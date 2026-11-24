@@ -77,14 +77,13 @@ describe("poolModelNotice", () => {
           account("second@example.com", 2, "exhausted", NOW + HOUR),
         ],
         "codex",
-        null,
         0.98,
         NOW,
       ),
     ).toBeNull();
   });
 
-  it("names the used-up first account, when it is back and the account in use", () => {
+  it("stays quiet when a backup account can serve and the primary is exhausted", () => {
     expect(
       poolModelNotice(
         [
@@ -92,15 +91,10 @@ describe("poolModelNotice", () => {
           account("first@example.com", 1, "exhausted", NOW + 5 * HOUR),
         ],
         "codex",
-        null,
         0.98,
         NOW,
       ),
-    ).toEqual({
-      message: "first@ used up",
-      detail: "Using second@",
-      until: NOW + 5 * HOUR,
-    });
+    ).toBeNull();
   });
 
   it("reports the provider as used up until the earliest account returns", () => {
@@ -111,7 +105,6 @@ describe("poolModelNotice", () => {
           account("second@example.com", 2, "exhausted", NOW + 3 * HOUR),
         ],
         "codex",
-        null,
         0.98,
         NOW,
       ),
@@ -122,7 +115,7 @@ describe("poolModelNotice", () => {
     });
   });
 
-  it("skips disabled accounts and keeps a broken first account without a time", () => {
+  it("reports an unavailable pool when the only ready account is disabled", () => {
     const disabled = {
       ...account("old@example.com", 0, "ready"),
       enabled: false,
@@ -133,41 +126,24 @@ describe("poolModelNotice", () => {
         [
           disabled,
           account("first@example.com", 1, "error"),
-          account("second@example.com", 2, "ready"),
+          account("second@example.com", 2, "exhausted", NOW + HOUR),
         ],
         "codex",
-        null,
         0.98,
         NOW,
       ),
     ).toEqual({
-      message: "first@ unavailable",
-      detail: "Using second@",
+      message: "OpenAI accounts unavailable",
+      detail: null,
       until: null,
     });
   });
 
-  it("stays quiet during sticky rotation when both accounts are available", () => {
-    const first = account("first@example.com", 1, "ready");
-    const second = account("second@example.com", 2, "ready");
+  it("stays quiet when a held backup can serve and the primary has an error", () => {
+    const first = account("first@example.com", 1, "error");
+    const second = account("second@example.com", 2, "held");
 
-    expect(
-      poolModelNotice([first, second], "codex", second.id, 0.98, NOW),
-    ).toBeNull();
-  });
-
-  it("moves past a used-up active account the way the pool does", () => {
-    const first = account("first@example.com", 1, "exhausted", NOW + 2 * HOUR);
-    const second = account("second@example.com", 2, "exhausted", NOW + HOUR);
-    const third = account("third@example.com", 3, "ready");
-
-    expect(
-      poolModelNotice([first, second, third], "codex", second.id, 0.98, NOW),
-    ).toEqual({
-      message: "first@ used up",
-      detail: "Using third@",
-      until: NOW + 2 * HOUR,
-    });
+    expect(poolModelNotice([first, second], "codex", 0.98, NOW)).toBeNull();
   });
 
   it("ignores accounts of another provider", () => {
@@ -180,7 +156,6 @@ describe("poolModelNotice", () => {
       poolModelNotice(
         [claude, account("first@example.com", 1, "ready")],
         "codex",
-        null,
         0.98,
         NOW,
       ),

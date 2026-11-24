@@ -552,7 +552,6 @@ export function createAccountPoolPlugin(
         ? poolModelNotice(
             (await operations.status()).accounts,
             "codex",
-            hub.activeAccountId("codex"),
             currentSettings.switchThreshold,
             Date.now(),
           )

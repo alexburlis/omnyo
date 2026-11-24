@@ -245,8 +245,8 @@ environment pull-request show <id>`. Diff commands require an explicit target
   hours old. A provider whose refresh keeps failing or timing out keeps
   answering from its last stored list. When nothing can be listed, the command
   prints the provider, failure code, and underlying host message on stderr.
-  A plugin notice, such as the Account Pooler's "OpenAI used up until … ·
-  Using openai2@", also prints on stderr until the time it names.
+  If all enabled OpenAI accounts reach their quota, the Account Pooler prints
+  a notice on stderr with the earliest known reset time, when available.
 - Top-level `customModels` in the same `config.json` registers extra picker
   models. Use a provider ID returned by the target host's catalog. Acceptance
   of unlisted models is provider-specific; consult that provider's skill.
