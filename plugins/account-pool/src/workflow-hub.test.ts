@@ -15,6 +15,10 @@ import {
   type PoolWorkflowInput,
 } from "./workflow-contract.js";
 import { syntheticStream } from "./fixtures/workflow-stream.js";
+import {
+  composerPredictionSchema,
+  predictionResult,
+} from "./prediction-contract.js";
 
 const cleanups: (() => Promise<void>)[] = [];
 
@@ -71,6 +75,7 @@ async function setup(kind: "oauth" | "api-key" = "oauth") {
   };
 
   let rawUsage: unknown = usage;
+  let responseText = "Wire verified";
 
   const calls: { headers: Headers; body: unknown }[] = [];
 
@@ -88,7 +93,7 @@ async function setup(kind: "oauth" | "api-key" = "oauth") {
           body: JSON.parse(new TextDecoder().decode(init?.body as ArrayBuffer)),
         });
 
-        return new Response(syntheticStream("codex"), {
+        return new Response(syntheticStream("codex", responseText), {
           headers: { "content-type": "text/event-stream" },
         });
       }
@@ -155,6 +160,9 @@ async function setup(kind: "oauth" | "api-key" = "oauth") {
     send,
     calls,
     usage,
+    setResponseText: (value: string) => {
+      responseText = value;
+    },
     setRawUsage: (value: unknown) => {
       rawUsage = value;
     },
@@ -272,6 +280,109 @@ describe("workflow included-only lease", () => {
       expect((await test.send(lease.capability)).status).toBe(429);
       expect(test.calls).toHaveLength(0);
       lease.revoke();
+    },
+  );
+});
+
+describe("pooled composer prediction", () => {
+  const result = {
+    suggestion: "Check the update.",
+    noSuggestionReason: null,
+    archiveReadiness: {
+      ready: false,
+      reason: "The update still needs checking.",
+    },
+  };
+
+  it("uses the Codex subscription and constrains the upstream request to structured text", async () => {
+    const test = await setup();
+    test.setResponseText(JSON.stringify(result));
+
+    const text = await test.hub.completePrediction(
+      test.input,
+      composerPredictionSchema([], true),
+      new AbortController().signal,
+      async () => {},
+    );
+
+    expect(predictionResult(text, [], true).text).toBe(result.suggestion);
+    expect(test.calls).toHaveLength(1);
+    expect(test.calls[0]?.headers.get("chatgpt-account-id")).toBe(
+      "fixture-account",
+    );
+    expect(test.calls[0]?.headers.has("x-omnyo-workflow-token")).toBe(false);
+    expect(test.calls[0]?.body).toMatchObject({
+      model: test.input.model,
+      store: false,
+      stream: true,
+      tools: [],
+      tool_choice: "none",
+      text: { format: { type: "json_schema", strict: true } },
+      input: expect.arrayContaining([
+        expect.objectContaining({
+          role: "user",
+          content: [{ type: "input_text", text: test.input.prompt }],
+        }),
+      ]),
+    });
+  });
+
+  it("does not use a Claude account when it is the only enabled account", async () => {
+    const test = await setup();
+    await test.accounts.setEnabled(test.account.id, false);
+    await test.accounts.add(
+      {
+        provider: "claude",
+        kind: "api-key",
+        label: "Anthropic fixture",
+        email: null,
+        accountUuid: crypto.randomUUID(),
+        subscriptionType: null,
+        rateLimitTier: null,
+        enabled: true,
+        priority: 0,
+      },
+      { kind: "api-key", apiKey: "fixture-key" },
+    );
+
+    await expect(
+      test.hub.completePrediction(
+        test.input,
+        composerPredictionSchema(),
+        new AbortController().signal,
+        async () => {},
+      ),
+    ).rejects.toThrow("fresh included Codex allowance");
+    expect(test.calls).toHaveLength(0);
+  });
+
+  it.each(["api-key", "credits", "unknown credits", "source changed"] as const)(
+    "sends no inference when %s prevents admission",
+    async (blocker) => {
+      const test = await setup(blocker === "api-key" ? "api-key" : "oauth");
+
+      if (blocker === "credits" || blocker === "unknown credits")
+        test.setRawUsage({
+          ...test.usage,
+          credits:
+            blocker === "credits"
+              ? { has_credits: true, unlimited: false, balance: "5" }
+              : undefined,
+        });
+
+      await expect(
+        test.hub.completePrediction(
+          test.input,
+          composerPredictionSchema(),
+          new AbortController().signal,
+          async () => {
+            if (blocker === "source changed")
+              throw new Error("Prediction source changed");
+          },
+        ),
+      ).rejects.toThrow();
+
+      expect(test.calls).toHaveLength(0);
     },
   );
 });

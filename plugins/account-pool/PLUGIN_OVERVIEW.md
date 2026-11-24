@@ -19,10 +19,9 @@ Credentials remain on the server. Routed providers receive machine-scoped hub to
 
 ## Predictions and reset credits
 
-Composer Predictions runs an ephemeral Codex turn on the chat's machine.
-The bundled plugin calls a protected RPC. The runner checks the dedicated
-Codex profile's sign-in and included allowance before sending a transcript.
-Cancellation and source changes stop the child process.
+Composer Predictions reuses an eligible pooled Codex subscription for all chats.
+The coordinator verifies included allowance and a zero credit balance before
+submitting the transcript. Cancellation and source changes stop the request.
 
 Account Usage can inspect reset credits for a selected enabled Codex OAuth account. Redemption requires the user's explicit confirmation and consumes an existing credit. An uncertain manual retry keeps the same account, credit and request ID. There is no purchase flow.
 

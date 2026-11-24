@@ -1,5 +1,3 @@
-import { homedir } from "node:os";
-import { join } from "node:path";
 import type { ChildProcess } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
 import {
@@ -34,38 +32,6 @@ interface PendingRequest {
 
 export const WORKFLOW_POOL_MODEL_PROVIDER = "omnyo-account-pool";
 
-export const CODEX_CHATGPT_URL = "https://chatgpt.com/backend-api/";
-
-const predictionConfig = {
-  model_provider: "openai",
-  forced_login_method: "chatgpt",
-  cli_auth_credentials_store: "file",
-  chatgpt_base_url: CODEX_CHATGPT_URL,
-  service_tier: "default",
-  project_doc_max_bytes: 0,
-  web_search: "disabled",
-  include_environment_context: false,
-  include_apps_instructions: false,
-  include_permissions_instructions: false,
-  "agents.enabled": false,
-  "features.multi_agent": false,
-  "features.multi_agent_v2": false,
-  "features.goals": false,
-  "features.plugins": false,
-  "features.hooks": false,
-  "features.apps": false,
-  "features.enable_mcp_apps": false,
-  "features.shell_tool": false,
-  "features.apply_patch_freeform": false,
-  "features.skip_host_skill_discovery": true,
-  "features.skill_search": false,
-  "features.memories": false,
-  "memories.use_memories": false,
-  "memories.generate_memories": false,
-  "skills.include_instructions": false,
-  "shell_environment_policy.inherit": "none",
-};
-
 const isolatedEnvironment = () =>
   Object.fromEntries(
     Object.entries(process.env).filter(([name]) =>
@@ -93,7 +59,6 @@ export class NativeSession {
     private readonly signal: AbortSignal,
     private readonly input: Writable,
     output: Readable,
-    private readonly textOnly: boolean,
   ) {
     this.exited = new Promise((resolve) => {
       child.once("close", () => {
@@ -168,32 +133,6 @@ export class NativeSession {
       },
       signal,
       "omnyo_workflow_text",
-      false,
-    );
-  }
-
-  static openPrediction(command: string, cwd: string, signal: AbortSignal) {
-    return NativeSession.start(
-      {
-        command,
-        args: [
-          "app-server",
-          ...Object.entries(predictionConfig).flatMap(([key, value]) => [
-            "-c",
-            `${key}=${JSON.stringify(value)}`,
-          ]),
-        ],
-        cwd,
-        env: {
-          ...isolatedEnvironment(),
-          CODEX_HOME: join(homedir(), ".codex-omnyo-predictions"),
-          HOME: cwd,
-          USERPROFILE: cwd,
-        },
-      },
-      signal,
-      "omnyo_composer_predictions",
-      true,
     );
   }
 
@@ -206,7 +145,6 @@ export class NativeSession {
     },
     signal: AbortSignal,
     clientName: string,
-    textOnly: boolean,
   ): Promise<NativeSession> {
     if (signal.aborted) throw new Error("Prediction canceled");
 
@@ -220,13 +158,7 @@ export class NativeSession {
       throw new Error("Native Codex did not attach its input and output");
     }
 
-    const session = new NativeSession(
-      child,
-      signal,
-      child.stdin,
-      child.stdout,
-      textOnly,
-    );
+    const session = new NativeSession(child, signal, child.stdin, child.stdout);
 
     try {
       await session.request(
@@ -244,14 +176,6 @@ export class NativeSession {
       await session.close();
       throw error;
     }
-  }
-
-  async waitForExit(): Promise<never> {
-    await this.exited;
-    throw (
-      this.failure ??
-      new Error("Native Codex exited before prediction completed")
-    );
   }
 
   request<Schema extends z.ZodType>(
@@ -393,9 +317,6 @@ export class NativeSession {
             message: "Composer predictions cannot approve or execute tools",
           },
         });
-
-        if (this.textOnly)
-          this.fail(new Error("Codex predictions cannot execute tools."));
 
         return;
       }

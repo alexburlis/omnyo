@@ -209,23 +209,14 @@ function predictionFailureMessage(rawMessage: string): string {
 
   if (sdkTimeoutMs(message) !== null) return TIMED_OUT_MESSAGE;
 
-  if (
-    message ===
-    "Sign in to the Codex prediction profile on this chat’s machine."
-  )
-    return "Sign in to the Codex prediction profile on this chat’s machine.";
-
   if (message.includes("fresh included Codex allowance"))
     return "Predictions need fresh included Codex allowance.";
 
   if (
     message ===
-    "Codex prediction requires its standard sign-in and a text-only configuration."
+    "Enable Codex routing in Account Pooler to generate predictions."
   )
-    return "Codex prediction requires its standard sign-in and a text-only configuration.";
-
-  if (message.includes("Native Codex request failed (-32601)"))
-    return "This Codex version cannot generate predictions. Update Codex on the thread’s machine.";
+    return "Enable Codex routing in Account Pooler to generate predictions.";
 
   if (message.includes("thread’s machine is unavailable"))
     return "Reconnect the thread’s machine to generate a prediction.";
@@ -351,7 +342,6 @@ export default async function plugin(api: PluginApi) {
       experimental_schema: predictionModelSchema,
       default: "gpt-6.1-sol",
     },
-    cliPath: { type: "string", label: "Codex executable", default: "codex" },
   });
 
   let config = await settings.get();
@@ -1423,7 +1413,6 @@ export default async function plugin(api: PluginApi) {
           input: {
             threadId,
             requestId,
-            cliPath: config.cliPath,
             model: config.codexModel,
             sourceSeq: source.seq,
             basis,

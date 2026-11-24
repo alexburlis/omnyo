@@ -3,9 +3,8 @@ import { z } from "zod";
 import {
   composerPredictionPrompt,
   composerPredictionResultSchema,
+  predictionResult,
 } from "./prediction-contract.js";
-
-import { predictionResult } from "./prediction-runner.js";
 
 const tags = [
   { id: "fix", description: "Defects and regressions" },

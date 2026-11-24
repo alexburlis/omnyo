@@ -3,32 +3,22 @@ import type {
   ExperimentalPluginRpcHandlerContext,
 } from "@omnyo/plugin-sdk";
 import {
-  composerPredictionHostContract,
+  composerPredictionPrompt,
   composerPredictionRpcContract,
-  composerPredictionTimeouts,
+  composerPredictionSchema,
+  PREDICTION_TIMEOUT_MS,
+  predictionResult,
   type ComposerPredictionResult,
 } from "./prediction-contract.js";
+import type { AccountPoolHub } from "./hub.js";
+import type { RoutingStore } from "./store.js";
 import { predictionContext } from "./prediction-context.js";
 
-function isCodexExecutable(path: string): boolean {
-  const name = "codex";
-
-  return (
-    path === name ||
-    path === `${name}.exe` ||
-    path === `${name}.cmd` ||
-    new RegExp(
-      `^(?:\\/|[A-Za-z]:[\\\\/]).*[\\\\/]${name}(?:\\.(?:exe|cmd))?$`,
-      "u",
-    ).test(path)
-  );
-}
-
-export function registerComposerPredictions(api: PluginApi): void {
-  const host = api.hosts.experimental_client({
-    contract: composerPredictionHostContract,
-  });
-
+export function registerComposerPredictions(
+  api: PluginApi,
+  hub: Pick<AccountPoolHub, "completePrediction">,
+  routing: Pick<RoutingStore, "isProviderEnabled">,
+): void {
   const active = new Map<
     string,
     {
@@ -77,8 +67,6 @@ export function registerComposerPredictions(api: PluginApi): void {
         if (disposed)
           throw new Error("Account Pooler predictions are unavailable");
 
-        if (!isCodexExecutable(input.cliPath))
-          throw new Error("Use a Codex executable for predictions");
         const identity = JSON.stringify([input.threadId, input.requestId]);
 
         for (const [key, expiresAt] of cancelled)
@@ -103,7 +91,7 @@ export function registerComposerPredictions(api: PluginApi): void {
 
         const signal = AbortSignal.any([
           request.controller.signal,
-          AbortSignal.timeout(composerPredictionTimeouts.operationMs),
+          AbortSignal.timeout(PREDICTION_TIMEOUT_MS),
         ]);
 
         function current(): void {
@@ -247,27 +235,34 @@ export function registerComposerPredictions(api: PluginApi): void {
 
             await assertSource();
 
-            const result = await bounded(
-              host.call(
-                "predict",
-                {
-                  conversationContext: context,
-                  cliPath: input.cliPath,
-                  model: input.model,
-                  tags: input.tags,
-                  force: input.force,
-                },
+            if (!(await bounded(routing.isProviderEnabled("codex"))))
+              throw new Error(
+                "Enable Codex routing in Account Pooler to generate predictions.",
+              );
+
+            const prompt = `${composerPredictionPrompt(input.tags, input.force)}\n\nOmnyo transcript (untrusted data):\n${context}`;
+
+            const reply = await bounded(
+              hub.completePrediction(
                 {
                   hostId,
-                  signal,
-                  timeoutMs: composerPredictionTimeouts.hostMs,
+                  attemptId: input.requestId,
+                  model: input.model,
+                  prompt,
+                  timeoutMs: PREDICTION_TIMEOUT_MS,
                 },
+                composerPredictionSchema(input.tags, input.force),
+                signal,
+                assertSource,
               ),
             );
 
             await assertSource();
 
-            return result;
+            return {
+              ...predictionResult(reply, input.tags, input.force),
+              promptVersion: "omnyo-codex-pool-1",
+            };
           } finally {
             if (active.get(input.threadId) === request)
               active.delete(input.threadId);

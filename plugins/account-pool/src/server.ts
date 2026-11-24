@@ -326,7 +326,7 @@ export function createAccountPoolPlugin(
       },
     );
     registerUsageSource(api, hub);
-    registerComposerPredictions(api);
+    registerComposerPredictions(api, hub, routing);
     registerWorkflowService(api, hub, routing);
     registerCodexResetRpc(api, hub);
     api.rpc.register(

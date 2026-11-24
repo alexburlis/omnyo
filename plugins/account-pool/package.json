@@ -18,7 +18,7 @@
     "omnyoPluginSdk": ">=0.4.102 >=0.6.44"
   },
   "omnyo": {
-    "name": "Account Pooler",
+    "name": "Account Pooler [EXPERIMENTAL]",
     "description": "Routes Claude and Codex API traffic across provider account pools.",
     "branding": {
       "icon": "Layers"

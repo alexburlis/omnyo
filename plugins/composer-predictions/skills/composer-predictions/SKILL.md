@@ -3,8 +3,9 @@ name: composer-predictions
 description: Inspect or request the next-message suggestion in a completed Codex, Claude Code or other provider thread.
 ---
 
-Composer Predictions uses one ordinary Codex app-server turn on the source machine
-for every chat provider. It uses the dedicated Codex profile's included allowance.
+Composer Predictions uses an existing Account Pooler Codex subscription for every
+chat provider, including Claude Code. It requires verified included allowance
+and a zero credit balance.
 
 The server predicts the next message and archive readiness in the background after successful turns on every provider, including already-read chats. Opening a chat shows the prepared state in the first paint from the conversation bootstrap and never requests inference; the source-validated cache keeps only the latest result per chat and survives reloads and restarts, so unchanged chats are not regenerated. A prediction takes several seconds after the turn ends, so the push-notifications plugin holds a finished-turn notification while the prediction is checking, for at most 30 seconds, and opening the chat from that notification shows the ready suggestion. Transient machine, transport, readiness and timeout failures retry automatically after 1, 5 and 20 minutes, and an unavailable machine is retried again when it reconnects; exhausted allowance retries after 30 and 90 minutes; configuration, model and version failures wait for an explicit Retry. Typing preserves pending results, ready suggestions and errors. The suggestion fills the empty prompt box at its full width as muted text above a "Suggested reply" caption; Send sends it in one click without focusing the box. After a click in the box it stays as a lighter shadow with the same controls, Insert or Tab in the empty box inserts it as an editable draft, Cmd+Z undoes the insert, and typing hides it. Running turns, submission, dismissal and navigation suppress stale suggestions.
 
@@ -57,29 +58,10 @@ omnyo composer-predictions request <thread-id> --force --json
 
 `--force` runs inference now and requires a reply, so a loop, job or other chat owning the next step no longer causes an omission. The model still will not repeat the latest request unchanged. Running, queued and waiting chats refuse a forced request and report why. The RPC equivalent is `request` with `force: true`; `--force` and `--fresh` cannot be combined. In the app, the same action is Suggest another reply on a suggestion, Suggest anyway on an omitted reply, the Suggest a reply button beside Send while nothing is suggested, and the Suggest a reply command. Each forced request uses allowance. It needs an Account Pooler that accepts `force`; an older one fails with “Update Account Pooler to suggest a reply on demand.” while ordinary predictions keep working.
 
-Codex generates suggestions for every chat provider. The machine that ran the chat
-needs Codex signed in to the dedicated prediction profile. In a terminal on that
-machine, run the sign-in command and use your existing ChatGPT account.
-
-```sh
-CODEX_HOME="$HOME/.codex-omnyo-predictions" codex -c 'cli_auth_credentials_store="file"' login
-```
-
-On Windows, use a separate PowerShell window.
-
-```powershell
-$env:CODEX_HOME = Join-Path $env:USERPROFILE '.codex-omnyo-predictions'
-codex -c 'cli_auth_credentials_store="file"' login
-```
-
-The prediction uses the ordinary Codex allowance of that profile. Omnyo checks
-available included allowance and an explicitly zero credit balance before sending
-the turn. A missing login, unknown allowance, or available paid credits stops the
-request. The old Account Pooler prepaid prediction setting is retired.
-
-Use Composer Predictions settings to enable predictions, select the Codex model
-(default `gpt-6.1-sol`), or set the executable resolved on the chat's machine
-(default `codex`). The plugin ignores saved backend choices from older versions.
+Enable Codex routing in Account Pooler and keep an eligible Codex subscription
+connected. Use Composer Predictions settings to enable predictions or choose a
+model (default `gpt-6.1-sol`). Saved provider and executable selections from
+earlier versions are ignored.
 
 The same prediction call returns an advisory archive-readiness verdict and a short
 reason. Ready means the whole requested outcome is delivered with proportionate
@@ -139,8 +121,7 @@ copies the exact complete text.
 Predictions use accepted inputs and completed assistant messages in source order.
 Each input is labelled by sender so the suggestion reflects what the user writes.
 Tool outputs, attachments and provider diagnostics stay out of the transcript.
-The context is bounded, and earlier omissions are marked. The runner rejects
-inherited instructions and tools before submitting chat text. The conversation
+The context is bounded, and earlier omissions are marked. Account Pooler disables tools and validates the structured response. The conversation
 and the prediction are never logged by this plugin.
 
 Archive assessments also expose `ask` and `recap`. `ask` names the single

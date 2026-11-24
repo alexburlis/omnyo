@@ -6,7 +6,7 @@ import {
   makeThreadResponse,
 } from "@omnyo/plugin-sdk/testing";
 import { registerComposerPredictions } from "./composer-predictions.js";
-import { composerPredictionHostContract } from "./prediction-contract.js";
+import type { AccountPoolHub } from "./hub.js";
 
 const predict = "experimental_composer-predictions.v1.predict";
 
@@ -28,7 +28,7 @@ const caller = {
 const outcome = {
   noSuggestionReason: null,
   text: "Run the live check.",
-  promptVersion: "fixture-v1",
+  promptVersion: "omnyo-codex-pool-1",
   archiveReadiness: {
     ready: false,
     reason: "Verification remains.",
@@ -45,7 +45,12 @@ afterEach(async () => {
 });
 
 function setup(
-  options: { providerId?: string; pending?: boolean; stall?: boolean } = {},
+  options: {
+    providerId?: string;
+    pending?: boolean;
+    stall?: boolean;
+    routing?: boolean;
+  } = {},
 ) {
   const work = experimental_threadIndicatorCases.find(
     ({ state }) => state.work?.primary.label === "open",
@@ -69,9 +74,9 @@ function setup(
     },
   };
 
-  let resolve: (value: typeof outcome) => void = () => {};
+  let resolve: () => void = () => {};
 
-  const result = new Promise<typeof outcome>((accept) => {
+  const result = new Promise<void>((accept) => {
     resolve = accept;
   });
 
@@ -117,24 +122,39 @@ function setup(
         get: async () => makeHostResponse({ id: hostId, status: "connected" }),
       },
     },
-    experimental_callHostRpc: async ({ input }) => {
-      composerPredictionHostContract.predict.input.parse(input);
-
-      return options.pending ? result : outcome;
-    },
   });
 
-  registerComposerPredictions(host.api);
+  const completePrediction = vi.fn<AccountPoolHub["completePrediction"]>(
+    async (_input, _schema, _signal, validateSource) => {
+      await validateSource();
+
+      if (options.pending) await result;
+
+      return JSON.stringify({
+        suggestion: outcome.text,
+        noSuggestionReason: null,
+        archiveReadiness: outcome.archiveReadiness,
+      });
+    },
+  );
+
+  const isProviderEnabled = vi.fn(async () => options.routing ?? true);
+  registerComposerPredictions(
+    host.api,
+    { completePrediction },
+    { isProviderEnabled },
+  );
   const { harness } = host;
   cleanups.push(() => harness.dispose());
   const input = { threadId, requestId, sourceSeq: 9, basis: "basis-9" };
-  const calls = harness.inspection.experimental_hostRpcCalls;
+  const calls = completePrediction.mock.calls;
 
   return {
     source,
     calls,
     resolve,
     harness,
+    isProviderEnabled,
     request: (force = false) =>
       harness.callRpc(predict, { ...input, force }, caller),
     stop: () => harness.callRpc(cancel, { threadId, requestId }, caller),
@@ -143,23 +163,30 @@ function setup(
 
 describe("Composer prediction RPC", () => {
   it.each(["codex", "claude-code", "acp"])(
-    "sends one bounded %s transcript to its remote host without native IDs or pool routing",
+    "sends one bounded %s transcript through Codex pool routing without native IDs",
     async (providerId) => {
       const test = setup({ providerId });
       await expect(test.request(true)).resolves.toMatchObject(outcome);
       expect(test.calls).toHaveLength(1);
-      expect(test.calls[0]).toMatchObject({
+      expect(test.calls[0]?.[0]).toMatchObject({
         hostId,
-        method: "predict",
-        input: {
-          force: true,
-          conversationContext: expect.stringContaining("Ship the repair."),
-        },
+        model: "gpt-6.1-sol",
+        prompt: expect.stringContaining("Ship the repair."),
       });
+      expect(test.calls[0]?.[1]).toMatchObject({
+        properties: { suggestion: { type: "string" } },
+      });
+      expect(test.isProviderEnabled).toHaveBeenCalledWith("codex");
     },
   );
 
-  it("rejects a different caller or stale basis before invoking the host", async () => {
+  it("does not dispatch from a Claude chat when Codex pool routing is disabled", async () => {
+    const test = setup({ providerId: "claude-code", routing: false });
+    await expect(test.request()).rejects.toThrow("Enable Codex routing");
+    expect(test.calls).toHaveLength(0);
+  });
+
+  it("rejects a different caller or stale basis before using the pool", async () => {
     const test = setup();
     const input = { threadId, requestId, sourceSeq: 9, basis: "wrong" };
     await expect(test.harness.callRpc(predict, input)).rejects.toThrow(
@@ -176,7 +203,7 @@ describe("Composer prediction RPC", () => {
     const first = test.request();
     const second = test.request();
     await vi.waitFor(() => expect(test.calls).toHaveLength(1));
-    test.resolve(outcome);
+    test.resolve();
     await expect(Promise.all([first, second])).resolves.toEqual([
       expect.objectContaining(outcome),
       expect.objectContaining(outcome),
@@ -215,7 +242,7 @@ describe("Composer prediction RPC", () => {
   });
 
   it.each(["explicit cancellation", "new source"] as const)(
-    "rejects late host output after %s",
+    "rejects late prediction output after %s",
     async (reason) => {
       const test = setup({ pending: true });
 
@@ -228,9 +255,9 @@ describe("Composer prediction RPC", () => {
       if (reason === "explicit cancellation") await test.stop();
       else test.source.completion.seq += 1;
 
-      test.resolve(outcome);
+      test.resolve();
       await result;
-      expect(test.calls[0]?.signal?.aborted).toBe(true);
+      expect(test.calls[0]?.[2].aborted).toBe(true);
     },
   );
 });

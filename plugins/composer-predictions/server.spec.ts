@@ -232,7 +232,7 @@ async function setup(savedSettings: Record<string, string> = {}) {
 
   const host = createFakePluginHost({
     pluginId: "omnyo--composer-predictions",
-    settings: { enabled: true, cliPath: "/tools/codex", ...savedSettings },
+    settings: { enabled: true, ...savedSettings },
     sdk: {
       experimental_attention: {
         snapshot: () => ({
@@ -399,7 +399,6 @@ const poolCallSchema = z.object({
   input: z.object({
     threadId: z.string(),
     requestId: z.string(),
-    cliPath: z.string().optional(),
     sourceSeq: z.number().optional(),
     basis: z.string().optional(),
     model: z.string().optional(),
@@ -697,7 +696,7 @@ describe("prediction server public boundaries", () => {
       expect(poolCalls(test)).toHaveLength(1);
       expect(poolCalls(test)[0]?.input).toMatchObject({
         model: "gpt-6.1-sol",
-        cliPath: "/tools/codex",
+
         sourceSeq: test.source.events[0]?.seq,
         basis: JSON.stringify({ sequence: test.source.events[0]?.seq }),
       });
@@ -2969,16 +2968,8 @@ describe("prediction server public boundaries", () => {
       "Predictions need fresh included Codex allowance.",
     ],
     [
-      "Sign in to the Codex prediction profile on this chat’s machine.",
-      "Sign in to the Codex prediction profile on this chat’s machine.",
-    ],
-    [
-      "Codex prediction requires its standard sign-in and a text-only configuration.",
-      "Codex prediction requires its standard sign-in and a text-only configuration.",
-    ],
-    [
-      "Native Codex request failed (-32601)",
-      "This Codex version cannot generate predictions. Update Codex on the thread’s machine.",
+      "Enable Codex routing in Account Pooler to generate predictions.",
+      "Enable Codex routing in Account Pooler to generate predictions.",
     ],
     [
       "Untrusted provider diagnostic with arbitrary private content",
@@ -3254,7 +3245,6 @@ describe("prediction server public boundaries", () => {
       input: {
         threadId: "thr_one",
         requestId: expect.any(String),
-        cliPath: "/tools/codex",
       },
     });
     expect(call?.signal?.aborted).toBe(false);

@@ -52,39 +52,22 @@ fails with “Update Account Pooler to suggest a reply on demand.” and ordinar
 predictions keep working.
 
 The server prewarms successful chats on every provider, including already-read chats, at startup, when chat state
-changes and every three minutes. It runs one background prediction at a time, bounds each to four minutes and checks the native Codex profile’s included allowance. After a restart, stored predictions for unchanged chats are restored in parallel without waiting behind new inference, and the most recently active chats are predicted first. Pending questions, queued or scheduled messages, and active chat work exclude a chat. Archived chats are skipped, and unchanged idle state is never republished. Running or waiting work the chat owns, such as a job, child chat or callback, delays background inference until it clears. Core vetoes the archive recommendation live while it is open. Eligibility is checked again before accepting the result. Leaving or hiding the composer keeps the shared prediction;
+changes and every three minutes. It runs one background prediction at a time, bounds each to four minutes and checks the Codex subscription’s included allowance. After a restart, stored predictions for unchanged chats are restored in parallel without waiting behind new inference, and the most recently active chats are predicted first. Pending questions, queued or scheduled messages, and active chat work exclude a chat. Archived chats are skipped, and unchanged idle state is never republished. Running or waiting work the chat owns, such as a job, child chat or callback, delays background inference until it clears. Core vetoes the archive recommendation live while it is open. Eligibility is checked again before accepting the result. Leaving or hiding the composer keeps the shared prediction;
 explicit cancellation and dismissal still stop it. Transient machine, transport, readiness and timeout failures retry automatically after 1, 5 and 20 minutes and then every 20 minutes, ahead of the waiting queue. A failure caused by an unavailable machine never exhausts its retries: the three-minute sweep keeps checking it and the machine’s reconnection regenerates it immediately; exhausted allowance retries after 30 minutes and then every 90 minutes until it returns, unless a current assessment or an explicit blocker settles the turn; configuration, model and version failures wait for an explicit Retry.
 
-## Set up Codex predictions
+## Account and allowance
 
-Codex generates suggestions for every chat provider. The machine that ran the chat
-needs Codex signed in to the dedicated prediction profile. In a terminal on that
-machine, run the sign-in command and use your existing ChatGPT account.
+Every chat provider, including Claude Code, uses a Codex subscription already
+connected to Account Pooler. Enable Codex routing and keep an eligible account
+in the pool. Before sending chat text, Account Pooler checks included allowance
+and an explicitly zero credit balance. If no account qualifies, Composer
+Predictions reports the allowance problem and uses its existing retry schedule.
 
-```sh
-CODEX_HOME="$HOME/.codex-omnyo-predictions" codex -c 'cli_auth_credentials_store="file"' login
-```
-
-On Windows, use a separate PowerShell window.
-
-```powershell
-$env:CODEX_HOME = Join-Path $env:USERPROFILE '.codex-omnyo-predictions'
-codex -c 'cli_auth_credentials_store="file"' login
-```
-
-The prediction uses the ordinary Codex allowance of that profile. Omnyo checks
-available included allowance and an explicitly zero credit balance before sending
-the turn. A missing login, unknown allowance, or available paid credits stops the
-request. The old Account Pooler prepaid prediction setting is retired.
-
-Use Composer Predictions settings to enable predictions, select the Codex model
-(default `gpt-6.1-sol`), or set the executable resolved on the chat's machine
-(default `codex`). The plugin ignores saved backend choices from older versions.
-
-The plugin sends a bounded transcript of accepted user inputs and completed
-assistant messages to Codex in a temporary, text-only session. It excludes
-attachment contents and tool output. If older messages exceed the budget, the
-transcript marks the omission. The session closes after one structured result.
+The prediction uses a bounded transcript of accepted inputs and completed
+assistant messages. It excludes attachment contents and tool output, and marks
+earlier omissions when the history exceeds the budget. The request disables
+tools and returns a structured reply and assessment. The prediction uses the
+model in Composer Predictions settings, which defaults to `gpt-6.1-sol`.
 Cached suggestions and dismissals for unchanged chats remain available.
 
 The same prediction call returns an advisory archive-readiness verdict and a short

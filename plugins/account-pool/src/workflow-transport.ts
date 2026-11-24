@@ -195,11 +195,11 @@ const messageItem = z
   })
   .passthrough();
 
-export async function workflowResponse(
+export async function inspectWorkflowResponse(
   source: Response,
   input: PoolWorkflowInput,
   signal: AbortSignal,
-): Promise<Response> {
+): Promise<{ response: Response; text: string }> {
   if (input.providerId === "claude-code")
     throw new Error(CLAUDE_WORKFLOW_UNAVAILABLE);
 
@@ -431,9 +431,20 @@ export async function workflowResponse(
     headers.delete("content-length");
     headers.delete("content-encoding");
 
-    return new Response(body, { status: source.status, headers });
+    return {
+      response: new Response(body, { status: source.status, headers }),
+      text,
+    };
   } finally {
     signal.removeEventListener("abort", abort);
     await reader.cancel().catch(() => {});
   }
+}
+
+export async function workflowResponse(
+  source: Response,
+  input: PoolWorkflowInput,
+  signal: AbortSignal,
+): Promise<Response> {
+  return (await inspectWorkflowResponse(source, input, signal)).response;
 }

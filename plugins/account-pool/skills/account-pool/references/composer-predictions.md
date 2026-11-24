@@ -2,20 +2,15 @@
 
 The protected `experimental_composer-predictions.v1.predict` and `.cancel`
 RPCs accept requests from the bundled Composer Predictions plugin. The coordinator
-checks the chat's work basis, completion and source machine before and after
-generation. It sends accepted inputs and completed assistant messages to the
-worker, without attachment data or tool output.
+binds the request to a completed chat and checks the work basis before and after
+inference.
 
-The worker starts a normal ephemeral Codex app-server thread in an empty
-directory. Codex uses its standard OpenAI route and manages credentials in the
-dedicated `~/.codex-omnyo-predictions` profile. The worker checks the effective
-configuration, instructions, active personal ChatGPT account, included allowance,
-and zero credit balance before submitting the transcript. Allowance is a snapshot
-taken immediately before dispatch. The process returns a structured reply and an
-archive assessment. It may also return one of the offered chat tags. The worker
-closes the child process and clears the working directory when the request settles.
+Account Pooler selects an eligible Codex subscription for every chat provider,
+including Claude Code. The shared text-inference path checks included allowance
+and zero available credits before dispatch, disables tools, and validates the
+streamed response. The request contains bounded chat text, excluding tool outputs
+and attachment contents. It returns one suggested reply and archive assessment,
+or a reason to omit the reply when other work owns the next step.
 
-The prediction profile and setup are documented in
-[Composer Predictions](../../../../composer-predictions/README.md#set-up-codex-predictions).
-A missing login or unavailable allowance appears in the composer and read-only
-diagnostics. Predictions are independent of Account Pooler routing and accounts.
+The composer and its read-only diagnostics show when Codex routing or eligible
+allowance is unavailable.

@@ -28,9 +28,8 @@ Pooled rate-limit failures can be retried by Provider Retry using the pool’s
 earliest usable account, even if the provider omits structured quota events.
 Inspect `omnyo provider-retry explain <thread-id> --json` for the last decision
 and `omnyo provider-retry status <thread-id> --json` for pending retries.
-Composer Predictions uses a guarded native Codex session on the chat's machine.
-Its dedicated sign-in and allowance checks run separately from pool routing.
-Read [prediction boundaries](references/composer-predictions.md) for setup and
+Composer Predictions reuses a pooled Codex subscription for every chat provider.
+Read [prediction boundaries](references/composer-predictions.md) for allowance and
 failure behavior.
 
 ## Throughput and observed quota windows

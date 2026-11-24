@@ -77,11 +77,11 @@ accounts are configured, so additions take effect without a reload. Machine
 token rotation keeps the prior token valid for ten minutes. The upstream URL
 configuration is for verification against controlled test endpoints.
 
-Composer Predictions uses the dedicated `~/.codex-omnyo-predictions` Codex home
-on the source machine. Sign in there with your existing ChatGPT account and use
-included allowance. `omnyo composer-predictions status <thread-id> --json` reads
-the current prediction. `omnyo composer-predictions diagnostics <thread-id>
---json` reads the last safe failure and skip without requesting inference.
+Composer Predictions uses an existing Account Pooler Codex subscription for
+every chat provider. It requires fresh included allowance and zero paid credits.
+`omnyo composer-predictions status <thread-id> --json` reads the current
+prediction. `omnyo composer-predictions diagnostics <thread-id> --json` reads the
+last safe failure and skip without requesting inference.
 
 Accounts run sequentially per provider: lower priority numbers first, with ties
 following the order accounts were added. New conversations use the current

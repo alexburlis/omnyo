@@ -1,10 +1,14 @@
 import { validatePooledWorkflowAllowance } from "./workflow-allowance.js";
-import { workflowRequest, workflowResponse } from "./workflow-transport.js";
+import {
+  workflowRequest,
+  inspectWorkflowResponse,
+} from "./workflow-transport.js";
 import {
   CLAUDE_WORKFLOW_UNAVAILABLE,
   WORKFLOW_SYSTEM_PROMPT,
   type PoolWorkflowInput,
 } from "./workflow-contract.js";
+import type { composerPredictionSchema } from "./prediction-contract.js";
 import type { PoolTelemetry } from "./telemetry.js";
 import {
   retryAvailabilitySchema,
@@ -912,10 +916,89 @@ export class AccountPoolHub {
     return { capability, revoke };
   }
 
+  async completePrediction(
+    input: Pick<
+      PoolWorkflowInput,
+      "hostId" | "attemptId" | "model" | "prompt" | "timeoutMs"
+    >,
+    schema: ReturnType<typeof composerPredictionSchema>,
+    signal: AbortSignal,
+    validateSource: () => Promise<void>,
+  ): Promise<string> {
+    const job: PoolWorkflowInput = {
+      ...input,
+      providerId: "codex",
+      maxOutputBytes: 64_000,
+    };
+
+    const lease = await this.prepareWorkflow(job, signal).catch(() => {
+      signal.throwIfAborted();
+      throw new Error("Predictions need fresh included Codex allowance.");
+    });
+
+    try {
+      const response = await this.forwardWorkflow(
+        new Request(`http://localhost${ROUTE}/v1/responses`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "text/event-stream",
+            session_id: job.attemptId,
+          },
+          signal,
+          body: JSON.stringify({
+            model: job.model,
+            stream: true,
+            store: false,
+            instructions: WORKFLOW_SYSTEM_PROMPT,
+            reasoning: { effort: "low" },
+            text: {
+              format: {
+                type: "json_schema",
+                name: "composer_prediction",
+                schema,
+                strict: true,
+              },
+            },
+            input: [
+              {
+                type: "message",
+                role: "developer",
+                content: [{ type: "input_text", text: WORKFLOW_SYSTEM_PROMPT }],
+              },
+              {
+                type: "message",
+                role: "user",
+                content: [{ type: "input_text", text: job.prompt }],
+              },
+            ],
+          }),
+        }),
+        lease.capability,
+        "codex",
+        validateSource,
+      );
+
+      if (!response.ok) {
+        await response.body?.cancel();
+        throw new Error(
+          response.status === 429
+            ? "Predictions need fresh included Codex allowance."
+            : "Codex could not generate a reply. Retry the prediction.",
+        );
+      }
+
+      return await response.text();
+    } finally {
+      lease.revoke();
+    }
+  }
+
   private async forwardWorkflow(
     request: Request,
     capability: string,
     provider: PoolProvider,
+    validateSource?: () => Promise<void>,
   ): Promise<Response> {
     const adapter = this.adapter(provider);
     const lease = this.workflowLeases.get(capability);
@@ -972,8 +1055,21 @@ export class AccountPoolHub {
           429,
           "Included subscription allowance changed.",
         );
-      await this.verifyWorkflowAllowance(currentAccount, signal, secret);
+
+      try {
+        await this.verifyWorkflowAllowance(currentAccount, signal, secret);
+      } catch (error) {
+        if (validateSource === undefined || signal.aborted) throw error;
+
+        return adapter.errorResponse(
+          429,
+          "Included subscription allowance is unavailable.",
+        );
+      }
+
       const raw = await workflowRequest(request, lease.input);
+      await validateSource?.();
+      signal.throwIfAborted();
       const headers = new Headers(request.headers);
       headers.delete("content-encoding");
       headers.delete("content-length");
@@ -1013,25 +1109,33 @@ export class AccountPoolHub {
       }
 
       try {
-        upstream.response = await workflowResponse(
+        const result = await inspectWorkflowResponse(
           upstream.response,
           lease.input,
           signal,
         );
+
+        upstream.response = result.response;
+
+        const changed = await this.options.accounts.recordUsed(
+          account.id,
+          this.options.now(),
+          lease.input.hostId,
+        );
+
+        if (changed) this.options.onAccountsChanged();
+
+        if (validateSource !== undefined) {
+          upstream.release();
+
+          return new Response(result.text);
+        }
+
+        return this.clientResponse(upstream);
       } catch (error) {
         await this.discardUpstream(upstream, false);
         throw error;
       }
-
-      const changed = await this.options.accounts.recordUsed(
-        account.id,
-        this.options.now(),
-        lease.input.hostId,
-      );
-
-      if (changed) this.options.onAccountsChanged();
-
-      return this.clientResponse(upstream);
     } catch {
       return adapter.errorResponse(
         signal.aborted ? 499 : 502,

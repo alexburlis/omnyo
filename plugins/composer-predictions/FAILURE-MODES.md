@@ -31,7 +31,7 @@
 - Suggestion admission excludes pending interactions, queued messages and live
   chat work. Background admission also waits for owned running or waiting work, so a
   verdict is formed once from a settled chat. Recheck admission after inference.
-- Background inference is serial and checks the native Codex profile’s included allowance.
+- Background inference is serial and checks included allowance in Account Pooler.
   A finished chat must not wait behind another chat's inference before admission:
   admit it at once, publish checking, and hold only its inference for the shared
   slot, latest finished chat first and ahead of sweeps. Otherwise its assessment
@@ -41,17 +41,15 @@
 
 The protected RPC and the Codex child process own these checks.
 
-- A prediction uses a normal ephemeral turn with no execution environments.
-  Codex loads the global AGENTS.md even with a zero project instruction budget.
-  A dedicated profile separates sign-in from the user's everyday config. Refuse
-  inherited instructions, enabled MCP servers and custom inference routes before
-  sending the transcript.
-- Read managed sign-in and rate limits on the child that will run the turn.
-  Require known included allowance and explicit zero paid credits. Missing
-  allowance or changed account state stops the attempt. A retry reads new values.
-- Read the exact completed source and work basis. The source host need not have
-  pool routing, a public coordinator URL or a native checkpoint. A changed
+- Predictions use the scoped Account Pooler Codex text path for every source
+  provider. Keep the request tool-free and avoid sending attachment data, tool
+  output, and inherited project configuration.
+- Require a fresh included-allowance check and explicit zero paid credits at
+  dispatch. A disabled or missing Codex subscription must not use a Claude
+  account or an API key. A retry obtains fresh evidence.
+- Bind each prediction to the exact completed source and work basis. A changed
   source cancels the request and discards late output.
+
 - Preserve only fixed error categories across the worker and composer. Provider
   response text, conversation content and credentials belong outside diagnostics.
 
@@ -61,7 +59,7 @@ The protected RPC and the Codex child process own these checks.
   A null suggestion does not establish completion. The native response must
   include a boolean verdict and a bounded reason; malformed assessments fail.
 - The combined host response and protected prediction prompt require daemon
-  protocol 262. Missing archive assessments fail validation.
+  protocol 263. Missing archive assessments fail validation.
 - Stale archive-readiness results follow the same source sequence, cancellation
   and final admission checks as next-message suggestions. They never mark or
   archive a chat.
@@ -93,13 +91,10 @@ stalled` and `Slow DB query` server logs before changing that budget.
 - Opening a chat must not generate or wait. The composer renders bootstrap and realtime state in its first paint and never calls `request` on open; the conversation reveal never waits for inference. The state lives in an app-wide store, so a composer remount cannot hide and re-show it.
 - A background attempt that ends idle or failed must not depend on the composer to retry it. Bounded transient retries and a three-minute sweep requeue it; reading prediction state never queues inference.
 - Repeated status notifications for archived chats must not republish unchanged idle state or take the serial queue. Closed chats are skipped until unarchived; unchanged invalidations bump neither the generation nor realtime.
-- A stalled native prediction must not block the serial queue. Each prediction has a four-minute deadline, then fails as transient and retries later.
 - Generations stay monotonic across plugin restarts, so an app-wide store never ignores newer server state as older.
 
 - A prediction that fails because its machine is offline must not exhaust bounded retries. Classify a transient failure as machine-unavailable when the host is disconnected afterwards, drop its source dedupe so the sweep keeps checking, and regenerate it on that host’s reconnection.
 - Failures, queued work and readiness changes must not overwrite the stored result. Store only completed results, dismissals and cancellations for their exact source, reuse that row whenever the latest completed source is unchanged, and keep one row per chat. Deleting a chat removes its row; startup prunes rows for already-deleted chats.
-- Long native predictions must not hit an earlier host-call deadline than the runner. The host call allows 155 seconds; a shorter deadline kills the host worker and fails unrelated in-flight calls.
-- Close the app-server before deleting its temporary working directory. The dedicated login stays in its own profile.
 
 - A verdict is about the conversation, and obligations veto live at every read.
   Telemetry events, status notifications, restarts and job changes must not make a

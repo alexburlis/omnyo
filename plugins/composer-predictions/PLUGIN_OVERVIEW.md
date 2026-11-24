@@ -14,10 +14,9 @@ cancellation stop a suggestion. Transient failures retry after 1, 5 and 20
 minutes then every 20, exhausted allowance after 30 then every 90; configuration,
 model and version failures wait for Retry. An unavailable machine retries on reconnect.
 
-Codex generates predictions for every provider on the chat's source machine.
-Sign in to its dedicated prediction profile using your existing ChatGPT account.
-Each turn requires verified included allowance and a zero credit balance. See
-[setup](README.md#set-up-codex-predictions).
+Codex generates predictions for every chat provider through an existing
+Account Pooler subscription. Each prediction requires verified included allowance
+and a zero credit balance. See [account and allowance](README.md#account-and-allowance).
 
 The same call returns an advisory archive verdict with a short reason: likely
 ready, more work remains, or waiting on an outside event nobody in the chat can

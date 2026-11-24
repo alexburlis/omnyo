@@ -2913,11 +2913,10 @@ for CLI and SDK commands.
 ## Composer predictions
 
 The bundled Composer Predictions plugin (`omnyo--composer-predictions`) exposes
-`enabled`, `codexModel`, and `cliPath`. It uses Codex on the completed chat's
-source machine for every provider. Follow the
-[Codex prediction profile setup](../plugins/composer-predictions/README.md#set-up-codex-predictions)
-on each machine that runs predictions. Saved backend selections and the former
-Account Pooler prepaid setting are retired.
+`enabled` and `codexModel`. It uses an existing Account Pooler Codex subscription
+for every chat provider. Enable Codex routing and connect an account with included
+allowance and zero paid credits. See
+[account and allowance](../plugins/composer-predictions/README.md#account-and-allowance).
 
 ## Automation script execution host
 
