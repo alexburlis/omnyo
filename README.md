@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="assets/omnyo/mark.svg" width="64" height="64" alt="Omnyo mark">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="apps/app/src/assets/omnyo-logo-dark.svg">
+    <img src="assets/omnyo-logo.svg" width="80" height="64" alt="Omnyo mark">
+  </picture>
 </p>
 <h1 align="center">Omnyo</h1>
 <p align="center"><strong>A local-first workspace for coding agents</strong></p>
