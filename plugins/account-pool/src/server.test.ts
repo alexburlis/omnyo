@@ -7548,7 +7548,7 @@ it("publishes pooled usage without a display plugin and does not invent unobserv
     await fixture.host.harness.behavior.callRpc(usageListMethod, {}),
   );
 
-  expect(inventory.label).toBe("Account Pooler");
+  expect(inventory.label).toBe("Account Pooler [EXPERIMENTAL]");
   expect(inventory.resources).toEqual([
     expect.objectContaining({
       id: fixture.account.id,
@@ -7600,7 +7600,10 @@ it("publishes an empty shared usage group before any accounts or settings are co
     ).toContain(usageListMethod);
     await expect(
       host.harness.behavior.callRpc(usageListMethod, {}),
-    ).resolves.toEqual({ label: "Account Pooler", resources: [] });
+    ).resolves.toEqual({
+      label: "Account Pooler [EXPERIMENTAL]",
+      resources: [],
+    });
     await expect(
       host.harness.behavior.callRpc(usageFetchMethod, {
         resourceId: "removed",

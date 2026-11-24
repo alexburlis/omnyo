@@ -71,7 +71,7 @@ export function registerUsageSource(api: PluginApi, hub: AccountPoolHub) {
         const { accounts } = await hub.status();
 
         return {
-          label: "Account Pooler",
+          label: "Account Pooler [EXPERIMENTAL]",
           resources: accounts
             .filter((account) => !isLegacyClaudeAccount(account))
             .map((account) => ({
