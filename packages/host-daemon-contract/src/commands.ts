@@ -1060,6 +1060,10 @@ const providerListModelsCommandSchema = z.object({
 const providerHealthCommandSchema = z
   .object({
     type: z.literal("provider.health"),
+    claudeProfileBinding: z
+      .object({ profileId: claudeProfileIdSchema })
+      .strict()
+      .optional(),
     providerId: z.string().min(1),
     bridgeLaunch: hostDaemonBridgeLaunchSchema,
     cwd: z.string().min(1).optional(),

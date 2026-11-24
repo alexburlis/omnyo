@@ -6,36 +6,46 @@ import {
 import { hostDaemonOnlineRpcResponseMessageSchema } from "../src/session.js";
 
 describe("native Claude profile host RPC", () => {
-  it("preserves the selected profile when requesting its model catalog", () => {
-    const profileId = "00000000-0000-4000-8000-000000000001";
+  it.each(["provider.list_models", "provider.health"])(
+    "preserves protocol 264 requests with and without a profile for %s",
+    (type) => {
+      const profileId = "00000000-0000-4000-8000-000000000001";
 
-    const result = hostDaemonOnlineRpcCommandSchema.safeParse({
-      type: "provider.list_models",
-      providerId: "claude-code",
-      bridgeLaunch: {
-        pluginId: "provider-claude-code",
-        source: { kind: "artifact", digest: "a".repeat(64), byteLength: 1 },
-        capabilities: {
-          providerInstallation: false,
-          supportsServiceTier: false,
-          permissionModes: ["full"],
-          supportsThreadArchive: false,
-          supportsThreadRename: false,
-          fork: "none",
+      const request = {
+        type,
+        providerId: "claude-code",
+        bridgeLaunch: {
+          pluginId: "provider-claude-code",
+          source: { kind: "artifact", digest: "a".repeat(64), byteLength: 1 },
+          capabilities: {
+            providerInstallation: false,
+            supportsServiceTier: false,
+            permissionModes: ["full"],
+            supportsThreadArchive: false,
+            supportsThreadRename: false,
+            fork: "none",
+          },
+          providerOptions: {},
+          envPassthrough: [],
         },
-        providerOptions: {},
-        envPassthrough: [],
-      },
-      contributedEnv: [],
-      claudeProfileBinding: { profileId },
-    });
+      };
 
-    expect(result.success).toBe(true);
+      expect(hostDaemonOnlineRpcCommandSchema.safeParse(request).success).toBe(
+        true,
+      );
 
-    if (!result.success) return;
+      const result = hostDaemonOnlineRpcCommandSchema.safeParse({
+        ...request,
+        claudeProfileBinding: { profileId },
+      });
 
-    expect(result.data).toHaveProperty("claudeProfileBinding", { profileId });
-  });
+      expect(result.success).toBe(true);
+
+      if (!result.success) return;
+
+      expect(result.data).toHaveProperty("claudeProfileBinding", { profileId });
+    },
+  );
 
   it("serializes a successful profile list reply through the daemon wire", () => {
     const command = {
