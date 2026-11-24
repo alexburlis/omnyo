@@ -20,6 +20,7 @@ import type {
   HostProviderCliInstallEvent,
   HostProviderCliInstallRequest,
   HostProviderCliStatusResponse,
+  HostProviderCliDetectionResponse,
   HostRtkStatusResponse,
   HostRetryUpdateResponse,
   DeleteOldServerCopyResponse,
@@ -175,6 +176,9 @@ export interface HostsArea {
   pathsExist(args: HostPathsExistArgs): Promise<HostPathsExistResult>;
   pickFolder(args: HostPickFolderArgs): Promise<HostPickFolderResult>;
   providerCliStatus(args: HostGetArgs): Promise<HostProviderCliStatusResult>;
+  detectProviderClis(
+    args: HostGetArgs,
+  ): Promise<HostProviderCliDetectionResponse>;
   rtkStatus(args: HostGetArgs): Promise<HostRtkStatusResponse>;
   experimental_resume(args: HostActionArgs): Promise<Host>;
   experimental_retryCleanup(args: HostActionArgs): Promise<HostActionResult>;
@@ -426,6 +430,14 @@ export function createHostsArea(args: CreateSdkAreaArgs): HostsArea {
     async rtkStatus(input) {
       return transport.readJson(
         transport.api.v1.hosts[":id"].tools.rtk.$get(
+          { param: { id: input.hostId } },
+          ...signalRequestArgs(input.signal),
+        ),
+      );
+    },
+    async detectProviderClis(input) {
+      return transport.readJson(
+        transport.api.v1.hosts[":id"]["provider-clis"].detect.$get(
           { param: { id: input.hostId } },
           ...signalRequestArgs(input.signal),
         ),

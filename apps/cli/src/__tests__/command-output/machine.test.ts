@@ -73,6 +73,31 @@ describe("omnyo machine command output", () => {
   const register: CommandRegistrar = (program) =>
     registerMachineCommands(program, () => "http://server");
 
+  it("detects provider executables through the selected machine without installing them", async () => {
+    const result = {
+      providers: [
+        { id: "codex", displayName: "Codex", installed: true },
+        { id: "claude-code", displayName: "Claude Code", installed: false },
+      ],
+      acpPluginId: "omnyo--provider-acp-next",
+    };
+
+    const detect = vi.fn(async () => result);
+
+    stubServerApi({
+      "v1.hosts.$get": vi.fn(async () => hosts),
+      "v1.hosts.:id.provider-clis.detect.$get": detect,
+    });
+    await runCommand(
+      ["machine", "provider-cli", "detect", "workstation", "--json"],
+      register,
+    );
+    expect(detect).toHaveBeenCalledWith({ param: { id: "host-primary" } });
+    expect(
+      JSON.parse(collectLogPayloads(vi.mocked(console.log))[0] ?? "null"),
+    ).toEqual(result);
+  });
+
   it("shows failed housekeeping as unknown through the SDK", async () => {
     const housekeeping = vi.fn(async () => ({
       status: "failed",

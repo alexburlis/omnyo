@@ -181,6 +181,11 @@ export type HostPathsExistResponse = PathsExistResponse;
 export type HostRtkStatusResponse =
   HostDaemonOnlineRpcResult<"host.rtk_status">;
 
+export type HostProviderCliDetectionResponse =
+  HostDaemonOnlineRpcResult<"host.detect_provider_clis"> & {
+    acpPluginId: "omnyo--provider-acp-next" | "provider-acp" | null;
+  };
+
 export const hostPickFolderRequestSchema = z
   .object({
     clientHostId: z.string().min(1),

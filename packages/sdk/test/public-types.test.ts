@@ -307,6 +307,7 @@ type ExpectedHostsKey =
   | "pathsExist"
   | "pickFolder"
   | "providerCliStatus"
+  | "detectProviderClis"
   | "experimental_resume"
   | "experimental_retryCleanup"
   | "retryUpdate"

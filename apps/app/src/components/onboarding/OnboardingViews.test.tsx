@@ -37,6 +37,67 @@ function renderAgents(agents: OnboardingAgent[]) {
 afterEach(cleanup);
 
 describe("AgentStep", () => {
+  it("shows one toggle per provider and leaves the choice to its owner", () => {
+    const onToggleProvider = vi.fn();
+
+    const handlers = {
+      onSignIn: vi.fn(),
+      onInstall: vi.fn(),
+      onViewInstallLog: vi.fn(),
+      onCancelSignIn: vi.fn(),
+      onRecheck: vi.fn(),
+    };
+
+    render(
+      <AgentStep
+        machineName="bee"
+        agents={[]}
+        choices={[
+          {
+            id: "acp",
+            name: "ACP",
+            selected: true,
+            disabled: false,
+            detail: "Detected: OpenCode",
+            provider: { id: "acp", logoUrl: null },
+            agents: [],
+          },
+          {
+            id: "claude-code",
+            name: "Claude Code",
+            selected: false,
+            disabled: false,
+            detail: "Not detected on this computer",
+            provider: { id: "claude-code", logoUrl: null },
+            agents: [],
+          },
+          {
+            id: "codex",
+            name: "Codex",
+            selected: true,
+            disabled: false,
+            detail: "Detected on this computer",
+            provider: { id: "codex", logoUrl: null },
+            agents: [],
+          },
+        ]}
+        onToggleProvider={onToggleProvider}
+        {...handlers}
+      />,
+    );
+
+    expect(screen.getAllByRole("switch")).toHaveLength(3);
+    expect(
+      screen
+        .getByRole("switch", { name: "Enable ACP" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    fireEvent.click(screen.getByRole("switch", { name: "Enable ACP" }));
+    expect(onToggleProvider).toHaveBeenCalledExactlyOnceWith("acp", false);
+    expect(handlers.onInstall).not.toHaveBeenCalled();
+    expect(handlers.onSignIn).not.toHaveBeenCalled();
+  });
+
   it("offers the install log only on the agent whose install failed", () => {
     const handlers = renderAgents([
       agent("claude-code", { status: "install", canInstall: true }),

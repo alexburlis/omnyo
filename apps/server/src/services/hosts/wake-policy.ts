@@ -66,6 +66,7 @@ const hostCommandWakePolicy = {
   "host.browse_directory": "work",
   "host.paths_exist": "work",
   "host.rtk_status": "never",
+  "host.detect_provider_clis": "never",
   "host.agent_processes.terminate": "never",
   "host.prepare_workspace_identity_v1": "work",
   "project.inspect": "work",

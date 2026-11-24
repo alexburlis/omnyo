@@ -25,3 +25,5 @@ export * from "./desktop-browser-import.js";
 export * from "./desktop-browser-cookie-sync.js";
 
 export * from "./housekeeping.js";
+
+export * from "./provider-detection.js";

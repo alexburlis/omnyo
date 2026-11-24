@@ -392,6 +392,7 @@ const ONLINE_RPC_RESPONSE_RESULT_FIXTURES: OnlineRpcResponseResultFixtures = {
     },
   },
   "host.rtk_status": { installed: false },
+  "host.detect_provider_clis": { providers: [] },
   "project.inspect": {
     path: "/home/me/project",
     gitRemoteUrl: "git@example.com:me/project.git",
@@ -1159,6 +1160,8 @@ const INTENTIONAL_OPTIONAL_HOST_DAEMON_FIELDS: Record<string, string> = {
     "a tool_use approval's presentation has a title only when the call has a headline (a path, a query); absence means the label stands alone.",
   "hostDaemonOnlineRpcCommandSchema.cwd":
     "provider.list_models may omit cwd when only user-level provider configuration applies.",
+  "hostDaemonOnlineRpcCommandSchema.customAgents.cwd":
+    "A configured ACP executable uses the host working directory unless its configuration specifies a working directory.",
   "hostDaemonOnlineRpcCommandSchema.discovery":
     "host.list_files requests icon discovery only when needed; omission preserves ordinary file search.",
   "hostDaemonOnlineRpcCommandSchema.query":
@@ -1497,7 +1500,7 @@ const CONTRIBUTED_ENV = [
 
 describe("host-daemon command schemas", () => {
   it("uses the current host-daemon protocol version", () => {
-    expect(HOST_DAEMON_PROTOCOL_VERSION).toBe(264);
+    expect(HOST_DAEMON_PROTOCOL_VERSION).toBe(265);
     expect(HOST_ARTIFACT_MAX_BYTES).toBe(256 * 1024 * 1024);
   });
 

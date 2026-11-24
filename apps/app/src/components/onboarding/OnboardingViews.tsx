@@ -27,6 +27,11 @@ import type {
   SignInGuide,
 } from "./onboarding-model";
 import { OnboardingMark } from "./OnboardingMark";
+import type { OnboardingProviderId } from "./provider-selection";
+import {
+  ONBOARDING_PROVIDERS,
+  matchesOnboardingProvider,
+} from "./provider-selection";
 
 const CONTENT_COLUMN_CLASS = "mx-auto w-full max-w-[560px] px-6";
 
@@ -347,24 +352,29 @@ function AgentRow({
   onInstall,
   onViewInstallLog,
   onCancelSignIn,
-}: AgentRowHandlers & { agent: OnboardingAgent }) {
+  hideIdentity = false,
+}: AgentRowHandlers & { agent: OnboardingAgent; hideIdentity?: boolean }) {
   const { state } = agent;
 
   return (
     <li className="px-4 py-3.5" data-agent-id={agent.id}>
       <div className="flex items-center gap-3">
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-border-hairline bg-surface-recessed">
-          <ProviderIcon
-            providerKind="agent"
-            provider={agent.provider}
-            className={cn(
-              "size-5",
-              state.status === "install" && "text-muted-foreground",
-            )}
-          />
-        </span>
+        {hideIdentity ? null : (
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-border-hairline bg-surface-recessed">
+            <ProviderIcon
+              providerKind="agent"
+              provider={agent.provider}
+              className={cn(
+                "size-5",
+                state.status === "install" && "text-muted-foreground",
+              )}
+            />
+          </span>
+        )}
         <div className="flex min-w-0 flex-1 flex-col">
-          <span className="text-sm font-medium">{agent.name}</span>
+          {hideIdentity ? null : (
+            <span className="text-sm font-medium">{agent.name}</span>
+          )}
           <span
             className={cn(
               "truncate text-xs text-muted-foreground",
@@ -437,14 +447,38 @@ interface AgentStepProps extends AgentRowHandlers {
   machineName: string | null;
   agents: readonly OnboardingAgent[] | null;
   onRecheck: () => void;
+  choices?: readonly OnboardingProviderChoice[];
+  onToggleProvider?: (id: OnboardingProviderId, enabled: boolean) => void;
+}
+
+export interface OnboardingProviderChoice {
+  id: OnboardingProviderId;
+  name: string;
+  selected: boolean;
+  disabled: boolean;
+  detail: string;
+  provider: ExperimentalProviderIconProps["provider"];
+  agents: readonly OnboardingAgent[];
 }
 
 export function AgentStep({
   machineName,
   agents,
   onRecheck,
+  choices,
+  onToggleProvider,
   ...rowHandlers
 }: AgentStepProps) {
+  const additionalAgents =
+    choices === undefined
+      ? []
+      : (agents ?? []).filter(
+          (agent) =>
+            !ONBOARDING_PROVIDERS.some((provider) =>
+              matchesOnboardingProvider(provider.id, agent.id),
+            ),
+        );
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -469,7 +503,49 @@ export function AgentStep({
           </button>
         )}
       </div>
-      {agents === null ? (
+      {choices !== undefined ? (
+        <ul className="divide-y divide-border-hairline overflow-hidden rounded-xl border border-border bg-card shadow-xs">
+          {choices.map((choice) => (
+            <li key={choice.id}>
+              <div className="flex items-center gap-3 px-4 py-3.5">
+                <span className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-border-hairline bg-surface-recessed">
+                  <ProviderIcon
+                    providerKind="agent"
+                    provider={choice.provider}
+                    className="size-5"
+                  />
+                </span>
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <span className="text-sm font-medium">{choice.name}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {choice.detail}
+                  </span>
+                </div>
+                <Switch
+                  aria-label={`Enable ${choice.name}`}
+                  checked={choice.selected}
+                  disabled={choice.disabled}
+                  onCheckedChange={(enabled) =>
+                    onToggleProvider?.(choice.id, enabled)
+                  }
+                />
+              </div>
+              {choice.selected && choice.agents.length > 0 ? (
+                <ul className="border-t border-border-hairline">
+                  {choice.agents.map((agent) => (
+                    <AgentRow
+                      key={agent.id}
+                      agent={agent}
+                      hideIdentity={choice.id !== "acp"}
+                      {...rowHandlers}
+                    />
+                  ))}
+                </ul>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : agents === null ? (
         <ul className="divide-y divide-border-hairline overflow-hidden rounded-xl border border-border bg-card shadow-xs">
           {[0, 1, 2].map((index) => (
             <li key={index} className="flex items-center gap-3 px-4 py-3.5">
@@ -488,10 +564,22 @@ export function AgentStep({
           ))}
         </ul>
       )}
-      <p className="text-xs text-muted-foreground">
-        Don't see your agent? Omnyo picks up other ACP agents, such as opencode,
-        once they are installed.
-      </p>
+      {additionalAgents.length > 0 ? (
+        <div className="flex flex-col gap-2">
+          <p className="text-xs text-muted-foreground">Other providers</p>
+          <ul className="divide-y divide-border-hairline overflow-hidden rounded-xl border border-border bg-card shadow-xs">
+            {additionalAgents.map((agent) => (
+              <AgentRow key={agent.id} agent={agent} {...rowHandlers} />
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {choices === undefined ? (
+        <p className="text-xs text-muted-foreground">
+          Don't see your agent? Omnyo picks up other ACP agents, such as
+          opencode, once they are installed.
+        </p>
+      ) : null}
     </div>
   );
 }

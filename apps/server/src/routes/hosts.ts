@@ -6,6 +6,8 @@ import {
 } from "../services/machines/server-access.js";
 import {
   getLatestSessionForHost,
+  getInstalledPlugin,
+  getPluginSettingsValues,
   getNonDestroyedHost,
   getPublicProjectByLocalPathSource,
   updateHost,
@@ -72,6 +74,7 @@ import { getMachineEnrollmentService } from "../services/machines/machine-servic
 import { manualHostCommand } from "../services/machines/manual-provider.js";
 import { prepareReconnect } from "../services/machines/reconnect.js";
 import { emitPluginHostDeleted } from "../services/plugins/plugin-thread-events.js";
+import { resolveOnboardingAcpDetection } from "../services/system/onboarding-provider-detection.js";
 
 const DISCOVERED_REPOS_MAX_DEPTH = 5;
 
@@ -574,6 +577,38 @@ export function registerHostRoutes(
     return context.json(
       withProviderCliStartupFailures(deps.db, hostId, result),
     );
+  });
+
+  get(routes.detectProviderClis, async (context) => {
+    const hostId = context.req.param("id");
+    assertUsableHostId(deps, { hostId });
+
+    const configuration = resolveOnboardingAcpDetection(
+      (["omnyo--provider-acp-next", "provider-acp"] as const).flatMap((id) => {
+        const plugin = getInstalledPlugin(deps.db, id);
+
+        return plugin === undefined
+          ? []
+          : [
+              {
+                id,
+                enabled: plugin.enabled,
+                customAgents: getPluginSettingsValues(deps.db, id).customAgents,
+              },
+            ];
+      }),
+    );
+
+    const result = await callHostRetryableOnlineRpc(deps, {
+      hostId,
+      timeoutMs: COMMAND_TIMEOUT_MS,
+      command: {
+        type: "host.detect_provider_clis",
+        customAgents: configuration.customAgents,
+      },
+    });
+
+    return context.json({ ...result, acpPluginId: configuration.acpPluginId });
   });
 
   post(routes.providerCliInstall, async (context, payload) => {

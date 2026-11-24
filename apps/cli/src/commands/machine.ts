@@ -782,6 +782,31 @@ export function registerMachineCommands(
     .description("Inspect and install provider CLIs on a machine");
 
   providerCli
+    .command("detect <id-or-name>")
+    .description("Detect coding agent executables on a machine")
+    .option("--json", "Print machine-readable JSON output")
+    .action(
+      action(async (target: string, opts: MachineListCommandOptions) => {
+        const serverUrl = getUrl();
+        const hostId = await resolveMachineHostId({ serverUrl, target });
+
+        const result = await createCliOmnyoSdk(
+          serverUrl,
+        ).hosts.detectProviderClis({
+          hostId,
+        });
+
+        if (outputJson(opts, result)) return;
+
+        for (const provider of result.providers) {
+          console.log(
+            `${provider.displayName}: ${provider.installed ? "Detected" : "Not detected"}`,
+          );
+        }
+      }),
+    );
+
+  providerCli
     .command("status <id-or-name>")
     .description("Show registered provider CLI installation/update status")
     .option("--json", "Print machine-readable JSON output")

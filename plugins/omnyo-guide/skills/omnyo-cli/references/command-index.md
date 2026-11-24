@@ -193,6 +193,7 @@ readiness. The default waits for a complete refresh.
 - `omnyo machine retry-update`
 - `omnyo machine provider-cli`
 - `omnyo machine provider-cli status`
+- `omnyo machine provider-cli detect <machine>` checks for Claude Code, Codex, and ACP executables.
 - `omnyo machine rtk-status <machine>` checks the machine's agent PATH.
 - `omnyo machine provider-cli install`
 

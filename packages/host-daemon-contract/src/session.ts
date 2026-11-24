@@ -529,6 +529,7 @@ const hostDaemonOnlineRpcResponseSuccessSchema = z.discriminatedUnion(
     onlineRpcResponseSuccessSchemaFor("host.browse_directory"),
     onlineRpcResponseSuccessSchemaFor("host.paths_exist"),
     onlineRpcResponseSuccessSchemaFor("host.rtk_status"),
+    onlineRpcResponseSuccessSchemaFor("host.detect_provider_clis"),
     onlineRpcResponseSuccessSchemaFor("host.agent_processes.terminate"),
     onlineRpcResponseSuccessSchemaFor("host.prepare_workspace_identity_v1"),
     onlineRpcResponseSuccessSchemaFor("project.inspect"),

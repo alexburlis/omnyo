@@ -5,6 +5,10 @@ import {
 } from "./claude-profiles.js";
 import { hostHousekeepingStatusSchema } from "./housekeeping.js";
 import {
+  acpDetectionAgentSchema,
+  providerCliDetectionResponseSchema,
+} from "./provider-detection.js";
+import {
   desktopBrowserCommandSchemas,
   desktopBrowserResultSchemas,
 } from "./desktop-browser.js";
@@ -2137,6 +2141,20 @@ export const hostDaemonCommandRegistry = {
     type: "host.rtk_status",
     schema: z.object({ type: z.literal("host.rtk_status") }).strict(),
     resultSchema: z.object({ installed: z.boolean() }).strict(),
+    transport: "onlineRpc",
+    retryable: true,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "host.detect_provider_clis": defineHostDaemonCommandDescriptor({
+    type: "host.detect_provider_clis",
+    schema: z
+      .object({
+        type: z.literal("host.detect_provider_clis"),
+        customAgents: z.array(acpDetectionAgentSchema).max(128).default([]),
+      })
+      .strict(),
+    resultSchema: providerCliDetectionResponseSchema,
     transport: "onlineRpc",
     retryable: true,
     flushEventsBeforeResult: false,

@@ -72,6 +72,15 @@ import {
   type OnboardingStepChrome as StepChrome,
 } from "./OnboardingViews";
 import {
+  ONBOARDING_PROVIDERS,
+  detectedOnboardingProviders,
+  initialOnboardingProviderSelected,
+  matchesOnboardingProvider,
+  onboardingProviderChanges,
+  onboardingProviderEnabled,
+  type OnboardingProviderId,
+} from "./provider-selection";
+import {
   OnboardingBrowserStep,
   browserLoginApi,
 } from "./OnboardingBrowserStep";
@@ -282,13 +291,20 @@ function AgentStepContainer({
   entry,
   hostId,
   hostName,
+  providerSelection,
+  onProviderSelectionChange,
   onContinue,
 }: {
   chrome: StepChrome;
   entry: OnboardingEntry;
   hostId: string | null;
   hostName: string | null;
-  onContinue: () => void;
+  providerSelection: Partial<Record<OnboardingProviderId, boolean>>;
+  onProviderSelectionChange: (
+    id: OnboardingProviderId,
+    enabled: boolean,
+  ) => void;
+  onContinue: (ready: boolean) => void;
 }) {
   const statesQuery = useSystemProviderStates({
     enabled: hostId !== null,
@@ -300,6 +316,22 @@ function AgentStepContainer({
   );
 
   const cliStatusQuery = useHostProviderCliStatus({ hostId });
+  const pluginListQuery = usePluginList({ enabled: true });
+  const setPluginEnabled = useSetPluginEnabled();
+  const [savingProviders, setSavingProviders] = useState(false);
+  const [setupApplied, setSetupApplied] = useState(false);
+
+  const detectionQuery = useQuery({
+    queryKey: ["onboarding-provider-detection", hostId],
+    enabled: hostId !== null,
+    queryFn: ({ signal }) => {
+      if (hostId === null) throw new Error("A connected computer is required.");
+
+      return sdk.hosts.detectProviderClis({ hostId, signal });
+    },
+    retry: false,
+  });
+
   const installRunner = useProviderCliInstallRunner();
   const { isLocalDaemonHost } = useHostDaemon();
   const createTerminal = useCreateTerminal();
@@ -543,27 +575,163 @@ function AgentStepContainer({
           };
         });
 
-  const agentReady = hasReadyAgent(states);
-  const agentBlocked = agents === null ? statesQuery.isError : !agentReady;
+  const installedPlugins = pluginListQuery.data?.plugins;
+  const checkingProviders = hostId !== null && detectionQuery.isPending;
+
+  const choices = ONBOARDING_PROVIDERS.map((definition) => {
+    const detected = detectedOnboardingProviders(
+      definition.id,
+      detectionQuery.data,
+      states,
+    );
+
+    const enabled = onboardingProviderEnabled(
+      definition.id,
+      installedPlugins ?? [],
+    );
+
+    const selected =
+      providerSelection[definition.id] ??
+      initialOnboardingProviderSelected({
+        id: definition.id,
+        replay: entry === "replay",
+        detected,
+        enabled,
+      });
+
+    const plugin = definition.pluginIds.flatMap(
+      (id) => installedPlugins?.find((item) => item.id === id) ?? [],
+    )[0];
+
+    return {
+      id: definition.id,
+      name: definition.name,
+      selected,
+      disabled:
+        savingProviders ||
+        installedPlugins === undefined ||
+        plugin === undefined ||
+        checkingProviders,
+      detail:
+        pluginListQuery.isError && installedPlugins === undefined
+          ? "Couldn't load provider plugins"
+          : plugin === undefined && installedPlugins !== undefined
+            ? "Provider plugin unavailable"
+            : detected === undefined
+              ? detectionQuery.isError || hostId === null
+                ? "Couldn't check this computer"
+                : "Checking this computer…"
+              : detected.length > 0
+                ? definition.id === "acp"
+                  ? `Detected: ${detected.join(", ")}`
+                  : "Detected on this computer"
+                : "Not detected on this computer",
+      provider: { id: definition.id, logoUrl: plugin?.logoUrl ?? null },
+      agents: (agents ?? []).filter((agent) =>
+        matchesOnboardingProvider(definition.id, agent.id),
+      ),
+    };
+  });
+
+  const selectedAgentReady = (providerStates: typeof states) =>
+    providerStates?.some((state) => {
+      if (state.status !== "ready") return false;
+
+      const choice = choices.find((item) =>
+        matchesOnboardingProvider(item.id, state.providerId),
+      );
+
+      return choice?.selected ?? true;
+    }) ?? false;
+
+  const saveProviders = async (skipSetup = false) => {
+    if (installedPlugins === undefined || savingProviders) return;
+    setSavingProviders(true);
+
+    try {
+      for (const choice of choices) {
+        onProviderSelectionChange(choice.id, choice.selected);
+
+        for (const change of onboardingProviderChanges({
+          id: choice.id,
+          enabled: choice.selected,
+          plugins: installedPlugins,
+          preferredAcpPluginId: detectionQuery.data?.acpPluginId,
+        })) {
+          await setPluginEnabled(change.pluginId, change.enabled);
+        }
+      }
+
+      if (skipSetup) {
+        await pluginListQuery.refetch();
+        onContinue(false);
+
+        return;
+      }
+
+      const [, refreshedStates] = await Promise.all([
+        pluginListQuery.refetch(),
+        refetchStates(),
+        providersQuery.refetch(),
+        cliStatusQuery.refetch(),
+      ]);
+
+      setSetupApplied(true);
+
+      if (
+        !choices.some((choice) => choice.selected) ||
+        (refreshedStates.isSuccess &&
+          selectedAgentReady(refreshedStates.data.providers))
+      ) {
+        onContinue(
+          refreshedStates.isSuccess &&
+            selectedAgentReady(refreshedStates.data.providers),
+        );
+      }
+    } catch (error) {
+      appToast.error(
+        error instanceof Error
+          ? error.message
+          : "Couldn't update the selected providers.",
+      );
+      await pluginListQuery.refetch();
+    } finally {
+      setSavingProviders(false);
+    }
+  };
 
   return (
     <OnboardingLayout
       {...chrome}
       step="agent"
-      title="Connect a coding agent"
-      description="Omnyo runs the agents you already use. You need one that is installed and signed in on this computer."
+      title="Choose your coding agents"
+      description="Choose the providers you want to use. Detected agents are selected for you."
       footerNote={
-        agentBlocked ? "Threads can't start until one agent is ready." : null
+        setupApplied && !selectedAgentReady(states)
+          ? "Install and sign in to an agent to start a chat."
+          : null
       }
       primaryLabel="Continue"
-      primaryDisabled={!agentReady}
-      secondaryLabel={agentBlocked ? "Skip for now" : undefined}
-      onPrimary={onContinue}
-      onSecondary={onContinue}
+      primaryDisabled={
+        installedPlugins === undefined ||
+        checkingProviders ||
+        (setupApplied &&
+          !selectedAgentReady(states) &&
+          choices.some((choice) => choice.selected))
+      }
+      primaryBusy={savingProviders}
+      onPrimary={() => void saveProviders()}
+      secondaryLabel={setupApplied ? "Skip for now" : undefined}
+      onSecondary={() => void saveProviders(true)}
     >
       <AgentStep
         machineName={hostName}
         agents={agents}
+        choices={choices}
+        onToggleProvider={(id, enabled) => {
+          setSetupApplied(false);
+          onProviderSelectionChange(id, enabled);
+        }}
         onSignIn={(providerId) => void startSignIn(providerId)}
         onInstall={startInstall}
         onViewInstallLog={viewInstallLog}
@@ -571,6 +739,8 @@ function AgentStepContainer({
         onRecheck={() => {
           void refetchStates();
           void cliStatusQuery.refetch();
+          void detectionQuery.refetch();
+          void pluginListQuery.refetch();
         }}
       />
     </OnboardingLayout>
@@ -1231,6 +1401,10 @@ export function OnboardingFlow({
 }) {
   const [step, setStep] = useState(initialStep);
 
+  const [providerSelection, setProviderSelection] = useState<
+    Partial<Record<OnboardingProviderId, boolean>>
+  >({});
+
   const [previousStep, setPreviousStep] = useState<OnboardingStepId | null>(
     null,
   );
@@ -1433,9 +1607,11 @@ export function OnboardingFlow({
             entry={entry}
             hostId={hostId}
             hostName={primaryHost?.name ?? null}
-            onContinue={advance(
-              hasReadyAgent(agentStates) ? "completed" : "skipped",
-            )}
+            providerSelection={providerSelection}
+            onProviderSelectionChange={(id, enabled) =>
+              setProviderSelection((current) => ({ ...current, [id]: enabled }))
+            }
+            onContinue={(ready) => advance(ready ? "completed" : "skipped")()}
           />
         );
       case "projects":

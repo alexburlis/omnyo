@@ -296,6 +296,7 @@ import type {
   HostProviderCliInstallEvent,
   HostProviderCliInstallRequest,
   HostProviderCliStatusResponse,
+  HostProviderCliDetectionResponse,
   HostRtkStatusResponse,
   HostRetryUpdateResponse,
   ProjectAttachmentContentQuery,
@@ -1282,6 +1283,12 @@ export const publicApiRoutes = {
       method: "get",
       request: noRequest<PathId>(),
       response: jsonResponse<HostProviderCliStatusResponse>(),
+    }),
+    detectProviderClis: defineRoute({
+      path: "/hosts/:id/provider-clis/detect",
+      method: "get",
+      request: noRequest<PathId>(),
+      response: jsonResponse<HostProviderCliDetectionResponse>(),
     }),
     providerCliInstall: defineRoute({
       path: "/hosts/:id/provider-clis/install",

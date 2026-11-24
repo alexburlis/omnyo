@@ -2602,6 +2602,59 @@ describe("dispatchCommand", () => {
     });
   });
 
+  it("detects onboarding CLIs on the host PATH without running them", async () => {
+    const agentPath = await makeTempDir("omnyo-provider-detection-");
+
+    const manager = new RuntimeManager({
+      createRuntime: () => createRuntime(),
+      provisionWorkspace: async () => createWorkspace(),
+      shellEnv: { PATH: agentPath },
+    });
+
+    const options = makeDispatchOptions({ runtimeManager: manager });
+
+    const command: CommandOf<"host.detect_provider_clis"> = {
+      type: "host.detect_provider_clis",
+      customAgents: [],
+    };
+
+    const before = await dispatchOnlineRpcCommand(command, options);
+    expect(before.providers.every((provider) => !provider.installed)).toBe(
+      true,
+    );
+
+    for (const name of ["claude", "opencode"]) {
+      const executable = process.platform === "win32" ? `${name}.exe` : name;
+      await fs.writeFile(
+        path.join(agentPath, executable),
+        "invalid executable",
+        { mode: 0o755 },
+      );
+    }
+
+    const after = await dispatchOnlineRpcCommand(command, options);
+    expect(
+      after.providers
+        .filter((provider) => provider.installed)
+        .map((provider) => provider.id),
+    ).toEqual(["claude-code", "acp-opencode"]);
+
+    const custom = await dispatchOnlineRpcCommand(
+      {
+        type: "host.detect_provider_clis",
+        customAgents: [
+          { id: "acp-team", displayName: "Team agent", command: "opencode" },
+        ],
+      },
+      options,
+    );
+
+    expect(
+      custom.providers.find((provider) => provider.id === "acp-team")
+        ?.installed,
+    ).toBe(true);
+  });
+
   it("routes provider health and usage to the targeted bridge runtime", async () => {
     const runtime = createRuntime();
 

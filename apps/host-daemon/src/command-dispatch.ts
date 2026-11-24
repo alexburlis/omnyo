@@ -15,6 +15,7 @@ import {
 } from "./command-handlers/environment-hook.js";
 import {
   parseHostDaemonOnlineRpcResultForCommand,
+  onboardingProviderExecutables,
   type HostDaemonOnlineRpcResultForCommand,
   providerCliInstallEventSchema,
   type DesktopBrowserBrokerCommand,
@@ -29,6 +30,8 @@ import {
   type ProviderInstallationOperation,
 } from "@omnyo/host-daemon-contract";
 import { isDeepStrictEqual } from "node:util";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { AgentRuntimeBridgeLaunch } from "@omnyo/agent-runtime";
 import semver from "semver";
 import {
@@ -1167,6 +1170,51 @@ const onlineRpcHandlers: OnlineRpcHandlerMap = {
         env: options.runtimeManager.getShellEnv(),
       }) !== undefined,
   }),
+  "host.detect_provider_clis": async (command, options) => {
+    const env = options.runtimeManager.getShellEnv();
+
+    const candidates = new Map<
+      string,
+      { id: string; displayName: string; command: string; cwd: string }
+    >(
+      onboardingProviderExecutables.map((candidate) => [
+        candidate.id,
+        {
+          ...candidate,
+          command:
+            candidate.id === "claude-code"
+              ? env.OMNYO_CLAUDE_CODE_EXECUTABLE?.trim() || candidate.command
+              : candidate.command,
+          cwd: process.cwd(),
+        },
+      ]),
+    );
+
+    for (const candidate of command.customAgents) {
+      candidates.set(candidate.id, {
+        ...candidate,
+        cwd: candidate.cwd ?? process.cwd(),
+      });
+    }
+
+    return {
+      providers: [...candidates.values()].map(
+        ({ id, displayName, command, cwd }) => ({
+          id,
+          displayName,
+          installed:
+            resolveExecutable(command, { cwd, env }) !== undefined ||
+            (id === "claude-code" &&
+              command === "claude" &&
+              process.platform === "win32" &&
+              resolveExecutable(
+                join(homedir(), ".local", "bin", "claude.exe"),
+                { cwd, env },
+              ) !== undefined),
+        }),
+      ),
+    };
+  },
   "host.agent_processes.terminate": async (_command, options) => {
     const containment = options.agentProcessContainment;
 
