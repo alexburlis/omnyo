@@ -19,7 +19,10 @@ Credentials remain on the server. Routed providers receive machine-scoped hub to
 
 ## Predictions and reset credits
 
-Composer Predictions uses the provider prompt and an ephemeral native fork of an idle, completed Codex thread; only the bundled prediction plugin can call it. Codex predictions require fresh included allowance and provider eligibility; Advanced settings can permit prepaid credits for Codex contexts. Claude predictions lease an enabled Claude subscription account below its limits, never an API-key account. Omnyo does not claim the desktop beta's free billing exemption. Cancellation and source changes revoke the capability and stop the owned child. Unknown allowance and parent proxy mode fail visibly.
+Composer Predictions runs an ephemeral Codex turn on the chat's machine.
+The bundled plugin calls a protected RPC. The runner checks the dedicated
+Codex profile's sign-in and included allowance before sending a transcript.
+Cancellation and source changes stop the child process.
 
 Account Usage can inspect reset credits for a selected enabled Codex OAuth account. Redemption requires the user's explicit confirmation and consumes an existing credit. An uncertain manual retry keeps the same account, credit and request ID. There is no purchase flow.
 

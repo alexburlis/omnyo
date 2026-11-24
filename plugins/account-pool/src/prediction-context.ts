@@ -1,9 +1,10 @@
 import type { PluginApi } from "@omnyo/plugin-sdk";
+import { PREDICTION_CONTEXT_BUDGET_BYTES } from "./prediction-contract.js";
 
 export const PREDICTION_CONTEXT_ERROR =
-  "The Claude Code conversation context is unavailable or too large. No prediction was generated.";
+  "The conversation context is unavailable or too large. No prediction was generated.";
 
-export const PREDICTION_CONTEXT_BUDGET_BYTES = 500_000;
+export { PREDICTION_CONTEXT_BUDGET_BYTES };
 
 const PAGE_SIZE = 100;
 

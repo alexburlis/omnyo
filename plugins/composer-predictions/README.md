@@ -16,7 +16,7 @@ including failures before this logging was installed.
 completed-turn `sourceSeq` and `skippedAt`. A repeated reason for the same turn
 is recorded once. Server logs use the `Prediction skipped:` prefix with this record.
 
-Bundled into the private Omnyo distribution as `omnyo--composer-predictions`. The server
+Bundled into Omnyo as `omnyo--composer-predictions`. The server
 prepares a suggestion for every idle, completed chat on any provider before you open it. The
 composer renders the prepared state in its first paint from the conversation
 bootstrap and an app-wide realtime store, so opening a chat never requests or waits
@@ -52,36 +52,40 @@ fails with “Update Account Pooler to suggest a reply on demand.” and ordinar
 predictions keep working.
 
 The server prewarms successful chats on every provider, including already-read chats, at startup, when chat state
-changes and every three minutes. It runs one background prediction at a time, bounds each to four minutes and honors Account Pooler’s
-configured allowance, including prepaid credits when enabled. After a restart, stored predictions for unchanged chats are restored in parallel without waiting behind new inference, and the most recently active chats are predicted first. Pending questions, queued or scheduled messages, and active chat work exclude a chat. Archived chats are skipped, and unchanged idle state is never republished. Running or waiting work the chat owns, such as a job, child chat or callback, delays background inference until it clears. Core vetoes the archive recommendation live while it is open. Eligibility is checked again before accepting the result. Leaving or hiding the composer keeps the shared prediction;
+changes and every three minutes. It runs one background prediction at a time, bounds each to four minutes and checks the native Codex profile’s included allowance. After a restart, stored predictions for unchanged chats are restored in parallel without waiting behind new inference, and the most recently active chats are predicted first. Pending questions, queued or scheduled messages, and active chat work exclude a chat. Archived chats are skipped, and unchanged idle state is never republished. Running or waiting work the chat owns, such as a job, child chat or callback, delays background inference until it clears. Core vetoes the archive recommendation live while it is open. Eligibility is checked again before accepting the result. Leaving or hiding the composer keeps the shared prediction;
 explicit cancellation and dismissal still stop it. Transient machine, transport, readiness and timeout failures retry automatically after 1, 5 and 20 minutes and then every 20 minutes, ahead of the waiting queue. A failure caused by an unavailable machine never exhausts its retries: the three-minute sweep keeps checking it and the machine’s reconnection regenerates it immediately; exhausted allowance retries after 30 minutes and then every 90 minutes until it returns, unless a current assessment or an explicit blocker settles the turn; configuration, model and version failures wait for an explicit Retry.
 
-The shipped Account Pooler owns the provider configuration, quota checks and
-native source-machine prediction fork. It accepts only this built-in caller and
-never returns provider credentials. Predictions require OpenAI's eligibility and
-default to fresh included Codex allowance. Available paid credits or missing
-credit metadata do not disqualify an account with included allowance. Account
-Pooler's `composerPredictionAllowance: included-or-prepaid-credits` explicitly
-allows fresh finite prepaid credits when no account has included allowance.
-Included allowance takes priority. API-key accounts, unavailable allowance or
-credits, parent proxy mode and unavailable provider predictions fail visibly. The Codex
-executable setting defaults to `codex`; a standalone login is unnecessary. Claude
-predictions use only subscription allowance, described below.
+## Set up Codex predictions
 
-Settings are in Omnyo's plugin settings. The optional CLI commands are diagnostics;
-normal operation needs no Terminal or custom launcher. Startup migrates settings
-and enabled intent from the old `composer-predictions` ID before loading plugins,
-then disables that old registration. Existing downstream choices take precedence.
+Codex generates suggestions for every chat provider. The machine that ran the chat
+needs Codex signed in to the dedicated prediction profile. In a terminal on that
+machine, run the sign-in command and use your existing ChatGPT account.
 
-For Codex threads, the host copies the completed rollout and existing model catalog into a temporary Codex home, loads that copy with read-only permissions and disabled native tools, then creates Codex’s supported `experimentalPredictionMode` ephemeral fork without configuration overrides. This avoids ordinary-fork auto-compaction and leaves the original rollout unchanged. The temporary home has no provider credentials; Account Pooler’s short-lived capability owns the request. Cleanup removes it when the native process exits. Prediction bodies are bounded to 32 MiB, including decoded compressed input, to accommodate image-bearing histories. The pool preserves trailing reasoning configuration updates only when
-they match the provider-selected effort, while validating the prediction prompt
-and prohibiting tool execution. This does not claim the official desktop billing exemption.
-Predictions may use normal included Codex allowance or explicitly authorized
-prepaid credits. OpenAI may overdraw credits; disable automatic reload in OpenAI
-before opting in when new purchases are forbidden. Omnyo never purchases credits or
-changes automatic reload. There is no API-key fallback. Known subscription,
-native-version and routing refusals appear in the composer; arbitrary provider
-diagnostics remain hidden.
+```sh
+CODEX_HOME="$HOME/.codex-omnyo-predictions" codex -c 'cli_auth_credentials_store="file"' login
+```
+
+On Windows, use a separate PowerShell window.
+
+```powershell
+$env:CODEX_HOME = Join-Path $env:USERPROFILE '.codex-omnyo-predictions'
+codex -c 'cli_auth_credentials_store="file"' login
+```
+
+The prediction uses the ordinary Codex allowance of that profile. Omnyo checks
+available included allowance and an explicitly zero credit balance before sending
+the turn. A missing login, unknown allowance, or available paid credits stops the
+request. The old Account Pooler prepaid prediction setting is retired.
+
+Use Composer Predictions settings to enable predictions, select the Codex model
+(default `gpt-6.1-sol`), or set the executable resolved on the chat's machine
+(default `codex`). The plugin ignores saved backend choices from older versions.
+
+The plugin sends a bounded transcript of accepted user inputs and completed
+assistant messages to Codex in a temporary, text-only session. It excludes
+attachment contents and tool output. If older messages exceed the budget, the
+transcript marks the omission. The session closes after one structured result.
+Cached suggestions and dismissals for unchanged chats remain available.
 
 The same prediction call returns an advisory archive-readiness verdict and a short
 reason. Ready means the whole requested outcome is delivered with proportionate
@@ -124,7 +128,7 @@ show “This prediction did not record why it omitted a reply.” without reques
 new inference. A suggestion, new turn or dismissal clears the omission reason.
 
 The `status` and `request` CLI commands and RPCs expose `archiveReadiness`
-(`ready`, `reason` and `waitingOn`, the external event or null); it is null before a successful prediction. A new turn or queued work clears both assessments. Open work withholds the recommendation in core without touching the stored verdict or suggestion. Background inference remains serial and honors the same allowance setting as manual predictions. A chat that just finished is admitted at once and shows as checking while it waits for the inference slot, ahead of background sweeps, with the latest finished chat first; the four-minute deadline starts when its inference starts. `request` reuses the stored prediction for an unchanged completed turn; `omnyo composer-predictions request <thread-id> --fresh` (RPC `fresh: true`) runs inference again for that turn, and `--force` (RPC `force: true`) also requires a reply while other work owns the next step.
+(`ready`, `reason` and `waitingOn`, the external event or null); it is null before a successful prediction. A new turn or queued work clears both assessments. Open work withholds the recommendation in core without touching the stored verdict or suggestion. Background inference remains serial and checks the same allowance as manual predictions. A chat that just finished is admitted at once and shows as checking while it waits for the inference slot, ahead of background sweeps, with the latest finished chat first; the four-minute deadline starts when its inference starts. `request` reuses the stored prediction for an unchanged completed turn; `omnyo composer-predictions request <thread-id> --fresh` (RPC `fresh: true`) runs inference again for that turn, and `--force` (RPC `force: true`) also requires a reply while other work owns the next step.
 
 When Chat Topics is enabled, the same prediction call also picks the one
 type-of-work tag from its list that best fits the chat, or none. A pick is sent
@@ -146,12 +150,6 @@ failure, or "No suggested reply" with its reason. The plugin adds only the Sugge
 a reply button, shown beside Send only while it can be used: the draft is empty and
 no suggestion is showing in any state, so it never repeats the loading card with a
 spinner of its own. Tab copies the exact complete text.
-
-Each chat is predicted by the provider chosen for its own provider in settings. By default Codex chats use Codex, Claude Code chats use Claude and other chats use Codex. `Codex chats predict with`, `Claude Code chats predict with` and `Other chats predict with` each choose `Codex` or `Claude (subscription)`. `Claude prediction model` defaults to `claude-haiku-5-5`. `Codex prediction model` defaults to `gpt-6.1-sol` and applies when Codex predicts from a transcript; a Codex chat predicted by Codex keeps its native fork and its own model. `Claude Code executable` defaults to `claude`. Settings changes apply to the next prediction; stored results are reused until the chat changes.
-
-A transcript prediction builds bounded context from Omnyo’s redacted accepted inputs, labelled by sender (`user`, `automation`, `agent` or `omnyo`), and completed assistant messages, preserving source order. Missing or oversized context fails visibly. Tool outputs and attachment contents are excluded, so the assistant's own report is the record of what it did and verified. Context is never logged. Codex transcript predictions run a fresh ephemeral read-only Codex session with the OpenAI prompt and included allowance only; its temporary Codex home is removed when the process exits.
-
-Claude predictions run `claude -p` on the chat's machine in safe mode with no tools, no MCP servers, no settings files and no session persistence, in a temporary configuration folder removed afterwards. Omnyo owns their base prompt and shares the suggestion, archive-readiness and tag rules and JSON result with Codex. Account Pooler leases one enabled Claude subscription account that has not reached its limits; API-key accounts are never used, so predictions add no pay-per-token spend. Each lease allows four requests for the chosen model and only the structured-output tool. Claude predictions count against the same subscription limits as Claude Code chats. Account Pooler routing for Claude Code must be enabled.
 
 The server-owned `thread.work` summary supplies the composer status and archive
 recommendation. Composer Predictions publishes its existing result with the

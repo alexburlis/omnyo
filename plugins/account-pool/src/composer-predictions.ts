@@ -3,15 +3,11 @@ import type {
   ExperimentalPluginRpcHandlerContext,
 } from "@omnyo/plugin-sdk";
 import {
-  CLAUDE_PREDICTIONS_RETIRED,
-  NATIVE_PREDICTION_UNAVAILABLE,
   composerPredictionHostContract,
   composerPredictionRpcContract,
   composerPredictionTimeouts,
   type ComposerPredictionResult,
 } from "./prediction-contract.js";
-import type { AccountPoolHub } from "./hub.js";
-import type { RoutingStore } from "./store.js";
 import { predictionContext } from "./prediction-context.js";
 
 function isCodexExecutable(path: string): boolean {
@@ -28,11 +24,7 @@ function isCodexExecutable(path: string): boolean {
   );
 }
 
-export function registerComposerPredictions(
-  api: PluginApi,
-  hub: Pick<AccountPoolHub, "prepareComposerPrediction">,
-  routing: Pick<RoutingStore, "isProviderEnabled" | "isBypassed">,
-): void {
+export function registerComposerPredictions(api: PluginApi): void {
   const host = api.hosts.experimental_client({
     contract: composerPredictionHostContract,
   });
@@ -84,9 +76,6 @@ export function registerComposerPredictions(
 
         if (disposed)
           throw new Error("Account Pooler predictions are unavailable");
-
-        if (input.backend === "claude")
-          throw new Error(CLAUDE_PREDICTIONS_RETIRED);
 
         if (!isCodexExecutable(input.cliPath))
           throw new Error("Use a Codex executable for predictions");
@@ -148,21 +137,35 @@ export function registerComposerPredictions(
 
         const work = async () => {
           try {
-            if (
-              !(await bounded(routing.isProviderEnabled("codex"))) ||
-              (await bounded(routing.isBypassed(input.threadId)))
-            )
-              throw new Error(
-                "Enable Account Pooler routing for this Codex thread",
-              );
-            current();
+            const threadId = input.threadId;
 
-            const thread = await bounded(
-              api.sdk.threads.get({
-                threadId: input.threadId,
-                include: "environment",
-              }),
-            );
+            const readThread = () =>
+              bounded(
+                api.sdk.threads.get({
+                  threadId,
+                  include: "environment",
+                  signal,
+                }),
+              );
+
+            const readCompletion = (beforeSeq?: number) =>
+              bounded(
+                api.sdk.threads.events.list({
+                  threadId,
+                  types: ["turn/completed"],
+                  order: "desc",
+                  limit: "1",
+                  ...(beforeSeq === undefined
+                    ? {}
+                    : { beforeSeq: String(beforeSeq) }),
+                  signal,
+                }),
+              ).then(([event]) => event);
+
+            const [thread, latest] = await Promise.all([
+              readThread(),
+              readCompletion(),
+            ]);
 
             current();
 
@@ -181,102 +184,55 @@ export function registerComposerPredictions(
 
             if (!environment?.hostId || !environment.path)
               throw new Error("The thread has no available environment");
-            request.hostId = environment.hostId;
+            const { hostId } = environment;
+            request.hostId = hostId;
 
-            const events = await bounded(
-              api.sdk.threads.events.list({
-                threadId: input.threadId,
-                types: ["turn/completed"],
-                order: "desc",
-                limit: "1",
-              }),
-            );
+            const latestSequence = latest?.seq;
 
-            current();
-            const source = events[0];
+            const source =
+              latestSequence === input.sourceSeq
+                ? latest
+                : await readCompletion(input.sourceSeq + 1);
 
             if (
-              !source ||
+              thread.work?.basis !== input.basis ||
+              source?.seq !== input.sourceSeq ||
               source.type !== "turn/completed" ||
-              source.data.status !== "completed" ||
-              (thread.providerId === "codex" &&
-                (!source.data.providerThreadId ||
-                  !source.data.providerCheckpointId))
+              source.data.status !== "completed"
             )
-              throw new Error("Complete a turn before requesting a prediction");
+              throw new Error("Prediction source changed");
 
-            const machine = await bounded(
-              api.sdk.hosts.get({
-                hostId: environment.hostId,
-              }),
-            );
-
-            current();
-
-            if (
-              machine.status !== "connected" ||
-              machine.lifecycle.phase !== "active"
-            )
-              throw new Error("The thread’s machine is unavailable");
-
-            const serverBaseUrl =
-              api.server.experimental_appUrl ?? api.server.loopbackBaseUrl;
-
-            if (
-              api.server.experimental_appUrl === null &&
-              (await bounded(api.sdk.system.config())).primaryHostId !==
-                environment.hostId
-            )
-              throw new Error(
-                "Remote predictions require the existing Omnyo public server URL",
-              );
-            current();
+            const readHost = () =>
+              bounded(api.sdk.hosts.get({ hostId, signal }));
 
             const assertSource = async () => {
-              const latest = await bounded(
-                api.sdk.threads.get({
-                  threadId: input.threadId,
-                  include: "environment",
-                }),
-              );
+              const [now, completion, machine] = await Promise.all([
+                readThread(),
+                readCompletion(),
+                readHost(),
+              ]);
 
               const latestEnvironment =
-                "environment" in latest ? latest.environment : null;
-
-              const completion = (
-                await bounded(
-                  api.sdk.threads.events.list({
-                    threadId: input.threadId,
-                    types: ["turn/completed"],
-                    order: "desc",
-                    limit: "1",
-                  }),
-                )
-              )[0];
-
-              const latestMachine = await bounded(
-                api.sdk.hosts.get({ hostId: environment.hostId }),
-              );
+                "environment" in now ? now.environment : null;
 
               current();
 
               if (
-                latestMachine.status !== "connected" ||
-                latestMachine.lifecycle.phase !== "active" ||
-                latest.providerId !== thread.providerId ||
-                latest.status !== "idle" ||
-                latest.queuedMessageCount > 0 ||
-                latest.archivedAt !== null ||
-                latest.deletedAt !== null ||
-                latestEnvironment?.hostId !== environment.hostId ||
+                machine.status !== "connected" ||
+                machine.lifecycle.phase !== "active"
+              )
+                throw new Error("The thread’s machine is unavailable");
+
+              if (
+                now.providerId !== thread.providerId ||
+                now.status !== "idle" ||
+                now.queuedMessageCount > 0 ||
+                now.archivedAt !== null ||
+                now.deletedAt !== null ||
+                now.work?.basis !== input.basis ||
+                latestEnvironment?.hostId !== hostId ||
                 latestEnvironment.path !== environment.path ||
-                completion?.seq !== source.seq ||
-                completion?.type !== "turn/completed" ||
-                completion.data.status !== "completed" ||
-                completion.data.providerThreadId !==
-                  source.data.providerThreadId ||
-                completion.data.providerCheckpointId !==
-                  source.data.providerCheckpointId
+                completion?.seq !== latestSequence
               ) {
                 request.controller.abort();
                 throw new Error("Prediction source changed");
@@ -285,83 +241,33 @@ export function registerComposerPredictions(
 
             request.validate = assertSource;
 
-            const nativeThreadId =
-              source.data.providerThreadId || input.threadId;
+            const context = await bounded(
+              predictionContext(api, threadId, source.seq, signal),
+            );
 
-            const { hostId, path: cwd } = environment;
+            await assertSource();
 
-            const predictOnHost = async (conversationContext?: string) => {
-              const lease = await bounded(
-                hub.prepareComposerPrediction(
+            const result = await bounded(
+              host.call(
+                "predict",
+                {
+                  conversationContext: context,
+                  cliPath: input.cliPath,
+                  model: input.model,
+                  tags: input.tags,
+                  force: input.force,
+                },
+                {
                   hostId,
-                  nativeThreadId,
                   signal,
-                  assertSource,
-                  conversationContext !== undefined || input.includedOnly,
-                  input.force,
-                ),
-              );
+                  timeoutMs: composerPredictionTimeouts.hostMs,
+                },
+              ),
+            );
 
-              try {
-                current();
-                await assertSource();
+            await assertSource();
 
-                const result = await bounded(
-                  host.call(
-                    "predict",
-                    {
-                      nativeThreadId,
-                      ...(conversationContext === undefined
-                        ? {}
-                        : { conversationContext }),
-                      cwd,
-                      cliPath: input.cliPath,
-                      model: input.model,
-                      route: {
-                        baseUrl: `${serverBaseUrl.replace(/\/+$/u, "")}/api/v1/plugins/account-pool/http/v1`,
-                        capability: lease.capability,
-                      },
-                      configuration: lease.configuration,
-                      ...(input.tags.length === 0 ? {} : { tags: input.tags }),
-                      ...(input.force ? { force: true } : {}),
-                    },
-                    {
-                      hostId,
-                      signal,
-                      timeoutMs: composerPredictionTimeouts.hostMs,
-                    },
-                  ),
-                );
-
-                current();
-                await assertSource();
-
-                return result;
-              } finally {
-                lease.revoke();
-              }
-            };
-
-            const transcript = () =>
-              bounded(
-                predictionContext(api, input.threadId, source.seq, signal),
-              );
-
-            if (thread.providerId !== "codex")
-              return await predictOnHost(await transcript());
-
-            try {
-              return await predictOnHost();
-            } catch (error) {
-              if (
-                !(error instanceof Error) ||
-                !error.message.includes(NATIVE_PREDICTION_UNAVAILABLE)
-              )
-                throw error;
-              current();
-
-              return await predictOnHost(await transcript());
-            }
+            return result;
           } finally {
             if (active.get(input.threadId) === request)
               active.delete(input.threadId);

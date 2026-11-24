@@ -7,23 +7,17 @@ dismisses it. Typing and new turns invalidate it. `request --force` runs inferen
 Finished chats always get a suggestion.
 
 The server prewarms successful chats at startup, on chat changes and every
-three minutes, one prediction at a time with a four-minute bound, within Account
-Pooler’s configured allowance. Pending questions, queued messages and active work
+three minutes, one prediction at a time with a four-minute bound. Pending questions, queued messages and active work
 exclude a chat; Decisions, callbacks and resources separately gate positive archive
 verdicts. Eligibility is rechecked before accepting a result. Dismissal and
 cancellation stop a suggestion. Transient failures retry after 1, 5 and 20
 minutes then every 20, exhausted allowance after 30 then every 90; configuration,
 model and version failures wait for Retry. An unavailable machine retries on reconnect.
 
-Account Pooler owns provider configuration, quota checks and the native
-source-machine fork. It accepts only this built-in caller and never returns credentials. Predictions default to fresh included Codex
-allowance and require OpenAI's prediction eligibility. Account Pooler's optional
-`composerPredictionAllowance: included-or-prepaid-credits` mode permits fresh
-finite prepaid credits when no included allowance is available. OpenAI may
-overdraw credits; disable automatic reload in OpenAI before opting in when new
-purchases are forbidden. Omnyo never purchases credits or changes automatic reload.
-API-key accounts, unavailable allowance, parent proxy mode and unsupported
-predictions fail visibly. The executable defaults to `codex`.
+Codex generates predictions for every provider on the chat's source machine.
+Sign in to its dedicated prediction profile using your existing ChatGPT account.
+Each turn requires verified included allowance and a zero credit balance. See
+[setup](README.md#set-up-codex-predictions).
 
 The same call returns an advisory archive verdict with a short reason: likely
 ready, more work remains, or waiting on an outside event nobody in the chat can

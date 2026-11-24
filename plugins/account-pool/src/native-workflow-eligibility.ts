@@ -57,7 +57,7 @@ const snapshotSchema = z.object({
 
 export function validateNativeCodexAllowance(
   raw: unknown,
-  accountId: string,
+  accountId?: string,
   now = Date.now(),
 ): void {
   const parsed = snapshotSchema.safeParse(raw);
@@ -66,7 +66,7 @@ export function validateNativeCodexAllowance(
   const { account, quota } = parsed.data;
 
   if (
-    quota.accountId !== accountId ||
+    (accountId !== undefined && quota.accountId !== accountId) ||
     account.account.planType !== quota.rateLimits.planType
   )
     throw new Error(unavailable);

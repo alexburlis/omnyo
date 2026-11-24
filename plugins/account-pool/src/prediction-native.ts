@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { ChildProcess } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
 import {
@@ -30,7 +32,48 @@ interface PendingRequest {
   reject: (error: Error) => void;
 }
 
-export const PREDICTION_POOL_MODEL_PROVIDER = "omnyo-account-pool";
+export const WORKFLOW_POOL_MODEL_PROVIDER = "omnyo-account-pool";
+
+export const CODEX_CHATGPT_URL = "https://chatgpt.com/backend-api/";
+
+const predictionConfig = {
+  model_provider: "openai",
+  forced_login_method: "chatgpt",
+  cli_auth_credentials_store: "file",
+  chatgpt_base_url: CODEX_CHATGPT_URL,
+  service_tier: "default",
+  project_doc_max_bytes: 0,
+  web_search: "disabled",
+  include_environment_context: false,
+  include_apps_instructions: false,
+  include_permissions_instructions: false,
+  "agents.enabled": false,
+  "features.multi_agent": false,
+  "features.multi_agent_v2": false,
+  "features.goals": false,
+  "features.plugins": false,
+  "features.hooks": false,
+  "features.apps": false,
+  "features.enable_mcp_apps": false,
+  "features.shell_tool": false,
+  "features.apply_patch_freeform": false,
+  "features.skip_host_skill_discovery": true,
+  "features.skill_search": false,
+  "features.memories": false,
+  "memories.use_memories": false,
+  "memories.generate_memories": false,
+  "skills.include_instructions": false,
+  "shell_environment_policy.inherit": "none",
+};
+
+const isolatedEnvironment = () =>
+  Object.fromEntries(
+    Object.entries(process.env).filter(([name]) =>
+      /^(PATH|SystemRoot|SYSTEMROOT|WINDIR|PATHEXT|TEMP|TMP|TMPDIR|LANG|LC_ALL)$/u.test(
+        name,
+      ),
+    ),
+  );
 
 export class NativeSession {
   private readonly pending = new Map<number, PendingRequest>();
@@ -50,6 +93,7 @@ export class NativeSession {
     private readonly signal: AbortSignal,
     private readonly input: Writable,
     output: Readable,
+    private readonly textOnly: boolean,
   ) {
     this.exited = new Promise((resolve) => {
       child.once("close", () => {
@@ -78,72 +122,96 @@ export class NativeSession {
     if (signal.aborted) this.abort();
   }
 
-  static async open(
-    cliPath: string,
+  static open(
+    command: string,
     cwd: string,
     signal: AbortSignal,
     route: { baseUrl: string; capability: string },
-    codexHome?: string,
-    purpose: "prediction" | "workflow" = "prediction",
+    codexHome: string,
+  ): Promise<NativeSession> {
+    const provider = `model_providers.${WORKFLOW_POOL_MODEL_PROVIDER}`;
+
+    return NativeSession.start(
+      {
+        command,
+        args: [
+          "app-server",
+          "-c",
+          "features.plugins=false",
+          "-c",
+          "features.hooks=false",
+          "-c",
+          "features.apps=false",
+          "-c",
+          `model_provider=${JSON.stringify(WORKFLOW_POOL_MODEL_PROVIDER)}`,
+          "-c",
+          `${provider}.name="OpenAI"`,
+          "-c",
+          `${provider}.base_url=${JSON.stringify(route.baseUrl)}`,
+          "-c",
+          `${provider}.wire_api="responses"`,
+          "-c",
+          `${provider}.requires_openai_auth=false`,
+          "-c",
+          `${provider}.supports_websockets=false`,
+          "-c",
+          `${provider}.env_http_headers.x-omnyo-workflow-token="OMNYO_WORKFLOW_CAPABILITY"`,
+        ],
+        cwd,
+        env: {
+          ...isolatedEnvironment(),
+          CODEX_HOME: codexHome,
+          HOME: codexHome,
+          USERPROFILE: codexHome,
+          OMNYO_WORKFLOW_CAPABILITY: route.capability,
+        },
+      },
+      signal,
+      "omnyo_workflow_text",
+      false,
+    );
+  }
+
+  static openPrediction(command: string, cwd: string, signal: AbortSignal) {
+    return NativeSession.start(
+      {
+        command,
+        args: [
+          "app-server",
+          ...Object.entries(predictionConfig).flatMap(([key, value]) => [
+            "-c",
+            `${key}=${JSON.stringify(value)}`,
+          ]),
+        ],
+        cwd,
+        env: {
+          ...isolatedEnvironment(),
+          CODEX_HOME: join(homedir(), ".codex-omnyo-predictions"),
+          HOME: cwd,
+          USERPROFILE: cwd,
+        },
+      },
+      signal,
+      "omnyo_composer_predictions",
+      true,
+    );
+  }
+
+  private static async start(
+    options: {
+      command: string;
+      args: string[];
+      cwd: string;
+      env: NodeJS.ProcessEnv;
+    },
+    signal: AbortSignal,
+    clientName: string,
+    textOnly: boolean,
   ): Promise<NativeSession> {
     if (signal.aborted) throw new Error("Prediction canceled");
 
-    const childEnv: NodeJS.ProcessEnv =
-      purpose === "workflow"
-        ? Object.fromEntries(
-            Object.entries(process.env).filter(([name]) =>
-              /^(PATH|SystemRoot|SYSTEMROOT|WINDIR|PATHEXT|TEMP|TMP|TMPDIR|LANG|LC_ALL)$/u.test(
-                name,
-              ),
-            ),
-          )
-        : { ...process.env };
-
-    delete childEnv.OMNYO_COMPOSER_PREDICTION_CAPABILITY;
-
-    const header =
-      purpose === "workflow"
-        ? "x-omnyo-workflow-token"
-        : "x-omnyo-composer-prediction-token";
-
-    const variable =
-      purpose === "workflow"
-        ? "OMNYO_WORKFLOW_CAPABILITY"
-        : "OMNYO_COMPOSER_PREDICTION_CAPABILITY";
-
     const child = experimental_spawnPortableProcess({
-      command: cliPath,
-      args: [
-        "app-server",
-        "-c",
-        "features.plugins=false",
-        ...(purpose === "workflow"
-          ? ["-c", "features.hooks=false", "-c", "features.apps=false"]
-          : []),
-        "-c",
-        `model_provider=${JSON.stringify(PREDICTION_POOL_MODEL_PROVIDER)}`,
-        "-c",
-        `model_providers.${PREDICTION_POOL_MODEL_PROVIDER}.name="OpenAI"`,
-        "-c",
-        `model_providers.${PREDICTION_POOL_MODEL_PROVIDER}.base_url=${JSON.stringify(route.baseUrl)}`,
-        "-c",
-        `model_providers.${PREDICTION_POOL_MODEL_PROVIDER}.wire_api="responses"`,
-        "-c",
-        `model_providers.${PREDICTION_POOL_MODEL_PROVIDER}.requires_openai_auth=false`,
-        "-c",
-        `model_providers.${PREDICTION_POOL_MODEL_PROVIDER}.supports_websockets=false`,
-        "-c",
-        `model_providers.${PREDICTION_POOL_MODEL_PROVIDER}.env_http_headers.${header}="${variable}"`,
-      ],
-      cwd,
-      env: {
-        ...childEnv,
-        ...(codexHome === undefined ? {} : { CODEX_HOME: codexHome }),
-        ...(purpose === "workflow" && codexHome
-          ? { HOME: codexHome, USERPROFILE: codexHome }
-          : {}),
-        [variable]: route.capability,
-      },
+      ...options,
       stdio: ["pipe", "pipe", "ignore"],
     });
 
@@ -152,19 +220,19 @@ export class NativeSession {
       throw new Error("Native Codex did not attach its input and output");
     }
 
-    const session = new NativeSession(child, signal, child.stdin, child.stdout);
+    const session = new NativeSession(
+      child,
+      signal,
+      child.stdin,
+      child.stdout,
+      textOnly,
+    );
 
     try {
       await session.request(
         "initialize",
         {
-          clientInfo: {
-            name:
-              purpose === "workflow"
-                ? "omnyo_workflow_text"
-                : "omnyo_composer_predictions",
-            version: "0.1.0",
-          },
+          clientInfo: { name: clientName, version: "0.1.0" },
           capabilities: { experimentalApi: true },
         },
         z.json(),
@@ -176,6 +244,14 @@ export class NativeSession {
       await session.close();
       throw error;
     }
+  }
+
+  async waitForExit(): Promise<never> {
+    await this.exited;
+    throw (
+      this.failure ??
+      new Error("Native Codex exited before prediction completed")
+    );
   }
 
   request<Schema extends z.ZodType>(
@@ -317,6 +393,9 @@ export class NativeSession {
             message: "Composer predictions cannot approve or execute tools",
           },
         });
+
+        if (this.textOnly)
+          this.fail(new Error("Codex predictions cannot execute tools."));
 
         return;
       }

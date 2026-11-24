@@ -97,10 +97,7 @@ type DialogState =
 
 const NEW_LOGIN: LoginTarget = { kind: "add", label: null, priority: 100 };
 
-type ConfigField = Exclude<
-  keyof AccountPoolConfig,
-  "parentMode" | "composerPredictionAllowance"
->;
+type ConfigField = Exclude<keyof AccountPoolConfig, "parentMode">;
 
 const CONFIG_FIELDS: readonly ConfigField[] = [
   "anthropicUpstreamBaseUrl",
@@ -1459,35 +1456,6 @@ function AccountPoolSettings() {
           </CollapsibleTrigger>
           <CollapsibleContent>
             <div className="divide-y divide-border border-t border-border">
-              <ConfigFieldRow
-                label="Prepaid credits for predictions"
-                description="Use credits after included allowance. Credits may overdraw; disable OpenAI automatic reload first. Omnyo never purchases credits."
-                error={null}
-              >
-                <Switch
-                  aria-label="Use prepaid credits for predictions"
-                  checked={
-                    config?.composerPredictionAllowance ===
-                    "included-or-prepaid-credits"
-                  }
-                  disabled={
-                    config === null ||
-                    configSaving ||
-                    pending.has("prediction-allowance")
-                  }
-                  onCheckedChange={(enabled) =>
-                    void run("prediction-allowance", async () => {
-                      applyConfig(
-                        await rpc.call("config.set", {
-                          composerPredictionAllowance: enabled
-                            ? "included-or-prepaid-credits"
-                            : "included-only",
-                        }),
-                      );
-                    })
-                  }
-                />
-              </ConfigFieldRow>
               <ConfigFieldRow
                 label="Anthropic upstream base URL"
                 description="QA override for Anthropic traffic."

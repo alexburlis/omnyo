@@ -20,7 +20,7 @@ omnyo pool account reset <id> --confirm --request-id <uuid> [--credit-id <provid
 omnyo pool status [--json]
 omnyo pool routing <claude|codex> [--off]
 omnyo pool config
-omnyo pool config set <anthropicUpstreamBaseUrl|codexUpstreamBaseUrl|switchThreshold|parentMode|composerPredictionAllowance> <value>
+omnyo pool config set <anthropicUpstreamBaseUrl|codexUpstreamBaseUrl|switchThreshold|parentMode> <value>
 omnyo pool parent [proxy|isolate]
 omnyo pool token rotate --machine <id-or-name>
 omnyo pool bypass <thread-id> [--off]

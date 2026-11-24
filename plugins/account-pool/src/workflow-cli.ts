@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import {
   NativeSession,
-  PREDICTION_POOL_MODEL_PROVIDER,
+  WORKFLOW_POOL_MODEL_PROVIDER,
 } from "./prediction-native.js";
 import {
   CLAUDE_WORKFLOW_UNAVAILABLE,
@@ -55,7 +55,6 @@ async function codexText(
     signal,
     input.route,
     directory,
-    "workflow",
   );
 
   try {
@@ -63,7 +62,7 @@ async function codexText(
       "thread/start",
       {
         model: input.model,
-        modelProvider: PREDICTION_POOL_MODEL_PROVIDER,
+        modelProvider: WORKFLOW_POOL_MODEL_PROVIDER,
         cwd: directory,
         ephemeral: true,
         approvalPolicy: "never",
@@ -92,7 +91,7 @@ async function codexText(
 
     if (
       thread.model !== input.model ||
-      thread.modelProvider !== PREDICTION_POOL_MODEL_PROVIDER
+      thread.modelProvider !== WORKFLOW_POOL_MODEL_PROVIDER
     )
       throw new Error("Workflow CLI changed the selected model or route.");
     let resolve!: (value: string) => void;

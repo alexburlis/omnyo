@@ -3,10 +3,7 @@ import { completeWorkflowCli } from "./workflow-cli.js";
 import { workflowHostContract } from "./workflow-contract.js";
 import { defineRpcContract } from "@omnyo/plugin-sdk";
 import { experimental_defineHostEntry } from "@omnyo/plugin-sdk/host";
-import {
-  CLAUDE_PREDICTIONS_RETIRED,
-  composerPredictionHostContract,
-} from "./prediction-contract.js";
+import { composerPredictionHostContract } from "./prediction-contract.js";
 import { predictNative } from "./prediction-runner.js";
 
 export default experimental_defineHostEntry({
@@ -20,8 +17,5 @@ export default experimental_defineHostEntry({
     workflowModelComplete: (input, context) =>
       completeWorkflowCli(input, context.signal),
     predict: (input, context) => predictNative(input, context.signal),
-    predictClaude: () => {
-      throw new Error(CLAUDE_PREDICTIONS_RETIRED);
-    },
   },
 });

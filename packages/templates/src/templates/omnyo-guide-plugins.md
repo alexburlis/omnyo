@@ -39,8 +39,7 @@ The builtin Account Pooler plugin routes explicitly added Anthropic API keys
 and Codex accounts. For a Claude subscription, sign in through Claude Code on
 the machine that runs the chat and use Claude Code’s `/usage` for quota.
 Previous pooled Claude subscription entries remain in the account list for
-reference and removal, with routing disabled. Claude predictions and workflows
-that require included allowance report unavailable.
+reference and removal, with routing disabled. Composer Predictions uses Codex for every chat provider.
 When a previous Claude chat's pool credential is unknown, use
 `omnyo pool bypass <thread-id>` to run it with the machine's Claude Code sign-in.
 
@@ -61,7 +60,7 @@ omnyo pool account reset <id> --confirm --request-id <uuid> [--credit-id <provid
 omnyo pool status [--json]
 omnyo pool routing <claude|codex> [--off]
 omnyo pool config
-omnyo pool config set <anthropicUpstreamBaseUrl|codexUpstreamBaseUrl|switchThreshold|parentMode|composerPredictionAllowance> <value>
+omnyo pool config set <anthropicUpstreamBaseUrl|codexUpstreamBaseUrl|switchThreshold|parentMode> <value>
 omnyo pool token rotate --machine <id-or-name>
 omnyo pool bypass <thread-id> [--off]
 ```
@@ -78,22 +77,11 @@ accounts are configured, so additions take effect without a reload. Machine
 token rotation keeps the prior token valid for ten minutes. The upstream URL
 configuration is for verification against controlled test endpoints.
 
-Composer predictions default to `composerPredictionAllowance: included-only`.
-`omnyo composer-predictions diagnostics <thread-id> --json` reads the last safe
-failure record without inference, even after a new turn or restart. It includes
-request/source correlation, stage, timing, retry schedule and allowlisted native
-error/HTTP codes; chat content and credentials are excluded. The next failure
-replaces it and chat deletion removes it. A null record includes failures before
-diagnostics were installed. Use `status` separately for the current prediction.
-
-Set `omnyo pool config set composerPredictionAllowance included-or-prepaid-credits`
-or enable **Prepaid credits for predictions** in Advanced Account Pooler settings
-to use fresh finite credits when no included allowance is available. The same
-setting is available through plugin `config.get` and `config.set` RPCs.
-Included allowance takes priority; stale, unknown, depleted or unlimited credit
-metadata does not authorize credit-only predictions. OpenAI may overdraw credits.
-Disable automatic reload in OpenAI before opting in when new purchases are
-forbidden. Omnyo never purchases credits or changes provider automatic reload.
+Composer Predictions uses the dedicated `~/.codex-omnyo-predictions` Codex home
+on the source machine. Sign in there with your existing ChatGPT account and use
+included allowance. `omnyo composer-predictions status <thread-id> --json` reads
+the current prediction. `omnyo composer-predictions diagnostics <thread-id>
+--json` reads the last safe failure and skip without requesting inference.
 
 Accounts run sequentially per provider: lower priority numbers first, with ties
 following the order accounts were added. New conversations use the current

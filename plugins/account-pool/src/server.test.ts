@@ -490,7 +490,6 @@ describe("Account Pool config schema", () => {
       codexUpstreamBaseUrl: "https://chatgpt.com/backend-api/codex",
       switchThreshold: 0.98,
       parentMode: "proxy",
-      composerPredictionAllowance: "included-only",
     });
     expect(
       accountPoolConfigSetInputSchema.safeParse({
@@ -533,6 +532,7 @@ describe("Account Pool plugin", () => {
     await host.api.storage.kv.set("config", {
       ...expected,
       cacheMissDebug: true,
+      composerPredictionAllowance: "included-or-prepaid-credits",
       cacheMissMinTokens: 20_000,
     });
     const plugin = createAccountPoolPlugin();
@@ -589,18 +589,6 @@ describe("Account Pool plugin", () => {
     expect(cliSet.exitCode).toBe(0);
     expect(cliSet.stdout).toContain("switchThreshold: 0.75");
 
-    const creditOptIn = await host.harness.behavior.runCli([
-      "config",
-      "set",
-      "composerPredictionAllowance",
-      "included-or-prepaid-credits",
-    ]);
-
-    expect(creditOptIn.exitCode).toBe(0);
-    expect(creditOptIn.stdout).toContain(
-      "composerPredictionAllowance: included-or-prepaid-credits",
-    );
-
     const updated = accountPoolConfigSchema.parse(
       await host.harness.behavior.callRpc("config.set", {
         anthropicUpstreamBaseUrl: "http://127.0.0.1:9000",
@@ -612,7 +600,6 @@ describe("Account Pool plugin", () => {
       codexUpstreamBaseUrl: "https://chatgpt.com/backend-api/codex",
       switchThreshold: 0.75,
       parentMode: "proxy",
-      composerPredictionAllowance: "included-or-prepaid-credits",
     });
     expect(
       accountPoolConfigSchema.parse(await host.api.storage.kv.get("config")),

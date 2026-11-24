@@ -1841,8 +1841,8 @@ cannot confirm that the chat previously used an API key.
 Manage account state through `omnyo pool account list|enable|disable|remove|priority|refresh`.
 
 For Claude subscription quota, open `/usage` in Claude Code. Omnyo still
-reports Claude sign-in status. Claude predictions and workflows that require
-included allowance report unavailable.
+reports Claude sign-in status. Composer Predictions uses Codex for every chat
+provider.
 
 Accounts run sequentially per provider: lower priority numbers first, with ties
 following the order accounts were added. New conversations use the current
@@ -1866,8 +1866,7 @@ sets an individual priority; the same operations are available through the
 Plugin-owned configuration values control routing. `switchThreshold` defaults
 to `0.98` and sets the preferred shared or model-family quota fraction for new
 conversations. Provider-allowed included quota above that threshold remains
-usable before paid fallback. Composer prediction allowance keeps its separate
-threshold and credit checks.
+usable before paid fallback.
 `anthropicUpstreamBaseUrl` defaults to `https://api.anthropic.com` and
 `codexUpstreamBaseUrl` defaults to
 `https://chatgpt.com/backend-api/codex`. Codex uses the hub's HTTP Responses
@@ -1883,20 +1882,7 @@ omnyo pool config
 omnyo pool config set switchThreshold 0.98
 omnyo pool config set anthropicUpstreamBaseUrl http://127.0.0.1:9000
 omnyo pool config set codexUpstreamBaseUrl http://127.0.0.1:9001
-omnyo pool config set composerPredictionAllowance included-or-prepaid-credits
 ```
-
-`composerPredictionAllowance` defaults to `included-only`. The optional
-`included-or-prepaid-credits` mode uses fresh finite prepaid Codex credits when no
-account has included allowance. Set it through `omnyo pool config set`, the
-`config.set` plugin RPC, or **Prepaid credits for predictions** in Advanced
-Account Pooler settings. Included allowance takes priority. Unknown, stale,
-depleted or unlimited credit metadata cannot authorize credit-only predictions;
-account holds, credential errors and workspace restrictions still apply.
-OpenAI may overdraw credits. Automatic reload is managed by OpenAI and must be
-disabled there before enabling this mode when new purchases are forbidden.
-Omnyo never purchases credits or changes automatic reload. This setting does not
-establish OpenAI prediction eligibility or the desktop beta's billing exemption.
 
 Upgrading from an Account Pooler build that stored these values through
 `api.settings` resets the threshold and both QA-only upstream overrides to
@@ -2924,14 +2910,14 @@ new-thread and follow-up composers. Starred text and mentions persist in the
 plugin database. See the [Prompt Library skill](../plugins/prompt-library/skills/prompt-library/SKILL.md)
 for CLI and SDK commands.
 
-## Private distribution composer predictions
+## Composer predictions
 
-The bundled Composer Predictions plugin (`omnyo--composer-predictions`) has two
-settings in Plugins: `enabled` (default `true`) and `cliPath` (default `codex`).
-The executable is resolved on the completed thread's source machine. Existing
-standalone plugin settings and enabled intent migrate before startup activation;
-an existing downstream registration keeps its own choices. Account Usage uses
-`omnyo--account-usage` and preserves the prior card expansion and pending reset IDs.
+The bundled Composer Predictions plugin (`omnyo--composer-predictions`) exposes
+`enabled`, `codexModel`, and `cliPath`. It uses Codex on the completed chat's
+source machine for every provider. Follow the
+[Codex prediction profile setup](../plugins/composer-predictions/README.md#set-up-codex-predictions)
+on each machine that runs predictions. Saved backend selections and the former
+Account Pooler prepaid setting are retired.
 
 ## Automation script execution host
 

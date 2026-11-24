@@ -60,7 +60,7 @@ function pendingPrediction() {
 
 const loaded: ReturnType<typeof createFakePluginHost>[] = [];
 
-async function setup() {
+async function setup(savedSettings: Record<string, string> = {}) {
   const pending = pendingPrediction();
 
   const source = {
@@ -232,7 +232,7 @@ async function setup() {
 
   const host = createFakePluginHost({
     pluginId: "omnyo--composer-predictions",
-    settings: { enabled: true, cliPath: "/tools/codex" },
+    settings: { enabled: true, cliPath: "/tools/codex", ...savedSettings },
     sdk: {
       experimental_attention: {
         snapshot: () => ({
@@ -400,9 +400,8 @@ const poolCallSchema = z.object({
     threadId: z.string(),
     requestId: z.string(),
     cliPath: z.string().optional(),
-    claudeCliPath: z.string().optional(),
-    includedOnly: z.boolean().optional(),
-    backend: z.enum(["codex", "claude"]).optional(),
+    sourceSeq: z.number().optional(),
+    basis: z.string().optional(),
     model: z.string().optional(),
     tags: z
       .array(z.object({ id: z.string(), description: z.string() }).strict())
@@ -687,83 +686,43 @@ describe("prediction server public boundaries", () => {
     expect(poolCalls(reloaded)).toHaveLength(0);
   });
 
-  it.each([
-    ["codex", { backend: "codex", model: "gpt-6.1-sol" }],
-    ["claude-code", { backend: "claude", model: "claude-haiku-5-5" }],
-    ["acp", { backend: "codex", model: "gpt-6.1-sol" }],
-  ])(
-    "predicts %s chats with their default provider",
-    async (providerId, expected) => {
+  it.each(["codex", "claude-code", "acp"])(
+    "predicts %s chats through Codex with the configured model",
+    async (providerId) => {
       const test = await setup();
       test.source.thread.providerId = providerId;
+      await test.harness.setSettings({ codexModel: "gpt-6.1-sol" });
 
       await test.request();
+      expect(poolCalls(test)).toHaveLength(1);
       expect(poolCalls(test)[0]?.input).toMatchObject({
-        ...expected,
+        model: "gpt-6.1-sol",
         cliPath: "/tools/codex",
-        claudeCliPath: "claude",
+        sourceSeq: test.source.events[0]?.seq,
+        basis: JSON.stringify({ sequence: test.source.events[0]?.seq }),
       });
     },
   );
 
-  it("routes a provider's chats to the backend and model chosen in settings", async () => {
-    const test = await setup();
-    await test.harness.setSettings({
+  it("uses Codex when saved settings still select Claude", async () => {
+    const test = await setup({
       codexChats: "claude",
-      claudeModel: "claude-sonnet-5-5",
+      claudeChats: "claude",
+      otherChats: "claude",
+      codexModel: "gpt-6.1-sol",
     });
 
     await test.request();
-    expect(poolCalls(test)[0]?.input).toMatchObject({
-      backend: "claude",
-      model: "claude-sonnet-5-5",
-    });
+    expect(poolCalls(test)).toHaveLength(1);
+    expect(poolCalls(test)[0]?.input).toMatchObject({ model: "gpt-6.1-sol" });
+    await expect(
+      test.harness.setSettings({ codexChats: "claude" }),
+    ).rejects.toThrow('unknown setting "codexChats"');
   });
 
   it.each([
-    [
-      "codex",
-      "OpenAI has not enabled composer predictions for any available account",
-      ["codex", "claude"],
-    ],
-    [
-      "claude-code",
-      "Predictions need included Claude subscription allowance",
-      ["claude", "codex"],
-    ],
-    ["codex", "private transport detail", ["codex"]],
-  ])(
-    "for %s chats failing with %j, predicts with %j",
-    async (providerId, failure, backends) => {
-      const test = await setup();
-      test.source.thread.providerId = providerId;
-      const [primary] = backends;
-
-      test.harness.sdk.stub("plugins.callRpc", async ({ method, input }) => {
-        if (!z.string().parse(method).endsWith(".predict"))
-          return { cancelled: true };
-
-        if (z.object({ backend: z.string() }).parse(input).backend === primary)
-          throw new Error(failure);
-
-        return { text: "Ship it.", archiveReadiness: null };
-      });
-
-      await test.request();
-      await vi.waitFor(async () =>
-        expect((await test.state()).status).toBe(
-          backends.length === 2 ? "ready" : "failed",
-        ),
-      );
-      const calls = poolCalls(test);
-      expect(calls.map(({ input }) => input.backend)).toEqual(backends);
-      expect(new Set(calls.map(({ input }) => input.requestId)).size).toBe(
-        backends.length,
-      );
-    },
-  );
-
-  it.each([
+    ["codex", "manual"],
+    ["codex", "background"],
     ["claude-code", "manual"],
     ["claude-code", "background"],
     ["acp", "manual"],
@@ -1118,15 +1077,14 @@ describe("prediction server public boundaries", () => {
       });
       test.pending.reject(
         new Error(
-          "Claude did not complete the prediction (status=success, code=api_error).",
+          "Codex did not complete the prediction (status=failed, code=internalServerError).",
         ),
       );
 
       const failed = {
         status: "failed",
         forced: true,
-        message:
-          "Claude could not finish the prediction. Omnyo retries automatically.",
+        message: "Codex could not generate a reply. Retry the prediction.",
       };
 
       await vi.waitFor(async () =>
@@ -1225,7 +1183,7 @@ describe("prediction server public boundaries", () => {
           {
             availability: "skipped",
             reason,
-            basis: test.source.thread.work?.basis,
+            basis: JSON.stringify({ sequence: test.source.events[0]?.seq }),
           },
         ]),
       );
@@ -1337,7 +1295,7 @@ describe("prediction server public boundaries", () => {
         {
           availability: "skipped",
           reason: "Background predictions skip child chats.",
-          basis: test.source.thread.work?.basis,
+          basis: JSON.stringify({ sequence: test.source.events[0]?.seq }),
         },
       ]),
     );
@@ -1521,14 +1479,9 @@ describe("prediction server public boundaries", () => {
 
     let calls = 0;
 
-    test.harness.sdk.stub("plugins.callRpc", async ({ method, input }) => {
+    test.harness.sdk.stub("plugins.callRpc", async ({ method }) => {
       if (!z.string().parse(method).endsWith(".predict"))
         return { cancelled: true };
-
-      if (z.object({ backend: z.string() }).parse(input).backend === "claude")
-        throw new Error(
-          "Predictions need included Claude subscription allowance",
-        );
 
       calls += 1;
 
@@ -1932,7 +1885,7 @@ describe("prediction server public boundaries", () => {
         expect(
           await test.harness.callRpc("diagnostics", { threadId: "thr_one" }),
         ).toMatchObject({ lastFailure: { retryAt: expect.any(Number) } });
-        expect(poolCalls(test)).toHaveLength(2);
+        expect(poolCalls(test)).toHaveLength(1);
       },
     );
 
@@ -2085,7 +2038,7 @@ describe("prediction server public boundaries", () => {
         threadId: "thr_one",
         fresh: true,
       });
-      await vi.waitFor(() => expect(poolCalls(test)).toHaveLength(3));
+      await vi.waitFor(() => expect(poolCalls(test)).toHaveLength(2));
       await vi.waitFor(async () =>
         expect(await test.state()).toMatchObject({
           status: "ready",
@@ -2105,7 +2058,7 @@ describe("prediction server public boundaries", () => {
         state: {
           threadId: "thr_one",
           generation: 1,
-          basis: test.source.thread.work?.basis,
+          basis: JSON.stringify({ sequence: test.source.events[0]?.seq }),
           status: "ready",
           text: null,
           noSuggestionReason:
@@ -2972,7 +2925,6 @@ describe("prediction server public boundaries", () => {
     test.source.thread.lastReadAt = 2;
     test.harness.runService("prewarm");
     await vi.waitFor(() => expect(poolCalls(test)).toHaveLength(1));
-    expect(poolCalls(test)[0]?.input).toMatchObject({ includedOnly: false });
     await complete(test.pending, "Inspect the finished work.");
     test.source.thread.lastReadAt = 2;
     expect(await test.request()).toMatchObject({
@@ -3017,48 +2969,20 @@ describe("prediction server public boundaries", () => {
       "Predictions need fresh included Codex allowance.",
     ],
     [
-      "Predictions require an account in Account Pooler with fresh included Codex allowance",
-      "Add a Claude or Codex account in Account Pooler to get predictions.",
+      "Sign in to the Codex prediction profile on this chat’s machine.",
+      "Sign in to the Codex prediction profile on this chat’s machine.",
     ],
     [
-      "Predictions require an account in Account Pooler with included Claude subscription allowance",
-      "Add a Claude or Codex account in Account Pooler to get predictions.",
-    ],
-    [
-      "Predictions require fresh included Codex allowance or finite prepaid credits",
-      "Predictions need fresh included Codex allowance or available prepaid credits.",
-    ],
-    [
-      "OpenAI has not enabled composer predictions for this account",
-      "OpenAI has not enabled predictions for the selected account.",
-    ],
-    [
-      "OpenAI has not enabled composer predictions for any available account",
-      "OpenAI has not enabled predictions for any available account.",
+      "Codex prediction requires its standard sign-in and a text-only configuration.",
+      "Codex prediction requires its standard sign-in and a text-only configuration.",
     ],
     [
       "Native Codex request failed (-32601)",
       "This Codex version cannot generate predictions. Update Codex on the thread’s machine.",
     ],
     [
-      "Account Pooler rejected the Codex prediction payload.",
-      "Codex sent an unsupported prediction request. Update Omnyo and retry.",
-    ],
-    [
-      "This Codex model does not support composer predictions.",
-      "This thread’s Codex model does not support predictions. Choose a supported model for your next turn.",
-    ],
-    [
-      "This Codex model does not support composer predictions (model=gpt-5.4).",
-      "This thread’s Codex model does not support predictions. Choose a supported model for your next turn.",
-    ],
-    [
-      "Account Pooler rejected the Codex prediction payload (tools).",
-      "Codex sent an unsupported prediction request. Update Omnyo and retry.",
-    ],
-    [
       "Untrusted provider diagnostic with arbitrary private content",
-      "Prediction failed. Check Account Pooler and retry.",
+      "Codex could not generate a reply. Retry the prediction.",
     ],
     [
       "Omnyo request timed out after 75 seconds.",
@@ -3227,7 +3151,7 @@ describe("prediction server public boundaries", () => {
       elapsedMs: 75_000,
       attempt: 1,
       retryAt: 60_100,
-      message: "Prediction failed. Check Account Pooler and retry.",
+      message: "Codex could not generate a reply. Retry the prediction.",
       native: null,
     };
 
@@ -3309,7 +3233,7 @@ describe("prediction server public boundaries", () => {
       ).toMatchObject({
         lastFailure: {
           cause: { kind: "transport", code: "ECONNRESET" },
-          message: "Prediction failed. Check Account Pooler and retry.",
+          message: "Codex could not generate a reply. Retry the prediction.",
         },
       });
     } finally {
@@ -3545,7 +3469,7 @@ describe("prediction server public boundaries", () => {
       await vi.waitFor(async () =>
         expect(await test.state()).toMatchObject({
           status: "failed",
-          message: "Prediction failed. Check Account Pooler and retry.",
+          message: "Codex could not generate a reply. Retry the prediction.",
         }),
       );
     });
@@ -3850,7 +3774,6 @@ describe("prediction server public boundaries", () => {
   it.each([
     "active turn",
     "queued message",
-    "missing checkpoint",
     "failed completion",
     "disconnected host",
   ])("rejects %s before host inference", async (condition) => {
@@ -3860,9 +3783,6 @@ describe("prediction server public boundaries", () => {
 
     if (condition === "queued message")
       test.source.thread.queuedMessageCount = 1;
-
-    if (condition === "missing checkpoint")
-      test.source.events[0]!.data.providerCheckpointId = "";
 
     if (condition === "failed completion")
       test.source.events[0]!.data.status = "failed";
@@ -3883,7 +3803,7 @@ describe("prediction server public boundaries", () => {
     expect(await test.state()).toMatchObject({
       status: "failed",
       text: null,
-      message: "Prediction failed. Check Account Pooler and retry.",
+      message: "Codex could not generate a reply. Retry the prediction.",
     });
     expect(JSON.stringify(test.harness.logEntries)).not.toContain(
       "private credential detail",

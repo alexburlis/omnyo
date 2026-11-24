@@ -123,7 +123,6 @@ function config(overrides: Partial<AccountPoolConfig> = {}): AccountPoolConfig {
     codexUpstreamBaseUrl: "https://chatgpt.com/backend-api/codex",
     switchThreshold: 0.98,
     parentMode: "proxy",
-    composerPredictionAllowance: "included-only",
     ...overrides,
   };
 }
@@ -232,29 +231,6 @@ describe("Account Pool parent banner", () => {
 });
 
 describe("Account Pool settings", () => {
-  it("opts into prepaid prediction credits through the shared config route", async () => {
-    const slot = render([], {
-      "config.set": () =>
-        config({ composerPredictionAllowance: "included-or-prepaid-credits" }),
-    });
-
-    fireEvent.click(await slot.findByRole("button", { name: "Advanced" }));
-
-    const toggle = await slot.findByRole("switch", {
-      name: "Use prepaid credits for predictions",
-    });
-
-    expect(toggle.getAttribute("aria-checked")).toBe("false");
-    fireEvent.click(toggle);
-    await waitFor(() => {
-      expect(slot.rpcCalls).toContainEqual({
-        method: "config.set",
-        input: { composerPredictionAllowance: "included-or-prepaid-credits" },
-      });
-      expect(toggle.getAttribute("aria-checked")).toBe("true");
-    });
-  });
-
   it("renders cached accounts as refreshing until live status arrives, then caches it", async () => {
     window.localStorage.setItem(
       STATUS_CACHE_KEY,

@@ -5,7 +5,6 @@ export const DEFAULT_ACCOUNT_POOL_CONFIG = {
   codexUpstreamBaseUrl: "https://chatgpt.com/backend-api/codex",
   switchThreshold: 0.98,
   parentMode: "proxy" as const,
-  composerPredictionAllowance: "included-only" as const,
 };
 
 const httpUrlSchema = z.string().refine((value) => {
@@ -25,11 +24,6 @@ const switchThresholdSchema = z
 
 export const parentModeSchema = z.enum(["proxy", "isolate"]);
 
-export const composerPredictionAllowanceSchema = z.enum([
-  "included-only",
-  "included-or-prepaid-credits",
-]);
-
 export const accountPoolConfigSchema = z
   .object({
     anthropicUpstreamBaseUrl: httpUrlSchema.default(
@@ -44,9 +38,6 @@ export const accountPoolConfigSchema = z
     parentMode: parentModeSchema.default(
       DEFAULT_ACCOUNT_POOL_CONFIG.parentMode,
     ),
-    composerPredictionAllowance: composerPredictionAllowanceSchema.default(
-      DEFAULT_ACCOUNT_POOL_CONFIG.composerPredictionAllowance,
-    ),
   })
   .strict();
 
@@ -58,7 +49,6 @@ export const accountPoolConfigSetInputSchema = z
     codexUpstreamBaseUrl: httpUrlSchema.optional(),
     switchThreshold: switchThresholdSchema.optional(),
     parentMode: parentModeSchema.optional(),
-    composerPredictionAllowance: composerPredictionAllowanceSchema.optional(),
   })
   .strict();
 

@@ -179,18 +179,6 @@ function refusedForce(error: unknown): boolean {
   );
 }
 
-const CLAUDE_INCOMPLETE_MESSAGE =
-  "Claude could not finish the prediction. Omnyo retries automatically.";
-
-const CLAUDE_ALLOWANCE_MESSAGE =
-  "Predictions need available Claude subscription allowance.";
-
-const CODEX_PLAN_UNAVAILABLE_MESSAGE =
-  "OpenAI has not enabled predictions for the selected account.";
-
-const CODEX_PLANS_UNAVAILABLE_MESSAGE =
-  "OpenAI has not enabled predictions for any available account.";
-
 const machineFailures = new Set([
   MACHINE_UNAVAILABLE_MESSAGE,
   "Reconnect the thread’s machine to generate a prediction.",
@@ -198,23 +186,20 @@ const machineFailures = new Set([
 
 const transientFailures = new Set([
   ...machineFailures,
-  "Prediction failed. Check Account Pooler and retry.",
+  "Codex could not generate a reply. Retry the prediction.",
   PREPARATION_FAILED_MESSAGE,
   "Prediction readiness could not be checked. Retry when Omnyo is available.",
   TIMED_OUT_MESSAGE,
-  CLAUDE_INCOMPLETE_MESSAGE,
 ]);
 
 function retryDelay(message: string, attempt: number): number | null {
-  const delays =
-    message.startsWith(ALLOWANCE_UNAVAILABLE) ||
-    message === CLAUDE_ALLOWANCE_MESSAGE
-      ? [30 * 60_000, 90 * 60_000]
-      : transientFailures.has(message) ||
-          message.startsWith("Checking ") ||
-          message.startsWith("Could not check ")
-        ? [60_000, 5 * 60_000, 20 * 60_000]
-        : [];
+  const delays = message.startsWith(ALLOWANCE_UNAVAILABLE)
+    ? [30 * 60_000, 90 * 60_000]
+    : transientFailures.has(message) ||
+        message.startsWith("Checking ") ||
+        message.startsWith("Could not check ")
+      ? [60_000, 5 * 60_000, 20 * 60_000]
+      : [];
 
   return delays[Math.min(attempt, delays.length) - 1] ?? null;
 }
@@ -224,62 +209,23 @@ function predictionFailureMessage(rawMessage: string): string {
 
   if (sdkTimeoutMs(message) !== null) return TIMED_OUT_MESSAGE;
 
-  if (message.includes("require an account in Account Pooler"))
-    return "Add a Claude or Codex account in Account Pooler to get predictions.";
-
-  if (message.includes("finite prepaid credits"))
-    return "Predictions need fresh included Codex allowance or available prepaid credits.";
-
   if (
-    message.includes("fresh included Codex allowance") ||
-    message.includes("Included Codex allowance")
+    message ===
+    "Sign in to the Codex prediction profile on this chat’s machine."
   )
+    return "Sign in to the Codex prediction profile on this chat’s machine.";
+
+  if (message.includes("fresh included Codex allowance"))
     return "Predictions need fresh included Codex allowance.";
 
-  if (message.includes("included Claude subscription allowance"))
-    return CLAUDE_ALLOWANCE_MESSAGE;
-
-  if (message.includes("routing for Claude Code predictions"))
-    return "Enable Claude Code routing in Account Pooler to use Claude predictions.";
-
-  if (message.includes("Use a Claude Code executable"))
-    return "Set the Claude Code executable in Composer Predictions settings.";
-
-  if (message.startsWith("Claude did not complete the prediction"))
-    return CLAUDE_INCOMPLETE_MESSAGE;
-
-  if (message.includes("not enabled composer predictions for any available"))
-    return CODEX_PLANS_UNAVAILABLE_MESSAGE;
-
-  if (message.includes("not enabled composer predictions"))
-    return CODEX_PLAN_UNAVAILABLE_MESSAGE;
+  if (
+    message ===
+    "Codex prediction requires its standard sign-in and a text-only configuration."
+  )
+    return "Codex prediction requires its standard sign-in and a text-only configuration.";
 
   if (message.includes("Native Codex request failed (-32601)"))
     return "This Codex version cannot generate predictions. Update Codex on the thread’s machine.";
-
-  if (
-    message.startsWith("This Codex model does not support composer predictions")
-  )
-    return "This thread’s Codex model does not support predictions. Choose a supported model for your next turn.";
-
-  if (message === "Account Pooler rejected the Codex prediction payload.")
-    return "Codex sent an unsupported prediction request. Update Omnyo and retry.";
-
-  const payloadFailure =
-    /^Account Pooler rejected the Codex prediction payload \((request|model|tools|prompt)\)\.$/u.exec(
-      message,
-    );
-
-  if (payloadFailure)
-    return payloadFailure[1] === "model"
-      ? "This thread’s Codex model does not support predictions. Choose a supported model for your next turn."
-      : "Codex sent an unsupported prediction request. Update Omnyo and retry.";
-
-  if (message.includes("parent proxy predictions are unavailable"))
-    return "Predictions are unavailable through a parent Account Pooler.";
-
-  if (message.includes("Remote predictions require"))
-    return "Set Omnyo’s public server URL to use predictions on this machine.";
 
   if (message.includes("thread’s machine is unavailable"))
     return "Reconnect the thread’s machine to generate a prediction.";
@@ -287,7 +233,7 @@ function predictionFailureMessage(rawMessage: string): string {
   if (message.includes("conversation context is unavailable or too large"))
     return "The conversation is unavailable or too large to predict. No prediction was generated.";
 
-  return "Prediction failed. Check Account Pooler and retry.";
+  return "Codex could not generate a reply. Retry the prediction.";
 }
 
 function nativeFailure(
@@ -389,116 +335,23 @@ function failureCause(
     : { kind: "http", status: Number(http[1]) };
 }
 
-const PREDICTION_BACKENDS = ["codex", "claude"] as const;
-
-const PREDICTION_BACKEND_LABELS = {
-  codex: "Codex",
-  claude: "Claude (subscription)",
-};
-
 const predictionModelSchema = z
   .string()
   .trim()
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u);
-
-interface PredictionBackendSelection {
-  backend: "codex" | "claude";
-  model: string;
-}
-
-interface PredictionBackendConfig {
-  codexChats: string;
-  claudeChats: string;
-  otherChats: string;
-  claudeModel: string;
-  codexModel: string;
-}
-
-function backendSelection(
-  backend: "codex" | "claude",
-  config: PredictionBackendConfig,
-): PredictionBackendSelection {
-  return backend === "claude"
-    ? { backend: "claude", model: config.claudeModel.trim() }
-    : { backend: "codex", model: config.codexModel.trim() };
-}
-
-export function predictionBackend(
-  providerId: string,
-  config: PredictionBackendConfig,
-): PredictionBackendSelection {
-  const choice =
-    providerId === "codex"
-      ? config.codexChats
-      : providerId === "claude-code"
-        ? config.claudeChats
-        : config.otherChats;
-
-  return backendSelection(choice === "claude" ? "claude" : "codex", config);
-}
-
-export function alternateBackend(
-  backend: "codex" | "claude",
-  config: PredictionBackendConfig,
-): PredictionBackendSelection {
-  return backendSelection(backend === "claude" ? "codex" : "claude", config);
-}
-
-export function providerUnavailable(message: string): boolean {
-  return (
-    message.startsWith(ALLOWANCE_UNAVAILABLE) ||
-    message === CLAUDE_ALLOWANCE_MESSAGE ||
-    message === CODEX_PLAN_UNAVAILABLE_MESSAGE ||
-    message === CODEX_PLANS_UNAVAILABLE_MESSAGE
-  );
-}
 
 export default async function plugin(api: PluginApi) {
   const reports = registerCompletionReports(api);
 
   const settings = api.settings.define({
     enabled: { type: "boolean", label: "Composer predictions", default: true },
-    codexChats: {
-      type: "select",
-      label: "Codex chats predict with",
-      options: [...PREDICTION_BACKENDS],
-      experimental_optionLabels: PREDICTION_BACKEND_LABELS,
-      default: "codex",
-    },
-    claudeChats: {
-      type: "select",
-      label: "Claude Code chats predict with",
-      options: [...PREDICTION_BACKENDS],
-      experimental_optionLabels: PREDICTION_BACKEND_LABELS,
-      default: "claude",
-    },
-    otherChats: {
-      type: "select",
-      label: "Other chats predict with",
-      options: [...PREDICTION_BACKENDS],
-      experimental_optionLabels: PREDICTION_BACKEND_LABELS,
-      default: "codex",
-    },
-    claudeModel: {
-      type: "string",
-      label: "Claude prediction model",
-      experimental_schema: predictionModelSchema,
-      default: "claude-haiku-5-5",
-    },
     codexModel: {
       type: "string",
       label: "Codex prediction model",
-      description:
-        "Used when Codex predicts from a chat transcript. Codex chats predicted by Codex keep their own model.",
       experimental_schema: predictionModelSchema,
       default: "gpt-6.1-sol",
     },
     cliPath: { type: "string", label: "Codex executable", default: "codex" },
-    claudeCliPath: {
-      type: "string",
-      label: "Claude Code executable",
-      default: "claude",
-    },
   });
 
   let config = await settings.get();
@@ -1448,9 +1301,7 @@ export default async function plugin(api: PluginApi) {
       if (
         !source ||
         source.type !== "turn/completed" ||
-        source.data.status !== "completed" ||
-        (thread.providerId === "codex" &&
-          (!source.data.providerThreadId || !source.data.providerCheckpointId))
+        source.data.status !== "completed"
       ) {
         return background
           ? skip(entry, "no-completed-turn", sourceSeq, admission.work)
@@ -1551,7 +1402,7 @@ export default async function plugin(api: PluginApi) {
         archiveReadiness: null,
       };
       publish(entry);
-      let requestId = randomUUID();
+      const requestId = randomUUID();
 
       let activeRequest = {
         requestId,
@@ -1565,7 +1416,7 @@ export default async function plugin(api: PluginApi) {
 
       const replyRequired = run === "forced" || !ownsNextStep(admission.work);
 
-      const requestPrediction = (selection: PredictionBackendSelection) =>
+      const requestPrediction = () =>
         api.sdk.plugins.callRpc({
           pluginId: "account-pool",
           method: "experimental_composer-predictions.v1.predict",
@@ -1573,17 +1424,15 @@ export default async function plugin(api: PluginApi) {
             threadId,
             requestId,
             cliPath: config.cliPath,
-            claudeCliPath: config.claudeCliPath,
-            includedOnly: false,
-            ...selection,
+            model: config.codexModel,
+            sourceSeq: source.seq,
+            basis,
             ...(tags.length === 0 ? {} : { tags }),
             ...(replyRequired ? { force: true } : {}),
           },
           outputSchema: poolPredictionSchema,
           signal: AbortSignal.any([controller.signal, deadline.signal]),
         });
-
-      const primary = predictionBackend(thread.providerId, config);
 
       const onPrediction = async (
         result: z.infer<typeof poolPredictionSchema>,
@@ -1718,31 +1567,7 @@ export default async function plugin(api: PluginApi) {
         );
         deadlineTimer.unref?.();
 
-        return requestPrediction(primary).then(onPrediction, fallback);
-      };
-
-      const fallback = (error: unknown) => {
-        const reported = predictionFailureMessage(
-          error instanceof Error ? error.message : "",
-        );
-
-        if (
-          disposed ||
-          controller.signal.aborted ||
-          deadline.signal.aborted ||
-          entry.state.generation !== generation ||
-          !providerUnavailable(reported)
-        )
-          throw error;
-        const alternate = alternateBackend(primary.backend, config);
-        api.log.warn(
-          `${PREDICTION_BACKEND_LABELS[primary.backend]} cannot predict this chat (${reported}) Predicting with ${PREDICTION_BACKEND_LABELS[alternate.backend]} instead.`,
-        );
-        requestId = randomUUID();
-        activeRequest = { ...activeRequest, requestId };
-        entry.activeRequest = activeRequest;
-
-        return requestPrediction(alternate).then(onPrediction);
+        return requestPrediction().then(onPrediction);
       };
 
       entry.task = (

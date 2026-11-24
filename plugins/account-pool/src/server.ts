@@ -121,6 +121,7 @@ export function createAccountPoolPlugin(
 
     delete storedConfig.cacheMissDebug;
     delete storedConfig.cacheMissMinTokens;
+    delete storedConfig.composerPredictionAllowance;
     let currentSettings = accountPoolConfigSchema.parse(storedConfig);
 
     if (hasRemovedSettings) {
@@ -325,7 +326,7 @@ export function createAccountPoolPlugin(
       },
     );
     registerUsageSource(api, hub);
-    registerComposerPredictions(api, hub, routing);
+    registerComposerPredictions(api);
     registerWorkflowService(api, hub, routing);
     registerCodexResetRpc(api, hub);
     api.rpc.register(

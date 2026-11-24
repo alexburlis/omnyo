@@ -198,7 +198,6 @@ function formatConfig(config: AccountPoolConfig): string {
     `codexUpstreamBaseUrl: ${config.codexUpstreamBaseUrl}`,
     `switchThreshold: ${config.switchThreshold}`,
     `parentMode: ${config.parentMode}`,
-    `composerPredictionAllowance: ${config.composerPredictionAllowance}`,
   ].join("\n");
 }
 
@@ -241,14 +240,8 @@ function parseConfigUpdate(
     return accountPoolConfigSetInputSchema.parse({ parentMode: value });
   }
 
-  if (key === "composerPredictionAllowance") {
-    return accountPoolConfigSetInputSchema.parse({
-      composerPredictionAllowance: value,
-    });
-  }
-
   throw new PluginCliError(
-    "Config key must be anthropicUpstreamBaseUrl, codexUpstreamBaseUrl, switchThreshold, parentMode, or composerPredictionAllowance.",
+    "Config key must be anthropicUpstreamBaseUrl, codexUpstreamBaseUrl, switchThreshold, or parentMode.",
     { code: "invalid_value" },
   );
 }
@@ -858,13 +851,13 @@ export function registerPoolCli(
             {
               name: "key",
               description:
-                "anthropicUpstreamBaseUrl, codexUpstreamBaseUrl, switchThreshold, parentMode, or composerPredictionAllowance",
+                "anthropicUpstreamBaseUrl, codexUpstreamBaseUrl, switchThreshold, or parentMode",
               required: true,
             },
             {
               name: "value",
               description:
-                "HTTP(S) URL for upstream keys; threshold above 0 and at most 1; proxy or isolate for parentMode; included-only or included-or-prepaid-credits for composerPredictionAllowance",
+                "Use an HTTP(S) URL, a threshold above 0 and at most 1, or proxy or isolate for parentMode",
               required: true,
             },
           ],

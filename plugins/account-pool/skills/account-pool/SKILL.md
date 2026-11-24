@@ -28,7 +28,10 @@ Pooled rate-limit failures can be retried by Provider Retry using the pool’s
 earliest usable account, even if the provider omits structured quota events.
 Inspect `omnyo provider-retry explain <thread-id> --json` for the last decision
 and `omnyo provider-retry status <thread-id> --json` for pending retries.
-Composer Predictions uses the protected Account Pooler capability with an idle completed chat source on any provider and the provider-issued prediction prompt. It defaults to included subscription allowance. `omnyo pool config set composerPredictionAllowance included-or-prepaid-credits` explicitly allows fresh finite credits when no included allowance is available; restore `included-only` to disable it. The same setting is exposed through `config.get`/`config.set` RPCs and Advanced Account Pooler settings. OpenAI may overdraw credits; disable provider automatic reload before opting in when new purchases are forbidden. Omnyo never purchases credits or changes automatic reload. Prediction eligibility remains provider-owned, and the desktop beta's free billing exemption is not guaranteed. The pool never returns account credentials. Claude prediction requests return an unavailable error. Read [prediction boundaries](references/composer-predictions.md) for restrictions and freshness requirements.
+Composer Predictions uses a guarded native Codex session on the chat's machine.
+Its dedicated sign-in and allowance checks run separately from pool routing.
+Read [prediction boundaries](references/composer-predictions.md) for setup and
+failure behavior.
 
 ## Throughput and observed quota windows
 

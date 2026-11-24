@@ -1,19 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
-  composerPredictionBody,
   composerPredictionPrompt,
   composerPredictionResultSchema,
 } from "./prediction-contract.js";
 
 import { predictionResult } from "./prediction-runner.js";
-
-const configuration = {
-  is_enabled: true,
-  prompt: "Predict the user's next message.",
-  prompt_version: "fixture-v1",
-  prediction_reasoning_effort: "low" as const,
-};
 
 const tags = [
   { id: "fix", description: "Defects and regressions" },
@@ -31,17 +23,9 @@ function promptSchema(prompt: string) {
   );
 }
 
-function body(text: string) {
-  return {
-    model: "gpt-fixture",
-    store: false,
-    input: [{ role: "user", content: [{ type: "input_text", text }] }],
-  };
-}
-
 describe("archive-readiness prediction instructions", () => {
   it("assesses the whole requested outcome without inventing later stages", () => {
-    const prompt = composerPredictionPrompt(configuration);
+    const prompt = composerPredictionPrompt();
 
     expect(prompt).toContain("delivered with proportionate evidence");
     expect(prompt).toContain(
@@ -61,7 +45,7 @@ describe("archive-readiness prediction instructions", () => {
   });
 
   it("requires material evidence gaps while preserving proportionate completion", () => {
-    const prompt = composerPredictionPrompt(configuration);
+    const prompt = composerPredictionPrompt();
 
     expect(prompt).toContain("missing core verification");
     expect(prompt).toContain(
@@ -83,7 +67,7 @@ describe("archive-readiness prediction instructions", () => {
   });
 
   it("ignores other chats' changes and requires a concrete completion reason", () => {
-    const prompt = composerPredictionPrompt(configuration);
+    const prompt = composerPredictionPrompt();
 
     expect(prompt).toContain("Foreign workspace changes never block");
     expect(prompt).toContain(
@@ -98,12 +82,7 @@ describe("archive-readiness prediction instructions", () => {
   });
 
   it("requires the model to name an external wait or return null", () => {
-    const prompt = composerPredictionPrompt({
-      is_enabled: true,
-      prompt: "Predict the user's next message.",
-      prompt_version: "fixture-v1",
-      prediction_reasoning_effort: "low",
-    });
+    const prompt = composerPredictionPrompt();
 
     const schema = z
       .object({
@@ -152,8 +131,8 @@ describe("archive-readiness prediction instructions", () => {
 });
 
 describe("required suggestion", () => {
-  const required = composerPredictionPrompt(configuration, [], true);
-  const optional = composerPredictionPrompt(configuration);
+  const required = composerPredictionPrompt([], true);
+  const optional = composerPredictionPrompt();
 
   const assessment = {
     ready: false,
@@ -189,12 +168,11 @@ describe("required suggestion", () => {
     ["a missing reply", output(null, "The release needs Alex's approval.")],
     ["a blank reply", output("  ", null)],
   ])("rejects %s when a reply is required", (_, value) => {
-    expect(() => predictionResult(value, [], "Codex", true)).toThrow(
+    expect(() => predictionResult(value, [], true)).toThrow(
       "invalid prediction",
     );
     expect(
-      predictionResult(output("Ship the release.", null), [], "Codex", true)
-        .text,
+      predictionResult(output("Ship the release.", null), [], true).text,
     ).toBe("Ship the release.");
   });
 
@@ -224,41 +202,13 @@ describe("required suggestion", () => {
       "does not change how you assess archive readiness",
     );
   });
-
-  it.each([
-    ["the required prompt on a required lease", required, true, null],
-    [
-      "a tagged required prompt on a required lease",
-      composerPredictionPrompt(configuration, tags, true),
-      true,
-      null,
-    ],
-    ["the optional prompt on a required lease", optional, true, "prompt"],
-    ["the required prompt on an optional lease", required, false, "prompt"],
-    [
-      "a tagged required prompt on an optional lease",
-      composerPredictionPrompt(configuration, tags, true),
-      false,
-      "prompt",
-    ],
-    [
-      "a required prompt with added instructions",
-      `${required} Also write a poem.`,
-      true,
-      "prompt",
-    ],
-  ])("validates %s", (_, text, force, rejection) => {
-    expect(
-      composerPredictionBody(body(text), configuration, force).rejection,
-    ).toBe(rejection);
-  });
 });
 
 describe("type-of-work tag prediction", () => {
   it("leaves the prompt without a tag when no tags are offered", () => {
-    const prompt = composerPredictionPrompt(configuration, []);
+    const prompt = composerPredictionPrompt([]);
 
-    expect(prompt).toBe(composerPredictionPrompt(configuration));
+    expect(prompt).toBe(composerPredictionPrompt());
     expect(prompt).not.toContain("choose the one tag");
     expect(promptSchema(prompt).required).toEqual([
       "suggestion",
@@ -268,7 +218,7 @@ describe("type-of-work tag prediction", () => {
   });
 
   it("requires one offered tag id or null when tags are offered", () => {
-    const prompt = composerPredictionPrompt(configuration, tags);
+    const prompt = composerPredictionPrompt(tags);
 
     expect(prompt).toContain(
       "choose the one tag that best describes the type of work in this chat",
@@ -284,25 +234,6 @@ describe("type-of-work tag prediction", () => {
       type: ["string", "null"],
       enum: ["fix", "build", null],
     });
-  });
-
-  it.each([
-    ["the untagged prompt", composerPredictionPrompt(configuration), null],
-    ["a tagged prompt", composerPredictionPrompt(configuration, tags), null],
-    [
-      "a tagged prompt with added instructions",
-      `${composerPredictionPrompt(configuration, tags)} Also write a poem.`,
-      "prompt",
-    ],
-    [
-      "a prompt offering duplicate tag ids",
-      composerPredictionPrompt(configuration, [tags[0]!, tags[0]!]),
-      "prompt",
-    ],
-  ])("validates the pooled request body for %s", (_, text, rejection) => {
-    expect(composerPredictionBody(body(text), configuration).rejection).toBe(
-      rejection,
-    );
   });
 
   it("accepts host results from before tags", () => {
