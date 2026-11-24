@@ -79,6 +79,13 @@ const STORY_VH = {
   leave: [172, 14],
 } as const;
 
+const MORPH_VH = {
+  leave: [150, 14],
+  morph: [156, 54],
+  wipe: [156, 40],
+  arrive: 12,
+} as const;
+
 const progressVar = (element: HTMLElement) =>
   element.dataset.progress === "local" ? "--sp" : "--p";
 
@@ -119,11 +126,13 @@ export function startStory(
     labels = ACTS,
     onProductProgress,
     productStage = false,
+    productMorph = false,
     themed = false,
   }: {
     labels?: readonly string[];
     onProductProgress?: (progress: number) => void;
     productStage?: boolean;
+    productMorph?: boolean;
     themed?: boolean;
   } = {},
 ) {
@@ -199,6 +208,12 @@ export function startStory(
 
   const storyTitle =
     storyPin?.querySelector<HTMLElement>(".story-title") ?? null;
+
+  const productFrame = productMorph ? anchor("product-frame") : null;
+  const productPin = productFrame?.closest<HTMLElement>(".pin") ?? null;
+  const productSurface = productFrame?.firstElementChild ?? null;
+  const frameRect: Vec4 = [0, 0, 0, 0];
+  const frameShape = { width: -1, radius: 0 };
 
   const veil = root.querySelector<HTMLElement>("[data-veil]");
 
@@ -564,6 +579,13 @@ export function startStory(
     const ctaRect = rectOf(ctaMark);
     const streamRect = rectOf(stream);
     const titleRect = rectOf(storyTitle);
+    const morphing = Boolean(productPin) && !phone;
+
+    const surfaceRect = morphing
+      ? productSurface?.getBoundingClientRect()
+      : undefined;
+
+    const productPinRect = morphing ? rectOf(productPin) : undefined;
     const layerRect = winLayer?.getBoundingClientRect();
     const scrollable = document.documentElement.scrollHeight - vh;
 
@@ -586,10 +608,35 @@ export function startStory(
       ramp(story.e, 0.4, 0.6) * 0.3 + ramp(storyY, 0, STORY_VH.rain) * 0.7;
 
     const s2 = during(STORY_VH.flow);
-    const s3 = ramp(app.e, 0.12, 0.78);
+
+    const arrive =
+      morphing && app.rect
+        ? ramp((-app.rect.top / vh) * 100, 0, MORPH_VH.arrive)
+        : 1;
+
+    const s3 = morphing
+      ? Math.min(during(MORPH_VH.morph), arrive < 1 ? 0.9999 : 1)
+      : ramp(app.e, 0.12, 0.78);
+
     const s4 = ramp(yours.e, 0.25, 0.6);
     const s5 = ramp(cta.e, 0.2, 0.7);
     const stage = s1 + s2 + s3 + s4 + s5;
+
+    if (surfaceRect && productSurface instanceof HTMLElement) {
+      if (frameShape.width !== surfaceRect.width) {
+        frameShape.width = surfaceRect.width;
+        frameShape.radius =
+          (Number.parseFloat(
+            getComputedStyle(productSurface).borderTopLeftRadius,
+          ) || 0) *
+          (surfaceRect.width / Math.max(1, productSurface.offsetWidth));
+      }
+
+      frameRect[0] = surfaceRect.left;
+      frameRect[1] = surfaceRect.top - (productPinRect?.top ?? 0);
+      frameRect[2] = surfaceRect.width;
+      frameRect[3] = surfaceRect.height;
+    }
 
     const heroCenter = centerOf(heroRect, vw, vh);
     const storyCenter = centerOf(storyRect, vw, vh);
@@ -627,7 +674,11 @@ export function startStory(
                 stage: 1,
                 disc: discs.app,
               }
-            : { t: ramp(app.e, 0.04, 0.5), ...storyCenter, stage: 1 }
+            : {
+                t: morphing ? during(MORPH_VH.wipe) : ramp(app.e, 0.04, 0.5),
+                ...storyCenter,
+                stage: 1,
+              }
           : { t: 0, x: 0, y: 0, stage: 0 },
       ],
       [
@@ -985,7 +1036,11 @@ export function startStory(
       setNumber(storyPin, "--orbit", smooth(during(STORY_VH.orbit)));
       setNumber(storyPin, "--rise", during(STORY_VH.rise));
       setNumber(storyPin, "--with", during(STORY_VH.with));
-      setNumber(storyPin, "--leave", during(STORY_VH.leave));
+      setNumber(
+        storyPin,
+        "--leave",
+        during(morphing ? MORPH_VH.leave : STORY_VH.leave),
+      );
 
       const lit = titleRect
         ? smooth(during(STORY_VH.light)) *
@@ -1049,6 +1104,8 @@ export function startStory(
       if (navLabel.textContent !== label) navLabel.textContent = label;
     }
 
+    if (productPin) setNumber(productPin, "--arrive", arrive);
+
     onProductProgress?.(app.rect && app.rect.top <= 0 ? app.p : 0);
     placeCanvas(place);
 
@@ -1057,6 +1114,8 @@ export function startStory(
       s2,
       s5,
       ctaHold: cta.p,
+      arrive,
+      morphing,
       footerE: footer.e,
       streamFade: streamRect
         ? clamp01((streamRect.top - NAV_HEIGHT - 24) / (vh * 0.25))
@@ -1107,6 +1166,8 @@ export function startStory(
       s2,
       s5,
       ctaHold,
+      arrive,
+      morphing,
       footerE,
       streamFade,
       toStage,
@@ -1152,8 +1213,10 @@ export function startStory(
 
     let alpha = 1;
 
-    if (stage > 2 && stage <= 3) alpha = 1 - Math.min(1, (stage - 2) * 1.15);
-    else if (stage > 3 && stage <= 4) alpha = Math.max(0, (stage - 3.1) / 0.9);
+    if (stage > 2 && stage <= 3) {
+      alpha = morphing ? 1 - arrive : 1 - Math.min(1, (stage - 2) * 1.15);
+    } else if (stage > 3 && stage <= 4)
+      alpha = Math.max(0, (stage - 3.1) / 0.9);
     else if (stage > 4 && stage < 5) alpha = Math.max(streamFade, stage - 4);
     alpha *= 1 - ramp(footerE, 0, 0.7);
 
@@ -1195,6 +1258,9 @@ export function startStory(
             streamRect.height / 2,
           ]
         : [0, 0, 0, 0],
+      frame: frameRect,
+      frameRadius: frameShape.radius,
+      morph: morphing ? 1 : 0,
       pointer: [pointer.x, pointer.y],
       pointerOn: pointer.on,
     };

@@ -770,6 +770,7 @@ export function KineticShell({
   labels,
   onProductProgress,
   productStage = false,
+  productMorph = false,
   themed = false,
   className = "",
 }: {
@@ -777,6 +778,7 @@ export function KineticShell({
   labels?: readonly string[];
   onProductProgress?: (progress: number) => void;
   productStage?: boolean;
+  productMorph?: boolean;
   themed?: boolean;
   className?: string;
 }) {
@@ -797,9 +799,10 @@ export function KineticShell({
       labels,
       onProductProgress,
       productStage,
+      productMorph,
       themed,
     });
-  }, [reduced, labels, onProductProgress, productStage, themed]);
+  }, [reduced, labels, onProductProgress, productStage, productMorph, themed]);
 
   return (
     <main

@@ -26,6 +26,9 @@ export interface ParticleFrame {
   markC: Vec4;
   windows: Vec4[];
   stream: Vec4;
+  frame: Vec4;
+  frameRadius: number;
+  morph: number;
   pointer: [number, number];
   pointerOn: number;
 }
@@ -46,6 +49,9 @@ uniform vec4 uMarkB;
 uniform vec4 uMarkC;
 uniform vec4 uWin[${WINDOW_COUNT}];
 uniform vec4 uStream;
+uniform vec4 uFrame;
+uniform float uFrameR;
+uniform float uMorph;
 uniform vec4 uChrome;
 uniform vec3 uColIn;
 uniform vec3 uColOut;
@@ -109,6 +115,35 @@ vec2 windowPos() {
   return toScene(p);
 }
 
+vec2 framePos() {
+  vec2 extent = uFrame.zw * 0.5;
+  vec2 center = toScene(uFrame.xy + extent);
+  float len = length(aMark.xy);
+  vec2 dir = len > 0.0001 ? aMark.xy / len : vec2(1.0, 0.0);
+  float edge = min(
+    extent.x / max(abs(dir.x), 0.0001),
+    extent.y / max(abs(dir.y), 0.0001)
+  );
+  vec2 p = dir * edge;
+  float r = min(uFrameR, min(extent.x, extent.y));
+  vec2 inner = clamp(p, r - extent, extent - r);
+  vec2 bend = p - inner;
+  float reach = length(bend);
+  vec2 normal;
+  if (reach > 0.001) {
+    p = inner + bend / reach * r;
+    normal = bend / reach;
+  } else {
+    normal = abs(p.x) * extent.y > abs(p.y) * extent.x
+      ? vec2(sign(p.x), 0.0)
+      : vec2(0.0, sign(p.y));
+  }
+  float band = clamp((len * ${MARK_SPAN.toFixed(1)} - 12.15) / 12.55, 0.0, 1.0);
+  float depth = min(extent.x, extent.y) * 0.075;
+  p -= normal * ((1.0 - band) * depth + (aSeed.z - 0.5) * 1.6);
+  return center + p;
+}
+
 vec2 fieldPos() {
   vec2 base = (aSeed.xy - 0.5) * uView * 1.12;
   base += vec2(
@@ -163,11 +198,13 @@ void main() {
   float i0 = min(floor(st), 4.0);
   float f = st - i0;
   float order = i0 < 0.5 ? (aWin.x / ${WINDOW_COUNT}.0) * 0.85 + aSeed.y * 0.15 : aSeed.y;
-  float span = i0 < 0.5 ? ${RAIN_SPAN.toFixed(2)} : 0.55;
+  float morphing = uMorph * step(1.5, i0) * step(i0, 2.5);
+  float span = i0 < 0.5 ? ${RAIN_SPAN.toFixed(2)} : mix(0.55, 0.8, morphing);
   float fp = clamp((f - order * (1.0 - span)) / span, 0.0, 1.0);
   fp = fp * fp * (3.0 - 2.0 * fp);
-  vec2 pos = mix(stateAt(i0), stateAt(i0 + 1.0), fp);
-  float swirl = sin(fp * PI) * (30.0 + aSeed.z * 150.0);
+  vec2 target = morphing > 0.5 ? framePos() : stateAt(i0 + 1.0);
+  vec2 pos = mix(stateAt(i0), target, fp);
+  float swirl = sin(fp * PI) * (30.0 + aSeed.z * 150.0) * mix(1.0, 0.12, morphing);
   float angle = aSeed.w * 6.2831 + fp * 2.6;
   pos += vec2(cos(angle), sin(angle)) * swirl;
 
@@ -182,7 +219,7 @@ void main() {
 
   float winWeight = i0 < 0.5 ? fp : (i0 < 1.5 ? 1.0 - fp : 0.0);
   float interior = step(1.5, aWin.w) * step(aWin.w, 2.5);
-  float fieldWeight = i0 > 1.5 && i0 < 2.5 ? fp : (i0 > 2.5 && i0 < 3.5 ? 1.0 - fp : 0.0);
+  float fieldWeight = i0 > 1.5 && i0 < 2.5 ? fp * (1.0 - morphing) : (i0 > 2.5 && i0 < 3.5 ? 1.0 - fp : 0.0);
   float streamWeight = i0 > 2.5 && i0 < 3.5 ? fp : (i0 > 3.5 ? 1.0 - fp : 0.0);
 
   gl_Position = vec4(pos / (uView * 0.5), 0.0, 1.0);
@@ -290,6 +327,9 @@ const UNIFORMS = [
   "uMarkC",
   "uWin",
   "uStream",
+  "uFrame",
+  "uFrameR",
+  "uMorph",
   "uChrome",
   "uColIn",
   "uColOut",
@@ -431,6 +471,9 @@ export function createParticles(canvas: HTMLCanvasElement, count: number) {
     frame.windows.forEach((rect, index) => windows.set(rect, index * 4));
     gl.uniform4fv(at.uWin, windows);
     gl.uniform4fv(at.uStream, frame.stream);
+    gl.uniform4fv(at.uFrame, frame.frame);
+    gl.uniform1f(at.uFrameR, frame.frameRadius);
+    gl.uniform1f(at.uMorph, frame.morph);
     gl.uniform2fv(at.uPointer, frame.pointer);
     gl.uniform1f(at.uPointerOn, frame.pointerOn);
     gl.clear(gl.COLOR_BUFFER_BIT);

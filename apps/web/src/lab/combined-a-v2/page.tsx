@@ -230,7 +230,7 @@ function Product() {
         </div>
         <div className={`kinetic-product is-${beat.view}`}>
           <div className="kinetic-product-light" aria-hidden="true" />
-          <div className="kinetic-product-frame">
+          <div className="kinetic-product-frame" data-anchor="product-frame">
             <AppMock view={beat.view} />
           </div>
           <div
@@ -297,6 +297,7 @@ export default function Page({ macDownload }: LandingPageProps) {
       className="lab-combined-kinetic lab-combined-a-v2"
       labels={ACT_LABELS}
       productStage
+      productMorph
       themed
     >
       <Hero macDownload={macDownload} />
