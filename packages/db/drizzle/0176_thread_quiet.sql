@@ -1,0 +1,1 @@
+ALTER TABLE `threads` ADD `quiet` integer DEFAULT false NOT NULL;

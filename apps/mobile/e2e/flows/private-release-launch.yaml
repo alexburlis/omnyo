@@ -1,0 +1,125 @@
+appId: ${OMNYO_PRIVATE_IOS_SMOKE_APP_ID}
+---
+- assertTrue: ${OMNYO_PRIVATE_IOS_SMOKE_APP_ID === "com.omnyohq.app"}
+- assertTrue: ${OMNYO_PRIVATE_IOS_SMOKE_STAGE === "first-install" || OMNYO_PRIVATE_IOS_SMOKE_STAGE === "reinstall-empty" || OMNYO_PRIVATE_IOS_SMOKE_STAGE === "reinstall-saved-server"}
+- runFlow:
+    when:
+      true: ${OMNYO_PRIVATE_IOS_SMOKE_STAGE === "first-install"}
+    commands:
+      - stopApp
+      - launchApp
+      - extendedWaitUntil:
+          visible:
+            id: "add-server-screen"
+          timeout: 15000
+      - assertVisible: "Connect to an Omnyo server"
+      - assertNotVisible:
+          id: "shell-webview|identity-start-fresh"
+      - takeScreenshot: private-first-install-cold-launch
+      - stopApp
+      - launchApp
+      - extendedWaitUntil:
+          visible:
+            id: "add-server-screen"
+          timeout: 15000
+      - assertVisible: "Connect to an Omnyo server"
+      - assertNotVisible:
+          id: "shell-webview|identity-start-fresh"
+      - takeScreenshot: private-first-install-second-cold-launch
+- runFlow:
+    when:
+      true: ${OMNYO_PRIVATE_IOS_SMOKE_STAGE === "reinstall-empty"}
+    commands:
+      - stopApp
+      - launchApp
+      - extendedWaitUntil:
+          visible:
+            id: "add-server-screen"
+          timeout: 15000
+      - assertVisible: "Connect to an Omnyo server"
+      - assertNotVisible:
+          id: "shell-webview|identity-start-fresh"
+      - takeScreenshot: private-reinstall-empty-cold-launch
+      - stopApp
+      - launchApp
+      - extendedWaitUntil:
+          visible:
+            id: "add-server-screen"
+          timeout: 15000
+      - assertVisible: "Connect to an Omnyo server"
+      - assertNotVisible:
+          id: "shell-webview|identity-start-fresh"
+      - takeScreenshot: private-reinstall-empty-second-cold-launch
+- runFlow:
+    when:
+      true: ${OMNYO_PRIVATE_IOS_SMOKE_STAGE === "reinstall-empty"}
+    commands:
+      - runFlow:
+          when:
+            visible: "Not now"
+          commands:
+            - tapOn: "Not now"
+      - tapOn:
+          id: "server-url-input"
+      - inputText: "${OMNYO_PRIVATE_IOS_SMOKE_SERVER_URL}"
+      - tapOn:
+          id: "server-label-input"
+      - inputText: "Smoke"
+      - tapOn: "Server URL"
+      - tapOn:
+          id: "add-server-submit"
+      - runFlow:
+          when:
+            visible: "Not now"
+          commands:
+            - tapOn: "Not now"
+      - extendedWaitUntil:
+          visible:
+            id: "shell-webview|shell-error|shell-server-error"
+          timeout: 30000
+      - runFlow:
+          when:
+            visible: "Not now"
+          commands:
+            - tapOn: "Not now"
+      - assertVisible:
+          id: "shell-webview"
+      - assertNotVisible:
+          id: "shell-error|add-server-screen|identity-start-fresh"
+      - takeScreenshot: private-reinstall-empty-saved-server
+- runFlow:
+    when:
+      true: ${OMNYO_PRIVATE_IOS_SMOKE_STAGE === "reinstall-saved-server"}
+    commands:
+      - stopApp
+      - launchApp
+      - extendedWaitUntil:
+          visible:
+            id: "shell-webview|shell-error|shell-server-error"
+          timeout: 30000
+      - runFlow:
+          when:
+            visible: "Not now"
+          commands:
+            - tapOn: "Not now"
+      - assertVisible:
+          id: "shell-webview"
+      - assertNotVisible:
+          id: "shell-error|add-server-screen|identity-start-fresh"
+      - takeScreenshot: private-reinstall-saved-server-cold-launch
+      - stopApp
+      - launchApp
+      - extendedWaitUntil:
+          visible:
+            id: "shell-webview|shell-error|shell-server-error"
+          timeout: 30000
+      - runFlow:
+          when:
+            visible: "Not now"
+          commands:
+            - tapOn: "Not now"
+      - assertVisible:
+          id: "shell-webview"
+      - assertNotVisible:
+          id: "shell-error|add-server-screen|identity-start-fresh"
+      - takeScreenshot: private-reinstall-saved-server-second-cold-launch

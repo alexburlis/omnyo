@@ -1,0 +1,67 @@
+{
+  "name": "omnyo-plugin-connect",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Remote access via the Omnyo relay at omnyo.link \u2014 this Omnyo becomes reachable at https://<handle>.omnyo.link. Disable to cut off all remote access.",
+  "author": {
+    "name": "bb",
+    "url": "https://github.com/get-bb"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/get-bb/bb.git",
+    "directory": "plugins/connect"
+  },
+  "engines": {
+    "omnyo": ">=1.0.129",
+    "omnyoPluginSdk": ">=0.6.6 >=0.6.44"
+  },
+  "omnyo": {
+    "name": "Omnyo Connect",
+    "description": "Remote access via the Omnyo relay at omnyo.link \u2014 this Omnyo becomes reachable at https://<handle>.omnyo.link. Disable to cut off all remote access.",
+    "branding": {
+      "icon": "ComputerCloud"
+    },
+    "server": "./src/server.ts",
+    "app": "./app.tsx",
+    "skills": [
+      "skills"
+    ]
+  },
+  "keywords": [
+    "omnyo-plugin"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --config vitest.config.ts",
+    "prepare:bundled": "omnyo-plugin-build prepare-bundled"
+  },
+  "dependencies": {
+    "@omnyo/connect-client": "workspace:*",
+    "@omnyo/shared-ui": "workspace:*",
+    "@omnyo/tunnel-client": "workspace:*",
+    "@omnyo/tunnel-contract": "workspace:*",
+    "qrcode": "^1.5.4",
+    "ws": "^8.18.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@omnyo/plugin-build": "workspace:*",
+    "@omnyo/plugin-sdk": "workspace:*",
+    "@testing-library/react": "^16.3.2",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.0.0",
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "^19.0.0",
+    "@types/ws": "^8.18.1",
+    "omnyo-plugin-omnyo-account": "workspace:*",
+    "better-sqlite3": "12.10.0",
+    "jsdom": "^29.0.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "typescript-7": "npm:typescript@^7.0.2",
+    "vitest": "4.1.11"
+  }
+}

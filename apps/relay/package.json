@@ -1,0 +1,46 @@
+{
+  "name": "@omnyo/relay",
+  "version": "0.0.1",
+  "type": "module",
+  "private": true,
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.23.5"
+  },
+  "scripts": {
+    "build": "node ../../scripts/build-node-entry.mjs src/main.ts dist/main.js --clean-dist --copy-dir ../../packages/connect-db/migrations dist/migrations/connect-db --copy-dir migrations dist/migrations/relay && node ../../scripts/build-node-entry.mjs src/usage/main.ts dist/usage-collector.js",
+    "start": "node dist/main.js",
+    "lint": "oxlint --deny-warnings src scripts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --config vitest.config.ts"
+  },
+  "dependencies": {
+    "@better-auth/drizzle-adapter": "^1.7.14",
+    "@hono/node-server": "1.19.15",
+    "@omnyo/connect-db": "workspace:*",
+    "@omnyo/domain": "workspace:*",
+    "@omnyo/process-utils": "workspace:*",
+    "@omnyo/tunnel-contract": "workspace:*",
+    "acme-client": "5.4.0",
+    "better-auth": "^1.7.14",
+    "better-sqlite3": "12.10.0",
+    "drizzle-orm": "0.45.2",
+    "hono": "^4.13.18",
+    "omnyo-plugin-automations": "workspace:*",
+    "ws": "^8.19.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@omnyo/connect-client": "workspace:*",
+    "@omnyo/tsconfig": "workspace:*",
+    "@omnyo/tunnel-client": "workspace:*",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.18.1",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "typescript-7": "npm:typescript@^7.0.2",
+    "vitest": "4.1.11"
+  }
+}

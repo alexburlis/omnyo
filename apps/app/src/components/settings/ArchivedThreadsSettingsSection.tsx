@@ -1,0 +1,383 @@
+import { useMemo, useState } from "react";
+import { RouteAnchor } from "@/components/ui/app-route-anchor";
+import type { ThreadListEntry } from "@omnyo/domain";
+import { Button } from "@omnyo/shared-ui/button";
+import { ProjectSelector } from "@/components/pickers/ProjectSelector";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@omnyo/shared-ui/dropdown-menu";
+import { EmptyStateBlock } from "@omnyo/shared-ui/empty-state";
+import { Skeleton } from "@omnyo/shared-ui/skeleton";
+import { Icon, type IconName } from "@omnyo/shared-ui/icon";
+import { Input } from "@omnyo/shared-ui/input";
+import { Pill } from "@omnyo/shared-ui/pill";
+import { ThreadUnarchiveButton } from "@/components/thread/ThreadUnarchiveButton";
+import { useUnarchiveThread } from "@/hooks/mutations/thread-state-mutations";
+import {
+  hasThreadSearchableQuery,
+  useArchivedThreads,
+  useThreadSearch,
+  type UseArchivedThreadsFilters,
+} from "@/hooks/queries/thread-queries";
+import { useSidebarNavigation } from "@/hooks/queries/sidebar-navigation-query";
+import type { ArchivedThreadsKindFilter } from "@/hooks/queries/query-keys";
+import { getThreadRoutePath } from "@/lib/route-paths";
+import { formatRelativeTime } from "@/lib/relative-time";
+import { getThreadDisplayTitle } from "@/lib/thread-title";
+import {
+  ThreadTitle,
+  useResolveThreadTitle,
+} from "@/components/thread/ThreadTitleMentions";
+import { CHILD_THREAD_NOUN } from "@/lib/child-thread-copy";
+
+const ALL_PROJECTS = "all";
+
+const ARCHIVED_THREAD_SEARCH_LIMIT = 50;
+
+const KIND_OPTIONS: ReadonlyArray<{
+  label: string;
+  value: ArchivedThreadsKindFilter;
+}> = [
+  { label: "All threads", value: "all" },
+  { label: "Threads", value: "root" },
+  { label: "Child threads", value: "child" },
+];
+
+interface ArchiveFilterMenuProps<T extends string> {
+  icon: IconName;
+  label: string;
+  options: ReadonlyArray<{ label: string; value: T }>;
+  onChange: (value: T) => void;
+  value: T;
+}
+
+function ArchiveFilterMenu<T extends string>({
+  icon,
+  label,
+  onChange,
+  options,
+  value,
+}: ArchiveFilterMenuProps<T>) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          className="h-8 min-w-36 justify-between gap-2 px-3 text-xs font-normal"
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            <Icon name={icon} className="size-3.5 shrink-0" />
+            <span className="truncate">{label}</span>
+          </span>
+          <Icon name="ChevronDown" className="size-3.5 shrink-0" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-44">
+        {options.map((option) => (
+          <DropdownMenuItem
+            key={option.value}
+            onSelect={() => onChange(option.value)}
+          >
+            <span className="min-w-0 flex-1 truncate">{option.label}</span>
+            {option.value === value ? (
+              <Icon name="Check" className="size-3.5" />
+            ) : null}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function filterArchivedThreadsBySearch(
+  threads: ThreadListEntry[],
+  search: string,
+  resolveTitle: (title: string) => string,
+): ThreadListEntry[] {
+  const normalizedSearch = search.trim().toLocaleLowerCase();
+
+  if (normalizedSearch.length === 0) return threads;
+
+  return threads.filter((thread) => {
+    const title = getThreadDisplayTitle(thread);
+
+    return [title, resolveTitle(title)].some((text) =>
+      text.toLocaleLowerCase().includes(normalizedSearch),
+    );
+  });
+}
+
+export function ArchivedThreadsSettingsSection() {
+  const [search, setSearch] = useState("");
+  const [kind, setKind] = useState<ArchivedThreadsKindFilter>("all");
+  const [projectId, setProjectId] = useState(ALL_PROJECTS);
+  const filtersActive = kind !== "all" || projectId !== ALL_PROJECTS;
+  const sidebarNavigation = useSidebarNavigation();
+  const searchIsActive = hasThreadSearchableQuery(search);
+
+  const archivedThreadsQuery = useArchivedThreads(
+    {
+      ...(projectId === ALL_PROJECTS ? {} : { projectId }),
+      kind,
+    } satisfies UseArchivedThreadsFilters,
+    { enabled: !searchIsActive },
+  );
+
+  const threadSearch = useThreadSearch({
+    active: searchIsActive,
+    limitPerGroup: ARCHIVED_THREAD_SEARCH_LIMIT,
+    query: search,
+  });
+
+  const unarchiveThread = useUnarchiveThread();
+  const resolveTitle = useResolveThreadTitle();
+
+  const projects = useMemo(() => {
+    if (!sidebarNavigation.data) return [];
+
+    return [
+      sidebarNavigation.data.personalProject,
+      ...sidebarNavigation.data.projects,
+    ];
+  }, [sidebarNavigation.data]);
+
+  const projectNames = useMemo(
+    () => new Map(projects.map((project) => [project.id, project.name])),
+    [projects],
+  );
+
+  const archivedThreads = useMemo(() => {
+    const threads = searchIsActive
+      ? (threadSearch.data?.archived.results.map((result) => result.thread) ??
+        [])
+      : (archivedThreadsQuery.data?.pages ?? []).flat();
+
+    const filteredThreads = threads.filter(
+      (thread) =>
+        thread.archivedAt !== null &&
+        (projectId === ALL_PROJECTS || thread.projectId === projectId) &&
+        (kind === "all" ||
+          (thread.parentThreadId !== null) === (kind === "child")),
+    );
+
+    return searchIsActive
+      ? filteredThreads
+      : filterArchivedThreadsBySearch(filteredThreads, search, resolveTitle);
+  }, [
+    archivedThreadsQuery.data,
+    kind,
+    projectId,
+    search,
+    searchIsActive,
+    threadSearch.data,
+    resolveTitle,
+  ]);
+
+  const groupedThreads = useMemo(() => {
+    const groups = new Map<string, ThreadListEntry[]>();
+
+    for (const thread of archivedThreads) {
+      const group = groups.get(thread.projectId);
+
+      if (group) group.push(thread);
+      else groups.set(thread.projectId, [thread]);
+    }
+
+    return [...groups.entries()];
+  }, [archivedThreads]);
+
+  const selectedKindLabel =
+    KIND_OPTIONS.find((option) => option.value === kind)?.label ??
+    "All threads";
+
+  const isInitialLoading = searchIsActive
+    ? threadSearch.isDebouncing ||
+      (threadSearch.isLoading && threadSearch.data === undefined)
+    : archivedThreadsQuery.isPending;
+
+  return (
+    <section className="space-y-5">
+      <div>
+        <h2 className="text-lg font-semibold text-foreground">
+          Archived threads
+        </h2>
+        <p className="mt-1 text-xs text-subtle-foreground">
+          Find and restore archived threads from across your projects.
+        </p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-56 flex-1">
+          <Icon
+            name="Search"
+            className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-subtle-foreground"
+          />
+          <Input
+            aria-label="Search archived threads"
+            className="h-8 pl-8 text-xs"
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search archived threads…"
+            value={search}
+          />
+        </div>
+        <ArchiveFilterMenu
+          icon="SlidersHorizontal"
+          label={selectedKindLabel}
+          onChange={setKind}
+          options={KIND_OPTIONS}
+          value={kind}
+        />
+        <ProjectSelector
+          projects={projects}
+          value={projectId}
+          onChange={(value) => setProjectId(value ?? ALL_PROJECTS)}
+          allProjectsValue={ALL_PROJECTS}
+          variant="outline"
+          modal={false}
+          className="min-w-36 justify-between gap-2 px-3 font-normal"
+        />
+      </div>
+
+      {isInitialLoading ? (
+        <div
+          role="status"
+          aria-label="Loading archived threads"
+          className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card"
+        >
+          {[0, 1, 2].map((index) => (
+            <div key={index} className="space-y-2 px-4 py-3.5">
+              <Skeleton aria-hidden className="h-3.5 w-1/2" />
+              <Skeleton aria-hidden className="h-3 w-24" />
+            </div>
+          ))}
+        </div>
+      ) : archivedThreads.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border">
+          {search.trim().length > 0 ? (
+            <EmptyStateBlock
+              icon="Search"
+              title="No archived threads match your search"
+              description="Try fewer words, or clear the search to see everything you’ve archived."
+              actions={
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setSearch("")}
+                >
+                  Clear search
+                </Button>
+              }
+            />
+          ) : filtersActive ? (
+            <EmptyStateBlock
+              icon="SlidersHorizontal"
+              title="No archived threads match these filters"
+              description="Nothing archived fits this project and thread type."
+              actions={
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setKind("all");
+                    setProjectId(ALL_PROJECTS);
+                  }}
+                >
+                  Show all archived threads
+                </Button>
+              }
+            />
+          ) : (
+            <EmptyStateBlock
+              icon="Archive"
+              title="Nothing archived yet"
+              description="Threads you archive land here. Restore one to put it back in the sidebar."
+            />
+          )}
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {groupedThreads.map(([groupProjectId, threads]) => (
+            <section key={groupProjectId} className="space-y-2">
+              <div className="flex items-center gap-2 px-0.5 text-xs font-medium text-muted-foreground">
+                <Icon name="Folder" className="size-3.5" />
+                <h3 className="min-w-0 flex-1 truncate">
+                  {projectNames.get(groupProjectId) ?? "Unknown project"}
+                </h3>
+                <span className="inline-flex h-5 items-center rounded-full bg-state-hover px-2 tabular-nums">
+                  {threads.length} {threads.length === 1 ? "thread" : "threads"}
+                </span>
+              </div>
+              <div className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
+                {threads.map((thread) => (
+                  <div
+                    key={thread.id}
+                    className="flex min-h-14 items-center gap-3 px-4 py-2.5"
+                  >
+                    <RouteAnchor
+                      className="min-w-0 flex-1"
+                      href={getThreadRoutePath({
+                        projectId: thread.projectId,
+                        threadId: thread.id,
+                      })}
+                    >
+                      <span className="flex min-w-0 items-center gap-2 text-sm">
+                        <ThreadTitle title={getThreadDisplayTitle(thread)} />
+                        {thread.parentThreadId !== null ? (
+                          <Pill variant="outline" className="shrink-0">
+                            <span className="inline-flex items-center gap-1 align-middle">
+                              <Icon
+                                name="ChildThread"
+                                className="size-3"
+                                aria-hidden
+                              />
+                              {CHILD_THREAD_NOUN}
+                            </span>
+                          </Pill>
+                        ) : null}
+                      </span>
+                      {thread.archivedAt !== null ? (
+                        <span className="mt-0.5 block text-xs text-subtle-foreground">
+                          Archived{" "}
+                          {formatRelativeTime({
+                            timestamp: thread.archivedAt,
+                            now: Date.now(),
+                          })}
+                        </span>
+                      ) : null}
+                    </RouteAnchor>
+                    <ThreadUnarchiveButton
+                      variant="secondary"
+                      isPending={
+                        unarchiveThread.isPending &&
+                        unarchiveThread.variables?.id === thread.id
+                      }
+                      onUnarchive={() =>
+                        unarchiveThread.mutate({ id: thread.id })
+                      }
+                    />
+                  </div>
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+      )}
+
+      {!searchIsActive && archivedThreadsQuery.hasNextPage ? (
+        <Button
+          type="button"
+          variant="ghost"
+          className="h-9 w-full text-sm font-normal text-muted-foreground"
+          disabled={archivedThreadsQuery.isFetchingNextPage}
+          onClick={() => archivedThreadsQuery.fetchNextPage()}
+        >
+          {archivedThreadsQuery.isFetchingNextPage ? "Loading…" : "Load more"}
+        </Button>
+      ) : null}
+    </section>
+  );
+}

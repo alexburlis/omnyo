@@ -1,0 +1,475 @@
+import {
+  isServerMoveFrozen,
+  serverMovingError,
+} from "../server-move/freeze-state.js";
+import { assertDirectAccessAdmission } from "../machines/direct-access-state.js";
+import { hostCommandMayWake } from "./wake-policy.js";
+import { isHostCleanupAllowed } from "./cleanup-context.js";
+import { assertMachineLifecycleAdmission } from "../machines/lifecycle.js";
+import {
+  getHost,
+  getLatestSessionForHost,
+  getThread,
+  getSessionById,
+} from "@omnyo/db";
+import { randomUUID } from "node:crypto";
+import {
+  type HostDaemonOnlineRpcResponseMessage,
+  type HostDaemonOnlineRpcResultForCommand,
+  type HostDaemonRetryableOnlineRpcCommand,
+  parseHostDaemonRpcResultForCommand,
+  type HostDaemonRpcCommand,
+  type HostDaemonRpcResultForCommand,
+} from "@omnyo/host-daemon-contract";
+import { ApiError } from "../../errors.js";
+import type { WorkSessionDeps } from "../../types.js";
+import {
+  HostOnlineRpcTimeoutError,
+  HostOnlineRpcUnavailableError,
+} from "../../ws/hub.js";
+import { ensureHostSessionReadyForWork } from "./host-lifecycle.js";
+import { inactiveHostUnavailableDetails } from "../lib/lifecycle-api-errors.js";
+import { isHostDisconnectHidden } from "./host-disconnect-display.js";
+import { LEASE_TIMEOUT_MS } from "../../constants.js";
+import { traceTurnRpc } from "../system/turn-trace.js";
+
+const HOST_DAEMON_REGISTRATION_WAIT_MS = 1_000;
+
+const HOST_DAEMON_RECONNECT_WAIT_MS = 5_000;
+
+const HOST_RPC_COMMANDS_ALLOWED_WHILE_SERVER_MOVE_FROZEN: ReadonlySet<string> =
+  new Set([
+    "plugin.host.dispose",
+    "plugin.host.cancel",
+    "thread.stop",
+    "environment.hook.cancel",
+  ]);
+
+function assertHostRpcAllowedWhileServerMoveFrozen(
+  deps: Pick<WorkSessionDeps, "db">,
+  commandType: string,
+): void {
+  if (
+    isServerMoveFrozen(deps.db) &&
+    !commandType.startsWith("server_move.") &&
+    !commandType.startsWith("server_access.") &&
+    !HOST_RPC_COMMANDS_ALLOWED_WHILE_SERVER_MOVE_FROZEN.has(commandType)
+  )
+    throw serverMovingError();
+}
+
+interface CallHostOnlineRpcArgs<TCommand extends HostDaemonRpcCommand> {
+  command: TCommand;
+  hostId: string;
+  signal?: AbortSignal;
+  timeoutMs: number;
+}
+
+interface CallHostRetryableOnlineRpcArgs<
+  TCommand extends HostDaemonRetryableOnlineRpcCommand,
+> {
+  command: TCommand;
+  hostId: string;
+  signal?: AbortSignal;
+  timeoutMs: number;
+}
+
+export function callHostOnlineRpc<TCommand extends HostDaemonRpcCommand>(
+  deps: WorkSessionDeps,
+  args: CallHostOnlineRpcArgs<TCommand>,
+): Promise<HostDaemonRpcResultForCommand<TCommand>>;
+export async function callHostOnlineRpc(
+  deps: WorkSessionDeps,
+  args: CallHostOnlineRpcArgs<HostDaemonRpcCommand>,
+): Promise<HostDaemonRpcResultForCommand> {
+  if (!args.command.type.startsWith("server_access."))
+    assertDirectAccessAdmission(deps, args.hostId);
+
+  assertHostRpcAllowedWhileServerMoveFrozen(deps, args.command.type);
+  await waitForReconnectingDaemon(deps, args.hostId);
+  assertHostActiveForRead(deps, args);
+
+  return callHostOnlineRpcWithRetry(deps, args, {
+    retryOnTransportFailure: false,
+    waitForTransportFailure: false,
+  });
+}
+
+export function callHostOnlineRpcForWork<TCommand extends HostDaemonRpcCommand>(
+  deps: WorkSessionDeps,
+  args: CallHostOnlineRpcArgs<TCommand>,
+): Promise<HostDaemonRpcResultForCommand<TCommand>>;
+export async function callHostOnlineRpcForWork(
+  deps: WorkSessionDeps,
+  args: CallHostOnlineRpcArgs<HostDaemonRpcCommand>,
+): Promise<HostDaemonRpcResultForCommand> {
+  if (!args.command.type.startsWith("server_access."))
+    assertDirectAccessAdmission(deps, args.hostId);
+
+  assertHostRpcAllowedWhileServerMoveFrozen(deps, args.command.type);
+  await waitForReconnectingDaemon(deps, args.hostId);
+  await prepareHostForWork(deps, args, false);
+
+  return callHostOnlineRpcWithRetry(deps, args, {
+    retryOnTransportFailure: false,
+    waitForTransportFailure: false,
+  });
+}
+
+export function callHostRetryableOnlineRpc<
+  TCommand extends HostDaemonRetryableOnlineRpcCommand,
+>(
+  deps: WorkSessionDeps,
+  args: CallHostRetryableOnlineRpcArgs<TCommand>,
+): Promise<HostDaemonOnlineRpcResultForCommand<TCommand>>;
+export async function callHostRetryableOnlineRpc(
+  deps: WorkSessionDeps,
+  args: CallHostRetryableOnlineRpcArgs<HostDaemonRetryableOnlineRpcCommand>,
+): Promise<HostDaemonOnlineRpcResultForCommand> {
+  args.signal?.throwIfAborted();
+
+  if (!args.command.type.startsWith("server_access."))
+    assertDirectAccessAdmission(deps, args.hostId);
+
+  assertHostRpcAllowedWhileServerMoveFrozen(deps, args.command.type);
+  await waitForReconnectingDaemon(deps, args.hostId);
+  assertHostActiveForRead(deps, args);
+
+  return callHostOnlineRpcWithRetry(deps, args, {
+    retryOnTransportFailure: true,
+    waitForTransportFailure: false,
+  });
+}
+
+export function callHostRetryableOnlineRpcForWork<
+  TCommand extends HostDaemonRetryableOnlineRpcCommand,
+>(
+  deps: WorkSessionDeps,
+  args: CallHostRetryableOnlineRpcArgs<TCommand>,
+): Promise<HostDaemonOnlineRpcResultForCommand<TCommand>>;
+export async function callHostRetryableOnlineRpcForWork(
+  deps: WorkSessionDeps,
+  args: CallHostRetryableOnlineRpcArgs<HostDaemonRetryableOnlineRpcCommand>,
+): Promise<HostDaemonOnlineRpcResultForCommand> {
+  if (!args.command.type.startsWith("server_access."))
+    assertDirectAccessAdmission(deps, args.hostId);
+
+  assertHostRpcAllowedWhileServerMoveFrozen(deps, args.command.type);
+  await waitForReconnectingDaemon(deps, args.hostId);
+  await prepareHostForWork(deps, args, true);
+
+  return callHostOnlineRpcWithRetry(deps, args, {
+    retryOnTransportFailure: true,
+    waitForTransportFailure: true,
+  });
+}
+
+function isCleanupRpc(
+  deps: WorkSessionDeps,
+  args: CallHostOnlineRpcArgs<HostDaemonRpcCommand>,
+): boolean {
+  return (
+    isHostCleanupAllowed(deps, args.hostId) &&
+    (args.command.type === "plugin.host.call" ||
+      (args.command.type === "environment.hook.run" &&
+        args.command.kind === "teardown")) &&
+    getHost(deps.db, args.hostId)?.phase === "removing"
+  );
+}
+
+function assertHostActiveForRead(
+  deps: WorkSessionDeps,
+  args: CallHostOnlineRpcArgs<HostDaemonRpcCommand>,
+): void {
+  if (
+    isCleanupRpc(deps, args) ||
+    args.command.type === "thread.stop" ||
+    args.command.type === "thread.storage.delete" ||
+    args.command.type === "environment.hook.cancel" ||
+    args.command.type === "plugin.host.cancel" ||
+    args.command.type === "plugin.host.dispose"
+  ) {
+    return;
+  }
+
+  const host = getHost(deps.db, args.hostId);
+
+  if (host !== null && host.phase !== "active") {
+    const details = inactiveHostUnavailableDetails("disconnected", host);
+    throw new ApiError(
+      502,
+      "host_unavailable",
+      details.reason === "suspended"
+        ? "Host is suspended"
+        : "Host is not connected",
+      { details, retryable: false },
+    );
+  }
+}
+
+async function prepareHostForWork(
+  deps: WorkSessionDeps,
+  args: CallHostOnlineRpcArgs<HostDaemonRpcCommand>,
+  retryOnTransportFailure: boolean,
+): Promise<void> {
+  if (isCleanupRpc(deps, args)) return;
+
+  if (!hostCommandMayWake(args.command)) {
+    assertHostActiveForRead(deps, args);
+
+    return;
+  }
+
+  const host = getHost(deps.db, args.hostId);
+
+  if (host?.phase === "suspended" || host?.phase === "resuming") {
+    deps.logger.info(
+      {
+        hostId: args.hostId,
+        commandType: args.command.type,
+        ...("threadId" in args.command
+          ? { threadId: args.command.threadId }
+          : {}),
+      },
+      "Host command requested machine wake",
+    );
+  }
+
+  await ensureHostSessionReadyForWork(deps, { hostId: args.hostId }).catch(
+    async (error) => {
+      if (!retryOnTransportFailure || !isHostUnavailableApiError(error)) {
+        throw error;
+      }
+
+      await waitForRetryableHostRpcTransport(deps, args);
+    },
+  );
+  assertMachineLifecycleAdmission(deps, args.hostId);
+
+  if (
+    (args.command.type === "thread.start" ||
+      args.command.type === "turn.submit") &&
+    getHost(deps.db, args.hostId)?.machineOperationId !== null &&
+    !["active", "starting"].includes(
+      getThread(deps.db, args.command.threadId)?.status ?? "",
+    )
+  ) {
+    throw new ApiError(
+      409,
+      "machine_dispatch_interrupted",
+      "This turn was interrupted while waiting for machine preservation; submit a new continuation turn",
+    );
+  }
+}
+
+async function callHostOnlineRpcWithRetry(
+  deps: WorkSessionDeps,
+  args: CallHostOnlineRpcArgs<HostDaemonRpcCommand>,
+  options: {
+    retryOnTransportFailure: false;
+    waitForTransportFailure: false;
+  },
+): Promise<HostDaemonRpcResultForCommand>;
+async function callHostOnlineRpcWithRetry(
+  deps: WorkSessionDeps,
+  args: CallHostRetryableOnlineRpcArgs<HostDaemonRetryableOnlineRpcCommand>,
+  options: {
+    retryOnTransportFailure: true;
+    waitForTransportFailure: boolean;
+  },
+): Promise<HostDaemonOnlineRpcResultForCommand>;
+async function callHostOnlineRpcWithRetry(
+  deps: WorkSessionDeps,
+  args: CallHostOnlineRpcArgs<HostDaemonRpcCommand>,
+  options: {
+    retryOnTransportFailure: boolean;
+    waitForTransportFailure: boolean;
+  },
+): Promise<HostDaemonRpcResultForCommand> {
+  const timeoutRetryDeadline =
+    options.retryOnTransportFailure && args.timeoutMs > 1
+      ? Date.now() + args.timeoutMs
+      : null;
+
+  const firstAttemptArgs =
+    timeoutRetryDeadline === null
+      ? args
+      : {
+          ...args,
+          timeoutMs: Math.max(1, Math.floor(args.timeoutMs / 2)),
+        };
+
+  const response = await requestHostOnlineRpcResponse(
+    deps,
+    firstAttemptArgs,
+  ).catch(async (error) => {
+    if (!options.retryOnTransportFailure) {
+      throwOnlineRpcError(error);
+    }
+
+    if (error instanceof HostOnlineRpcUnavailableError) {
+      if (!options.waitForTransportFailure) throwOnlineRpcError(error);
+      await waitForRetryableHostRpcTransport(deps, args);
+
+      return requestHostOnlineRpcResponse(deps, args).catch((retryError) => {
+        throwOnlineRpcError(retryError);
+      });
+    }
+
+    if (!(error instanceof HostOnlineRpcTimeoutError)) {
+      throwOnlineRpcError(error);
+    }
+
+    const retryTimeoutMs =
+      timeoutRetryDeadline === null ? 0 : timeoutRetryDeadline - Date.now();
+
+    if (retryTimeoutMs <= 0) {
+      throwOnlineRpcError(error);
+    }
+
+    return requestHostOnlineRpcResponse(deps, {
+      ...args,
+      timeoutMs: retryTimeoutMs,
+    }).catch((retryError) => {
+      throwOnlineRpcError(retryError);
+    });
+  });
+
+  if (!response.ok) {
+    throw new ApiError(502, response.errorCode, response.errorMessage, {
+      retryable: false,
+      details: {
+        expectedFailure: response.expectedFailure,
+        errorInfo: response.errorInfo,
+        rateLimits: response.rateLimits,
+      },
+    });
+  }
+
+  if (response.commandType !== args.command.type) {
+    throw new ApiError(
+      500,
+      "command_result_type_mismatch",
+      `Host RPC ${response.requestId} completed with unexpected type ${response.commandType}`,
+    );
+  }
+
+  return parseHostDaemonRpcResultForCommand(args.command, response.result);
+}
+
+async function waitForReconnectingDaemon(
+  deps: WorkSessionDeps,
+  hostId: string,
+): Promise<void> {
+  if (
+    deps.hub.hasDaemonForHost(hostId) ||
+    getHost(deps.db, hostId)?.phase !== "active"
+  ) {
+    return;
+  }
+
+  const now = Date.now();
+  const latestSession = getLatestSessionForHost(deps.db, { hostId });
+
+  const reconnecting =
+    latestSession !== null &&
+    ((latestSession.status === "active" &&
+      latestSession.updatedAt + LEASE_TIMEOUT_MS > now) ||
+      isHostDisconnectHidden(latestSession, now));
+
+  if (reconnecting) {
+    await deps.hub.waitForDaemonForHost(hostId, HOST_DAEMON_RECONNECT_WAIT_MS);
+  }
+}
+
+async function waitForRetryableHostRpcTransport(
+  deps: WorkSessionDeps,
+  args: CallHostOnlineRpcArgs<HostDaemonRpcCommand>,
+): Promise<void> {
+  if (!deps.hub.hasDaemonForHost(args.hostId)) {
+    await deps.hub.waitForDaemonForHost(
+      args.hostId,
+      HOST_DAEMON_REGISTRATION_WAIT_MS,
+    );
+  }
+
+  await prepareHostForWork(deps, args, false);
+}
+
+export function isHostUnavailableApiError(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    error.status === 502 &&
+    error.body.code === "host_unavailable"
+  );
+}
+
+function requestHostOnlineRpcResponse(
+  deps: Pick<WorkSessionDeps, "hub" | "db">,
+  args: CallHostOnlineRpcArgs<HostDaemonRpcCommand>,
+): Promise<HostDaemonOnlineRpcResponseMessage> {
+  args.signal?.throwIfAborted();
+
+  if (
+    args.command.type === "provider.installation.run" ||
+    args.command.type === "provider.installation.start" ||
+    args.command.type === "provider.installation.get" ||
+    args.command.type.startsWith("runtime_update.")
+  ) {
+    const sessionId = deps.hub.getDaemonSessionIdForHost(args.hostId);
+
+    const session =
+      sessionId === null ? null : getSessionById(deps.db, { sessionId });
+
+    const requiredProtocol =
+      args.command.type === "provider.installation.start" ||
+      args.command.type === "provider.installation.get"
+        ? 250
+        : 239;
+
+    if (session === null || session.protocolVersion < requiredProtocol)
+      throw new ApiError(
+        409,
+        "runtime_update_busy",
+        "The worker must update before guarded installation is available.",
+      );
+  }
+
+  if (!args.command.type.startsWith("server_access."))
+    assertDirectAccessAdmission(deps, args.hostId);
+
+  assertHostRpcAllowedWhileServerMoveFrozen(deps, args.command.type);
+
+  return traceTurnRpc(args.command.type, () =>
+    deps.hub.requestHostOnlineRpc({
+      hostId: args.hostId,
+      message: {
+        type: "host-rpc.request",
+        requestId: randomUUID(),
+        command: args.command,
+      },
+      ...(args.signal === undefined ? {} : { signal: args.signal }),
+      timeoutMs: args.timeoutMs,
+    }),
+  );
+}
+
+export function hostCommandTimeoutError(): ApiError {
+  return new ApiError(
+    504,
+    "command_timeout",
+    "Timed out waiting for command result",
+  );
+}
+
+function throwOnlineRpcError(error: unknown): never {
+  if (error instanceof HostOnlineRpcTimeoutError) {
+    throw hostCommandTimeoutError();
+  }
+
+  if (error instanceof HostOnlineRpcUnavailableError) {
+    throw new ApiError(502, "host_unavailable", "Host is not connected", false);
+  }
+
+  throw error;
+}

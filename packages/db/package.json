@@ -1,0 +1,46 @@
+{
+  "name": "@omnyo/db",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./internal-environment-lifecycle": {
+      "source": "./src/internal-environment-lifecycle.ts",
+      "types": "./src/internal-environment-lifecycle.ts",
+      "default": "./src/internal-environment-lifecycle.ts"
+    }
+  },
+  "types": "./src/index.ts",
+  "files": [
+    "drizzle"
+  ],
+  "scripts": {
+    "clean": "rimraf dist tsconfig.tsbuildinfo",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --config vitest.config.ts",
+    "db:generate": "node --import tsx ./node_modules/drizzle-kit/bin.cjs generate",
+    "db:studio": "node --import tsx ./node_modules/drizzle-kit/bin.cjs studio"
+  },
+  "dependencies": {
+    "@omnyo/config": "workspace:*",
+    "@omnyo/domain": "workspace:*",
+    "@omnyo/text-utils": "workspace:*",
+    "better-sqlite3": "12.10.0",
+    "drizzle-orm": "0.45.2",
+    "nanoid": "^5.1.11"
+  },
+  "devDependencies": {
+    "@omnyo/tsconfig": "workspace:*",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.0.0",
+    "drizzle-kit": "^0.30.0",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "typescript-7": "npm:typescript@^7.0.2",
+    "vitest": "4.1.11"
+  }
+}

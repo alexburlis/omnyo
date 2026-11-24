@@ -1,0 +1,1331 @@
+import { createHash } from "node:crypto";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { gzipSync } from "node:zlib";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+import {
+  readServerConnectHoldFile,
+  readServerImportFile,
+  readServerMovedFile,
+  SERVER_IMPORT_FILE_NAME,
+  SERVER_MOVED_FILE_NAME,
+  type ServerMovedFile,
+  type ServerImportFile,
+  writeServerArchive,
+  writeServerConnectHoldFile,
+} from "@omnyo/server-archive";
+import {
+  collectLogPayloads,
+  readlineMocks,
+  runCommand,
+  setupCommandOutputTestEnvironment,
+} from "../helpers/command-output-harness.js";
+import type { CommandRegistrar } from "../helpers/command-output-harness.js";
+import { registerServerCommands } from "../../commands/server.js";
+import { isNewerAppVersion } from "../../commands/server-local.js";
+
+const tempDirs: string[] = [];
+
+async function makeTempDir(prefix: string): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), prefix));
+  tempDirs.push(dir);
+
+  return dir;
+}
+
+async function writeDataFile(
+  root: string,
+  relativePath: string,
+  body: string,
+): Promise<string> {
+  const path = join(root, ...relativePath.split("/"));
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, body);
+
+  return path;
+}
+
+async function buildArchive(
+  appVersion = "0.50.0",
+  serverMoveExperiment = true,
+): Promise<string> {
+  const sourceDataDir = await makeTempDir("omnyo-cli-server-source-");
+
+  const files = [
+    { archivePath: "app.db", body: "sqlite database" },
+    {
+      archivePath: "config.json",
+      body: JSON.stringify({ config: { OMNYO_LOG_LEVEL: "debug" } }),
+    },
+    { archivePath: "auth-secret", body: "secret" },
+    { archivePath: "attachments/thr_1/image.png", body: "png" },
+    { archivePath: "plugins/tasks/data.db", body: "plugin database" },
+  ];
+
+  const sourceFiles = await Promise.all(
+    files.map(async (file) => ({
+      archivePath: file.archivePath,
+      sourcePath: await writeDataFile(
+        sourceDataDir,
+        file.archivePath,
+        file.body,
+      ),
+    })),
+  );
+
+  const outPath = join(
+    await makeTempDir("omnyo-cli-server-archive-"),
+    "export.tar.gz",
+  );
+
+  await writeServerArchive({
+    outPath,
+    files: sourceFiles,
+    manifest: {
+      createdAt: 1_700_000_000_000,
+      appVersion,
+      protocolVersion: 209,
+      migrationCount: 150,
+      sourceDataDir: "/home/old/.omnyo",
+      sourceServerHostId: "host-old-server",
+      serverMoveExperiment,
+    },
+  });
+
+  return outPath;
+}
+
+function tarHeader(path: string, size: number): Buffer {
+  const header = Buffer.alloc(512);
+
+  const field = (offset: number, length: number, value: string): void => {
+    header.write(value, offset, length, "utf8");
+  };
+
+  const octal = (value: number, length: number): string =>
+    `${value.toString(8).padStart(length - 1, "0")}\0`;
+
+  field(0, 100, path);
+  field(100, 8, octal(0o600, 8));
+  field(108, 8, octal(0, 8));
+  field(116, 8, octal(0, 8));
+  field(124, 12, octal(size, 12));
+  field(136, 12, octal(0, 12));
+  field(148, 8, "        ");
+  field(156, 1, "0");
+  field(257, 6, "ustar\0");
+  field(263, 2, "00");
+  const checksum = header.reduce((sum, byte) => sum + byte, 0);
+  field(148, 8, `${checksum.toString(8).padStart(6, "0")}\0 `);
+
+  return header;
+}
+
+function tarEntry(path: string, body: Buffer): Buffer {
+  return Buffer.concat([
+    tarHeader(path, body.length),
+    body,
+    Buffer.alloc((512 - (body.length % 512)) % 512),
+  ]);
+}
+
+async function writeLegacyCraftedArchiveV2(
+  files: ReadonlyArray<{ path: string; body: string }>,
+): Promise<string> {
+  const manifest = Buffer.from(
+    JSON.stringify({
+      format: "bb-server-archive",
+      version: 2,
+      createdAt: 1_700_000_000_000,
+      bbVersion: "0.50.0",
+      protocolVersion: 209,
+      migrationCount: 150,
+      sourceDataDir: "/home/old/.omnyo",
+      sourceServerHostId: "host-old-server",
+      serverMoveExperiment: true,
+      entries: files.map((file) => ({
+        path: file.path,
+        size: Buffer.byteLength(file.body),
+        sha256: createHash("sha256").update(file.body).digest("hex"),
+      })),
+    }),
+  );
+
+  const archive = gzipSync(
+    Buffer.concat([
+      tarEntry("manifest.json", manifest),
+      ...files.map((file) =>
+        tarEntry(`files/${file.path}`, Buffer.from(file.body)),
+      ),
+      Buffer.alloc(1024),
+    ]),
+  );
+
+  const outPath = join(
+    await makeTempDir("omnyo-cli-server-archive-"),
+    "crafted.tar.gz",
+  );
+
+  await writeFile(outPath, archive);
+
+  return outPath;
+}
+
+function movedLock(overrides: Partial<ServerMovedFile> = {}): ServerMovedFile {
+  return {
+    version: 1,
+    moveId: "move-1",
+    movedAt: 1_700_000_000_000,
+    fromHostId: "host-laptop",
+    toHostId: "host-desktop",
+    toHostName: "desktop",
+    serverUrl: "https://me.example.test",
+    mode: "connect",
+    connectHandle: "me",
+    oldCopyEntries: ["app.db", "attachments", "plugins/tasks/data.db"],
+    ...overrides,
+  };
+}
+
+async function writeLegacyMovedMarkerV1(
+  dataDir: string,
+  value: ServerMovedFile,
+): Promise<void> {
+  await writeDataFile(dataDir, SERVER_MOVED_FILE_NAME, JSON.stringify(value));
+}
+
+async function writeLegacyImportedMarkerV1(
+  dataDir: string,
+  value: ServerImportFile,
+): Promise<void> {
+  await writeDataFile(dataDir, SERVER_IMPORT_FILE_NAME, JSON.stringify(value));
+}
+
+const register: CommandRegistrar = (program) =>
+  registerServerCommands(
+    program.enablePositionalOptions(),
+    () => "http://server",
+  );
+
+let plainArchive: string;
+
+beforeAll(async () => {
+  plainArchive = await buildArchive();
+}, 60_000);
+
+afterAll(async () => {
+  await Promise.all(
+    tempDirs.splice(0).map((dir) => rm(dir, { force: true, recursive: true })),
+  );
+});
+
+describe("Omnyo server import", () => {
+  setupCommandOutputTestEnvironment();
+
+  const createdDirs: string[] = [];
+
+  afterEach(async () => {
+    await Promise.all(
+      createdDirs
+        .splice(0)
+        .map((dir) => rm(dir, { force: true, recursive: true })),
+    );
+  });
+
+  async function makeDataDirParent(): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), "omnyo-cli-server-import-"));
+    createdDirs.push(dir);
+
+    return dir;
+  }
+
+  beforeEach(() => {
+    vi.stubEnv("OMNYO_APP_VERSION", "0.50.0");
+  });
+
+  it("installs a plain export and marks it for a manual import boot", async () => {
+    const parent = await makeDataDirParent();
+    const dataDir = join(parent, "omnyo-data");
+    vi.spyOn(Date, "now").mockReturnValue(1_700_000_500_000);
+
+    await runCommand(
+      ["server", "import", plainArchive, "--data-dir", dataDir, "--yes"],
+      register,
+    );
+
+    expect(await readFile(join(dataDir, "app.db"), "utf8")).toBe(
+      "sqlite database",
+    );
+    expect(
+      await readFile(
+        join(dataDir, "attachments", "thr_1", "image.png"),
+        "utf8",
+      ),
+    ).toBe("png");
+    expect(
+      await readFile(join(dataDir, "plugins", "tasks", "data.db"), "utf8"),
+    ).toBe("plugin database");
+    const marker = await readServerImportFile(dataDir);
+    expect(marker).toEqual({
+      version: 1,
+      kind: "manual",
+      moveId: null,
+      activationToken: null,
+      sourceDataDir: "/home/old/.omnyo",
+      sourceServerHostId: "host-old-server",
+      targetHostId: null,
+      serverUrl: null,
+      importedEntries: expect.arrayContaining([
+        "app.db",
+        "config.json",
+        "auth-secret",
+        "attachments/thr_1/image.png",
+        "plugins/tasks/data.db",
+      ]),
+      createdAt: 1_700_000_500_000,
+      fixupsAppliedAt: null,
+    });
+    expect(await readServerConnectHoldFile(dataDir)).toEqual({
+      version: 1,
+      reason: "manual-import",
+      createdAt: 1_700_000_500_000,
+    });
+    expect(await readdir(parent)).toEqual(["omnyo-data"]);
+    const output = collectLogPayloads(vi.mocked(console.log));
+    expect(output[0]).toBe(
+      `Imported the Omnyo server into ${dataDir} (5 files from /home/old/.omnyo, exported by Omnyo 0.50.0).`,
+    );
+    expect(output.slice(2)).toEqual([
+      "Stop the original Omnyo server before you start this one. Two servers holding the same Omnyo connect credential take each other's tunnel.",
+      `Omnyo connect stays off in this copy until you run omnyo server allow-connect --data-dir ${dataDir}.`,
+      `Then start it with omnyo-app --data-dir ${dataDir}.`,
+    ]);
+  });
+
+  it("prints the import result as JSON", async () => {
+    const dataDir = join(await makeDataDirParent(), "omnyo-data");
+
+    await runCommand(
+      [
+        "server",
+        "import",
+        plainArchive,
+        "--data-dir",
+        dataDir,
+        "--yes",
+        "--json",
+      ],
+      register,
+    );
+
+    expect(await readFile(join(dataDir, "auth-secret"), "utf8")).toBe("secret");
+    expect(
+      JSON.parse(collectLogPayloads(vi.mocked(console.log))[0]!),
+    ).toMatchObject({
+      dataDir,
+      appVersion: "0.50.0",
+      sourceServerHostId: "host-old-server",
+    });
+  });
+
+  it("refuses a finite V1 database without creating a replacement", async () => {
+    const dataDir = join(await makeDataDirParent(), "omnyo-data");
+    await writeDataFile(dataDir, "bb.db", "existing server");
+
+    await expect(
+      runCommand(
+        ["server", "import", plainArchive, "--data-dir", dataDir, "--yes"],
+        register,
+      ),
+    ).rejects.toThrow("process.exit:1");
+
+    expect(collectLogPayloads(vi.mocked(console.error))[0]).toBe(
+      "Error: Existing database requires the stopped-owner Omnyo migration before startup",
+    );
+    expect(await readFile(join(dataDir, "bb.db"), "utf8")).toBe(
+      "existing server",
+    );
+    expect(await readServerImportFile(dataDir)).toBeNull();
+  });
+
+  it("refuses a finite V1 runtime record whose existing process is alive", async () => {
+    const dataDir = join(await makeDataDirParent(), "omnyo-data");
+    await writeDataFile(
+      dataDir,
+      "bb-app-runtime.json",
+      JSON.stringify({
+        entryPath: "/usr/lib/bb-app/dist/launcher.js",
+        pid: process.pid,
+        surface: "cli",
+        serverUrl: "http://127.0.0.1:38886",
+        startedAt: new Date().toISOString(),
+        version: "0.50.0",
+      }),
+    );
+
+    await expect(
+      runCommand(
+        ["server", "import", plainArchive, "--data-dir", dataDir, "--yes"],
+        register,
+      ),
+    ).rejects.toThrow("process.exit:1");
+
+    expect(collectLogPayloads(vi.mocked(console.error))[0]).toBe(
+      "Error: Stop the existing runtime owner before identity adoption",
+    );
+    await expect(stat(join(dataDir, "app.db"))).rejects.toThrow();
+  });
+
+  it("imports past a finite V1 runtime record whose process has exited", async () => {
+    const dataDir = join(await makeDataDirParent(), "omnyo-data");
+    await writeDataFile(
+      dataDir,
+      "bb-app-runtime.json",
+      JSON.stringify({
+        entryPath: "/usr/lib/bb-app/dist/launcher.js",
+        pid: 2_147_483_646,
+        surface: "cli",
+        serverUrl: "http://127.0.0.1:38886",
+        startedAt: new Date().toISOString(),
+        version: "0.50.0",
+      }),
+    );
+
+    await runCommand(
+      ["server", "import", plainArchive, "--data-dir", dataDir, "--yes"],
+      register,
+    );
+
+    expect(await readServerImportFile(dataDir)).not.toBeNull();
+  });
+
+  it("changes nothing when the confirmation is declined", async () => {
+    const parent = await makeDataDirParent();
+    const dataDir = join(parent, "omnyo-data");
+    readlineMocks.question.mockResolvedValue("n");
+
+    await runCommand(
+      ["server", "import", plainArchive, "--data-dir", dataDir],
+      register,
+    );
+
+    expect(readlineMocks.question).toHaveBeenCalledWith(
+      `Import the Omnyo server from ${plainArchive} into ${dataDir}? [y/N] `,
+    );
+    expect(await readdir(parent)).toEqual([]);
+  });
+
+  it("refuses an export made by a newer Omnyo and leaves nothing behind", async () => {
+    const newerArchive = await buildArchive("0.51.0");
+    const parent = await makeDataDirParent();
+    const dataDir = join(parent, "omnyo-data");
+
+    await expect(
+      runCommand(
+        ["server", "import", newerArchive, "--data-dir", dataDir, "--yes"],
+        register,
+      ),
+    ).rejects.toThrow("process.exit:1");
+
+    expect(collectLogPayloads(vi.mocked(console.error))).toEqual([
+      "Error: This export came from Omnyo 0.51.0; install that version or newer before importing.",
+    ]);
+    expect(await readdir(parent)).toEqual([]);
+  });
+
+  it("refuses an export from a server with the serverMove experiment off before installing anything", async () => {
+    const offArchive = await buildArchive("0.50.0", false);
+    const parent = await makeDataDirParent();
+    const dataDir = join(parent, "omnyo-data");
+
+    await expect(
+      runCommand(
+        ["server", "import", offArchive, "--data-dir", dataDir, "--yes"],
+        register,
+      ),
+    ).rejects.toThrow("process.exit:1");
+
+    expect(collectLogPayloads(vi.mocked(console.error))).toEqual([
+      'Error: This export came from a server with the "Server move" experiment off. Run omnyo settings experiment serverMove true on that server, then export again.',
+    ]);
+    expect(await readdir(parent)).toEqual([]);
+  });
+
+  it("rolls back an interrupted import before importing again", async () => {
+    const dataDir = join(await makeDataDirParent(), "omnyo-data");
+    await writeDataFile(dataDir, "host-id", "host-desktop");
+    await writeDataFile(
+      dataDir,
+      "config.json",
+      JSON.stringify({
+        config: {
+          OMNYO_APP_URL: "https://desktop.ts.net",
+          OMNYO_LOG_LEVEL: "trace",
+        },
+      }),
+    );
+    await writeDataFile(
+      dataDir,
+      "server-import-backup/config.json",
+      JSON.stringify({ config: { OMNYO_APP_URL: "https://desktop.ts.net" } }),
+    );
+    await writeDataFile(dataDir, "app.db", "interrupted import database");
+    await writeDataFile(
+      dataDir,
+      "skills/interrupted/SKILL.md",
+      "interrupted skill",
+    );
+    await writeDataFile(
+      dataDir,
+      "server-import-journal.json",
+      JSON.stringify({
+        version: 1,
+        entries: ["skills/interrupted/SKILL.md", "config.json", "app.db"],
+        preexistingEntries: ["config.json"],
+      }),
+    );
+
+    await runCommand(
+      ["server", "import", plainArchive, "--data-dir", dataDir, "--yes"],
+      register,
+    );
+
+    expect(await readFile(join(dataDir, "app.db"), "utf8")).toBe(
+      "sqlite database",
+    );
+    expect((await readdir(dataDir)).sort()).toEqual([
+      ".config.json.lock",
+      "app.db",
+      "attachments",
+      "auth-secret",
+      "config.json",
+      "host-id",
+      "plugins",
+      "server-connect-hold.json",
+      "server-import.json",
+    ]);
+    expect(
+      JSON.parse(await readFile(join(dataDir, "config.json"), "utf8")),
+    ).toEqual({
+      config: {
+        OMNYO_APP_URL: "https://desktop.ts.net",
+        OMNYO_LOG_LEVEL: "debug",
+      },
+    });
+    expect(await readServerImportFile(dataDir)).toMatchObject({
+      kind: "manual",
+      importedEntries: expect.arrayContaining(["app.db", "config.json"]),
+    });
+    expect(collectLogPayloads(vi.mocked(console.log))[0]).toBe(
+      `Rolled back an interrupted import in ${dataDir}.`,
+    );
+  });
+
+  it("refuses to import over a finished import whose journal was left behind", async () => {
+    const dataDir = join(await makeDataDirParent(), "omnyo-data");
+    const importedEntries = ["attachments/thr_1/image.png", "bb.db"];
+    await writeDataFile(dataDir, "bb.db", "imported database");
+    await writeDataFile(dataDir, "attachments/thr_1/image.png", "imported png");
+    await writeDataFile(
+      dataDir,
+      "server-import-journal.json",
+      JSON.stringify({
+        version: 1,
+        entries: importedEntries,
+        preexistingEntries: [],
+      }),
+    );
+    await writeLegacyImportedMarkerV1(dataDir, {
+      version: 1,
+      kind: "manual",
+      moveId: null,
+      activationToken: null,
+      sourceDataDir: "/home/old/.omnyo",
+      sourceServerHostId: "host-old-server",
+      targetHostId: null,
+      serverUrl: null,
+      importedEntries,
+      createdAt: 1_700_000_000_000,
+      fixupsAppliedAt: null,
+    });
+    await writeServerConnectHoldFile(dataDir, {
+      version: 1,
+      reason: "manual-import",
+      createdAt: 1_700_000_000_000,
+    });
+
+    await expect(
+      runCommand(
+        ["server", "import", plainArchive, "--data-dir", dataDir, "--yes"],
+        register,
+      ),
+    ).rejects.toThrow("process.exit:1");
+
+    expect(collectLogPayloads(vi.mocked(console.error))[0]).toBe(
+      "Error: Existing database requires the stopped-owner Omnyo migration before startup",
+    );
+    expect(await readFile(join(dataDir, "bb.db"), "utf8")).toBe(
+      "imported database",
+    );
+    expect(
+      await readFile(
+        join(dataDir, "attachments", "thr_1", "image.png"),
+        "utf8",
+      ),
+    ).toBe("imported png");
+    expect(await readServerImportFile(dataDir)).toMatchObject({
+      kind: "manual",
+      importedEntries,
+    });
+    expect(await readServerConnectHoldFile(dataDir)).not.toBeNull();
+  });
+
+  it("removes the pre-import config backups once the import is marked", async () => {
+    const dataDir = join(await makeDataDirParent(), "omnyo-data");
+    await writeDataFile(
+      dataDir,
+      "config.json",
+      JSON.stringify({ config: { OMNYO_APP_URL: "https://desktop.ts.net" } }),
+    );
+
+    await runCommand(
+      ["server", "import", plainArchive, "--data-dir", dataDir, "--yes"],
+      register,
+    );
+
+    expect(await readServerImportFile(dataDir)).not.toBeNull();
+    expect(await readdir(dataDir)).not.toContain("server-import-backup");
+    expect(
+      JSON.parse(await readFile(join(dataDir, "config.json"), "utf8")),
+    ).toEqual({
+      config: {
+        OMNYO_APP_URL: "https://desktop.ts.net",
+        OMNYO_LOG_LEVEL: "debug",
+      },
+    });
+  });
+
+  it("refuses an archive that carries host-owned files", async () => {
+    const hostileArchive = await writeLegacyCraftedArchiveV2([
+      { path: "app.db", body: "sqlite database" },
+      { path: "host-id", body: "host-attacker" },
+    ]);
+
+    const parent = await makeDataDirParent();
+    const dataDir = join(parent, "omnyo-data");
+
+    await expect(
+      runCommand(
+        ["server", "import", hostileArchive, "--data-dir", dataDir, "--yes"],
+        register,
+      ),
+    ).rejects.toThrow("process.exit:1");
+
+    expect(collectLogPayloads(vi.mocked(console.error))).toEqual([
+      `Error: Refusing to import ${hostileArchive}: Archive entry "host-id" is not a server-owned path. Nothing was imported.`,
+    ]);
+    expect(await readdir(parent)).toEqual([]);
+  });
+});
+
+describe("isNewerAppVersion", () => {
+  it.each([
+    ["0.51.0", "0.50.0", true],
+    ["0.50.0", "0.50.0", false],
+    ["0.49.9", "0.50.0", false],
+    ["1.0.0", "0.99.99", true],
+    ["0.50.0", "0.50.0-beta.2", true],
+    ["0.50.0-beta.2", "0.50.0", false],
+    ["0.50.0-beta.10", "0.50.0-beta.2", true],
+    ["0.50.0-rc.1", "0.50.0-beta.9", true],
+    ["0.50.0-beta", "0.50.0-beta.1", false],
+    ["not-a-version", "0.50.0", false],
+  ] as const)("%s newer than %s is %s", (candidate, current, expected) => {
+    expect(isNewerAppVersion(candidate, current)).toBe(expected);
+  });
+});
+
+describe("Omnyo server unlock", () => {
+  setupCommandOutputTestEnvironment();
+
+  beforeEach(() => {
+    vi.mocked(globalThis.fetch).mockRejectedValue(
+      new TypeError("fetch failed"),
+    );
+  });
+
+  function healthResponse(status: number, body: object): Response {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  it("refuses while the new server still answers its health check", async () => {
+    const dataDir = await makeTempDir("omnyo-cli-server-lock-");
+    await writeLegacyMovedMarkerV1(dataDir, movedLock());
+
+    const configPath = await writeDataFile(
+      dataDir,
+      "config.json",
+      JSON.stringify({ serverUrl: "https://me.example.test" }),
+    );
+
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      healthResponse(200, { ok: true, launchId: "launch-1" }),
+    );
+
+    await expect(
+      runCommand(
+        ["server", "unlock", "--data-dir", dataDir, "--yes"],
+        register,
+      ),
+    ).rejects.toThrow("process.exit:1");
+
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(
+      "https://me.example.test/health",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(collectLogPayloads(vi.mocked(console.error))).toEqual([
+      "Error: The server at https://me.example.test is running. Unlocking now would run two servers with the same data and Omnyo connect credential. Stop it first, or pass --force.",
+    ]);
+    expect(await readServerMovedFile(dataDir)).not.toBeNull();
+    expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual({
+      serverUrl: "https://me.example.test",
+    });
+  });
+
+  it("--force unlocks without probing the new server", async () => {
+    const dataDir = await makeTempDir("omnyo-cli-server-lock-");
+    await writeLegacyMovedMarkerV1(dataDir, movedLock());
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      healthResponse(200, { ok: true }),
+    );
+
+    await runCommand(
+      ["server", "unlock", "--data-dir", dataDir, "--yes", "--force"],
+      register,
+    );
+
+    expect(vi.mocked(globalThis.fetch)).not.toHaveBeenCalled();
+    expect(await readServerMovedFile(dataDir)).toBeNull();
+  });
+
+  it.each([
+    [
+      "the moved responder answers 410",
+      () =>
+        Promise.resolve(
+          healthResponse(410, {
+            code: "server_moved",
+            message: "This Omnyo server moved",
+            details: {
+              serverUrl: "https://me.example.test",
+              toHostName: "desktop",
+              movedAt: 1,
+            },
+          }),
+        ),
+    ],
+    [
+      "the new server is still pending",
+      () =>
+        Promise.resolve(
+          healthResponse(200, {
+            ok: true,
+            serverMove: { state: "pending", moveId: "move-1" },
+          }),
+        ),
+    ],
+    [
+      "the connection is refused",
+      () => Promise.reject(new TypeError("fetch failed")),
+    ],
+    [
+      "the health check times out",
+      () =>
+        Promise.reject(
+          new DOMException(
+            "The operation was aborted due to timeout",
+            "TimeoutError",
+          ),
+        ),
+    ],
+  ])("unlocks when %s", async (_label, respond) => {
+    const dataDir = await makeTempDir("omnyo-cli-server-lock-");
+    await writeLegacyMovedMarkerV1(dataDir, movedLock());
+    vi.mocked(globalThis.fetch).mockImplementation(respond);
+
+    await runCommand(
+      ["server", "unlock", "--data-dir", dataDir, "--yes"],
+      register,
+    );
+
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledOnce();
+    expect(await readServerMovedFile(dataDir)).toBeNull();
+  });
+
+  const connectGrantConfig = {
+    config: { OMNYO_LOG_LEVEL: "debug" },
+    serverUrl: "https://me.example.test",
+    serverHeaders: { "x-omnyo-connect-machine": "grant-secret" },
+  };
+
+  async function writeConnectLockWithGrant(): Promise<{
+    dataDir: string;
+    configPath: string;
+  }> {
+    const dataDir = await makeTempDir("omnyo-cli-server-lock-");
+    await writeLegacyMovedMarkerV1(dataDir, movedLock({ mode: "connect" }));
+
+    const configPath = await writeDataFile(
+      dataDir,
+      "config.json",
+      JSON.stringify(connectGrantConfig),
+    );
+
+    return { dataDir, configPath };
+  }
+
+  it("probes a connect-mode server through the machine grant and refuses when it answers", async () => {
+    const { dataDir, configPath } = await writeConnectLockWithGrant();
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      healthResponse(200, { version: "0.50.0" }),
+    );
+
+    await expect(
+      runCommand(
+        ["server", "unlock", "--data-dir", dataDir, "--yes"],
+        register,
+      ),
+    ).rejects.toThrow("process.exit:1");
+
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledOnce();
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(
+      "https://me.example.test/api/v1/system/version",
+      expect.objectContaining({
+        headers: { "x-omnyo-connect-machine": "grant-secret" },
+        signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(collectLogPayloads(vi.mocked(console.error))).toEqual([
+      "Error: The server at https://me.example.test is running. Unlocking now would run two servers with the same data and Omnyo connect credential. Stop it first, or pass --force.",
+    ]);
+    expect(await readServerMovedFile(dataDir)).not.toBeNull();
+    expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual(
+      connectGrantConfig,
+    );
+  });
+
+  it.each([
+    [
+      "the gate reports the tunnel offline",
+      () =>
+        Promise.resolve(
+          new Response("Omnyo connect: tunnel offline\n", {
+            status: 503,
+            headers: { "x-omnyo-tunnel-offline": "1" },
+          }),
+        ),
+    ],
+    [
+      "the connection is refused",
+      () => Promise.reject(new TypeError("fetch failed")),
+    ],
+    [
+      "the grant probe times out",
+      () =>
+        Promise.reject(
+          new DOMException(
+            "The operation was aborted due to timeout",
+            "TimeoutError",
+          ),
+        ),
+    ],
+  ])(
+    "unlocks a connect-mode copy without a note when %s, then drops the grant",
+    async (_label, respond) => {
+      const { dataDir, configPath } = await writeConnectLockWithGrant();
+      vi.mocked(globalThis.fetch).mockImplementation(respond);
+
+      await runCommand(
+        ["server", "unlock", "--data-dir", dataDir, "--yes"],
+        register,
+      );
+
+      expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(
+        "https://me.example.test/api/v1/system/version",
+        expect.anything(),
+      );
+      expect(await readServerMovedFile(dataDir)).toBeNull();
+      expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual({
+        config: { OMNYO_LOG_LEVEL: "debug" },
+      });
+      expect(
+        collectLogPayloads(vi.mocked(console.error)).filter((line) =>
+          line.startsWith("Couldn't confirm"),
+        ),
+      ).toEqual([]);
+    },
+  );
+
+  it.each([401, 403])(
+    "unlocks a connect-mode copy with a note when the grant probe gets HTTP %i",
+    async (status) => {
+      const { dataDir } = await writeConnectLockWithGrant();
+      vi.mocked(globalThis.fetch).mockResolvedValue(
+        new Response("Omnyo connect: machine not authorized\n", { status }),
+      );
+
+      await runCommand(
+        ["server", "unlock", "--data-dir", dataDir, "--yes"],
+        register,
+      );
+
+      expect(await readServerMovedFile(dataDir)).toBeNull();
+      expect(collectLogPayloads(vi.mocked(console.error))[0]).toBe(
+        `Couldn't confirm whether the server at https://me.example.test is running (HTTP ${String(status)}). Make sure it is stopped before this old copy starts.`,
+      );
+    },
+  );
+
+  it("probes /health without headers for a direct-mode copy even when config.json has headers", async () => {
+    const dataDir = await makeTempDir("omnyo-cli-server-lock-");
+    await writeLegacyMovedMarkerV1(
+      dataDir,
+      movedLock({
+        mode: "direct",
+        serverUrl: "https://desk.ts.net/",
+        connectHandle: null,
+      }),
+    );
+    await writeDataFile(
+      dataDir,
+      "config.json",
+      JSON.stringify(connectGrantConfig),
+    );
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      healthResponse(200, { ok: true }),
+    );
+
+    await expect(
+      runCommand(
+        ["server", "unlock", "--data-dir", dataDir, "--yes"],
+        register,
+      ),
+    ).rejects.toThrow("process.exit:1");
+
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(
+      "https://desk.ts.net/health",
+      { signal: expect.any(AbortSignal) },
+    );
+  });
+
+  it("warns, confirms, and removes the lock", async () => {
+    const dataDir = await makeTempDir("omnyo-cli-server-lock-");
+    await writeDataFile(dataDir, "app.db", "old server");
+    await writeLegacyMovedMarkerV1(dataDir, movedLock());
+    readlineMocks.question.mockResolvedValue("yes");
+
+    await runCommand(["server", "unlock", "--data-dir", dataDir], register);
+
+    expect(await readServerMovedFile(dataDir)).toBeNull();
+    expect(await readFile(join(dataDir, "app.db"), "utf8")).toBe("old server");
+    const warnings = collectLogPayloads(vi.mocked(console.error));
+    expect(warnings[0]).toMatch(
+      /^This Omnyo server moved to desktop \(https:\/\/me\.example\.test\) on /u,
+    );
+    expect(warnings.slice(1)).toEqual([
+      "Unlocking starts this old copy again. Everything since the move is lost here: threads, settings, and plugin data changed on desktop stay there.",
+      "Stop the Omnyo server on desktop first. Two servers holding the same Omnyo connect credential take each other's tunnel.",
+    ]);
+    expect(collectLogPayloads(vi.mocked(console.log))).toEqual([
+      `Unlocked ${dataDir}. Omnyo on this computer starts the old server again within a few seconds; if Omnyo isn't running, start it with omnyo-app --data-dir ${dataDir}.`,
+    ]);
+  });
+
+  it("keeps the lock when the confirmation is declined", async () => {
+    const dataDir = await makeTempDir("omnyo-cli-server-lock-");
+    await writeLegacyMovedMarkerV1(dataDir, movedLock());
+    readlineMocks.question.mockResolvedValue("n");
+
+    await runCommand(["server", "unlock", "--data-dir", dataDir], register);
+
+    expect(await readServerMovedFile(dataDir)).not.toBeNull();
+  });
+
+  it("refuses without --yes outside an interactive terminal", async () => {
+    const dataDir = await makeTempDir("omnyo-cli-server-lock-");
+    await writeLegacyMovedMarkerV1(dataDir, movedLock());
+    Object.defineProperty(process.stdout, "isTTY", {
+      value: false,
+      configurable: true,
+    });
+
+    await expect(
+      runCommand(["server", "unlock", "--data-dir", dataDir], register),
+    ).rejects.toThrow("process.exit:1");
+
+    expect(await readServerMovedFile(dataDir)).not.toBeNull();
+  });
+
+  it("refuses to unlock an old copy that was already deleted", async () => {
+    const dataDir = await makeTempDir("omnyo-cli-server-lock-");
+    await writeLegacyMovedMarkerV1(dataDir, movedLock({ oldCopyEntries: [] }));
+
+    await expect(
+      runCommand(
+        ["server", "unlock", "--data-dir", dataDir, "--yes"],
+        register,
+      ),
+    ).rejects.toThrow("process.exit:1");
+
+    expect(collectLogPayloads(vi.mocked(console.error))).toEqual([
+      `Error: The old server copy in ${dataDir} was deleted, so there is nothing to unlock. Unlocking would start an empty Omnyo server.`,
+    ]);
+    expect(await readServerMovedFile(dataDir)).not.toBeNull();
+  });
+
+  it("reports an unlocked data directory without failing", async () => {
+    const dataDir = await makeTempDir("omnyo-cli-server-lock-");
+
+    await runCommand(
+      ["server", "unlock", "--data-dir", dataDir, "--json"],
+      register,
+    );
+
+    expect(JSON.parse(collectLogPayloads(vi.mocked(console.log))[0]!)).toEqual({
+      dataDir,
+      unlocked: false,
+      removedConfigKeys: [],
+    });
+  });
+
+  it("drops the new server's address and credentials from config.json and keeps everything else", async () => {
+    const dataDir = await makeTempDir("omnyo-cli-server-lock-");
+    await writeLegacyMovedMarkerV1(dataDir, movedLock());
+
+    const configPath = await writeDataFile(
+      dataDir,
+      "config.json",
+      JSON.stringify({
+        config: {
+          OMNYO_LOG_LEVEL: "debug",
+          OMNYO_APP_URL: "https://laptop.ts.net",
+        },
+        customModels: [{ providerId: "codex", model: "gpt-5.4" }],
+        customAcpAgents: [{ id: "not a valid agent" }],
+        serverUrl: "https://me.example.test",
+        serverHeaders: { "x-omnyo-connect-machine": "credential" },
+        machineCredential: "machine-secret",
+        connectMachineId: "machine-1",
+      }),
+    );
+
+    await chmod(configPath, 0o644);
+
+    await runCommand(
+      ["server", "unlock", "--data-dir", dataDir, "--yes", "--json"],
+      register,
+    );
+
+    expect(await readServerMovedFile(dataDir)).toBeNull();
+    expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual({
+      config: {
+        OMNYO_LOG_LEVEL: "debug",
+        OMNYO_APP_URL: "https://laptop.ts.net",
+      },
+      customModels: [{ providerId: "codex", model: "gpt-5.4" }],
+      customAcpAgents: [{ id: "not a valid agent" }],
+    });
+
+    if (process.platform !== "win32") {
+      expect((await stat(configPath)).mode & 0o777).toBe(0o600);
+    }
+
+    expect(await readdir(dataDir)).toEqual(["config.json"]);
+    expect(JSON.parse(collectLogPayloads(vi.mocked(console.log))[0]!)).toEqual({
+      dataDir,
+      unlocked: true,
+      removedConfigKeys: [
+        "serverUrl",
+        "serverHeaders",
+        "machineCredential",
+        "connectMachineId",
+      ],
+    });
+  });
+
+  it("keeps the lock and config untouched when config.json is not a valid omnyo-app config", async () => {
+    const dataDir = await makeTempDir("omnyo-cli-server-lock-");
+    await writeLegacyMovedMarkerV1(dataDir, movedLock());
+
+    const invalid = JSON.stringify({
+      serverUrl: "https://me.example.test",
+      unexpected: true,
+    });
+
+    const configPath = await writeDataFile(dataDir, "config.json", invalid);
+
+    await expect(
+      runCommand(
+        ["server", "unlock", "--data-dir", dataDir, "--yes"],
+        register,
+      ),
+    ).rejects.toThrow("process.exit:1");
+
+    expect(collectLogPayloads(vi.mocked(console.error)).at(-1)).toMatch(
+      new RegExp(
+        `^Error: ${configPath.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&")} is not a valid omnyo-app config\\. Fix it, then unlock again\\.`,
+        "u",
+      ),
+    );
+    expect(await readServerMovedFile(dataDir)).not.toBeNull();
+    expect(await readFile(configPath, "utf8")).toBe(invalid);
+  });
+
+  it("unlocks without creating config.json when there is none", async () => {
+    const dataDir = await makeTempDir("omnyo-cli-server-lock-");
+    await writeLegacyMovedMarkerV1(dataDir, movedLock());
+
+    await runCommand(
+      ["server", "unlock", "--data-dir", dataDir, "--yes"],
+      register,
+    );
+
+    expect(await readdir(dataDir)).toEqual([]);
+    expect(collectLogPayloads(vi.mocked(console.log))).toEqual([
+      `Unlocked ${dataDir}. Omnyo on this computer starts the old server again within a few seconds; if Omnyo isn't running, start it with omnyo-app --data-dir ${dataDir}.`,
+    ]);
+  });
+
+  it("uses OMNYO_DATA_DIR when --data-dir is omitted", async () => {
+    const dataDir = await makeTempDir("omnyo-cli-server-lock-");
+    await writeLegacyMovedMarkerV1(dataDir, movedLock());
+    vi.stubEnv("OMNYO_DATA_DIR", dataDir);
+
+    await runCommand(["server", "unlock", "--yes"], register);
+
+    expect(await readServerMovedFile(dataDir)).toBeNull();
+  });
+});
+
+describe("Omnyo server allow-connect", () => {
+  setupCommandOutputTestEnvironment();
+
+  function hold() {
+    return {
+      version: 1 as const,
+      reason: "manual-import" as const,
+      createdAt: 1_700_000_000_000,
+    };
+  }
+
+  it("warns, confirms, and removes the Omnyo connect hold", async () => {
+    const dataDir = await makeTempDir("omnyo-cli-server-hold-");
+    await writeDataFile(dataDir, "app.db", "imported server");
+    await writeServerConnectHoldFile(dataDir, hold());
+    readlineMocks.question.mockResolvedValue("yes");
+
+    await runCommand(
+      ["server", "allow-connect", "--data-dir", dataDir],
+      register,
+    );
+
+    expect(await readServerConnectHoldFile(dataDir)).toBeNull();
+    expect(await readFile(join(dataDir, "app.db"), "utf8")).toBe(
+      "imported server",
+    );
+    expect(collectLogPayloads(vi.mocked(console.error))).toEqual([
+      "Stop the original Omnyo server first. Two servers holding the same Omnyo account credential take each other's tunnel and spend the same hosted quota.",
+    ]);
+    expect(collectLogPayloads(vi.mocked(console.log))).toEqual([
+      `Removed the Omnyo connect hold from ${dataDir}. Omnyo account and Omnyo connect start the next time this server starts; restart Omnyo if it's already running.`,
+    ]);
+  });
+
+  it("keeps the hold when the confirmation is declined", async () => {
+    const dataDir = await makeTempDir("omnyo-cli-server-hold-");
+    await writeServerConnectHoldFile(dataDir, hold());
+    readlineMocks.question.mockResolvedValue("n");
+
+    await runCommand(
+      ["server", "allow-connect", "--data-dir", dataDir],
+      register,
+    );
+
+    expect(await readServerConnectHoldFile(dataDir)).toEqual(hold());
+  });
+
+  it("removes the hold with --yes and reports it as JSON", async () => {
+    const dataDir = await makeTempDir("omnyo-cli-server-hold-");
+    await writeServerConnectHoldFile(dataDir, hold());
+
+    await runCommand(
+      ["server", "allow-connect", "--data-dir", dataDir, "--yes", "--json"],
+      register,
+    );
+
+    expect(await readServerConnectHoldFile(dataDir)).toBeNull();
+    expect(JSON.parse(collectLogPayloads(vi.mocked(console.log))[0]!)).toEqual({
+      dataDir,
+      connectHoldRemoved: true,
+    });
+  });
+
+  it("reports a data directory without a hold", async () => {
+    const dataDir = await makeTempDir("omnyo-cli-server-hold-");
+
+    await runCommand(
+      ["server", "allow-connect", "--data-dir", dataDir],
+      register,
+    );
+    await runCommand(
+      ["server", "allow-connect", "--data-dir", dataDir, "--json"],
+      register,
+    );
+
+    expect(collectLogPayloads(vi.mocked(console.log))).toEqual([
+      `${dataDir} has no Omnyo connect hold.`,
+      JSON.stringify({ dataDir, connectHoldRemoved: false }, null, 2),
+    ]);
+  });
+});
+
+describe("Omnyo server delete-old-copy", () => {
+  setupCommandOutputTestEnvironment();
+
+  it("deletes the listed server entries and sidecars but keeps the lock and host-owned files", async () => {
+    const dataDir = await makeTempDir("omnyo-cli-server-old-copy-");
+
+    for (const path of [
+      "app.db",
+      "app.db-wal",
+      "app.db-shm",
+      "attachments/thr_1/image.png",
+      "plugins/tasks/data.db",
+      "plugins/tasks/data.db-wal",
+      "plugins/tasks/host-data/cache.json",
+      "host-id",
+      "auth.json",
+      "config.json",
+      "env.json",
+      "thread-storage/thr_1/notes.md",
+    ]) {
+      await writeDataFile(dataDir, path, path);
+    }
+
+    await writeLegacyMovedMarkerV1(
+      dataDir,
+      movedLock({
+        oldCopyEntries: [
+          "app.db",
+          "attachments",
+          "plugins/tasks/data.db",
+          "config.json",
+          "env.json",
+        ],
+      }),
+    );
+    readlineMocks.question.mockResolvedValue("y");
+
+    await runCommand(
+      ["server", "delete-old-copy", "--data-dir", dataDir],
+      register,
+    );
+
+    expect(readlineMocks.question).toHaveBeenCalledWith(
+      `Delete the old Omnyo server copy in ${dataDir} (5 entries)? The server now runs on desktop; this cannot be undone. [y/N] `,
+    );
+    expect((await readdir(dataDir)).sort()).toEqual([
+      "auth.json",
+      "config.json",
+      "env.json",
+      "host-id",
+      "plugins",
+      SERVER_MOVED_FILE_NAME,
+      "thread-storage",
+    ]);
+    expect(await readdir(join(dataDir, "plugins", "tasks"))).toEqual([
+      "host-data",
+    ]);
+    expect(await readServerMovedFile(dataDir)).toEqual(
+      movedLock({ oldCopyEntries: [] }),
+    );
+    expect(collectLogPayloads(vi.mocked(console.log))).toEqual([
+      `Deleted the old Omnyo server copy from ${dataDir} (3 entries). This computer keeps running as a regular machine.`,
+    ]);
+  });
+
+  it("reports that there is no old copy when the data directory is not locked", async () => {
+    const dataDir = await makeTempDir("omnyo-cli-server-old-copy-");
+    await writeDataFile(dataDir, "app.db", "this machine's server");
+
+    await runCommand(
+      ["server", "delete-old-copy", "--data-dir", dataDir, "--yes"],
+      register,
+    );
+
+    expect(await readFile(join(dataDir, "app.db"), "utf8")).toBe(
+      "this machine's server",
+    );
+    expect(collectLogPayloads(vi.mocked(console.log))).toEqual([
+      `No old server copy here: ${dataDir} is not locked by a server move.`,
+    ]);
+  });
+
+  it("is a no-op after the old copy was deleted", async () => {
+    const dataDir = await makeTempDir("omnyo-cli-server-old-copy-");
+    await writeLegacyMovedMarkerV1(dataDir, movedLock({ oldCopyEntries: [] }));
+
+    await runCommand(
+      ["server", "delete-old-copy", "--data-dir", dataDir, "--json"],
+      register,
+    );
+
+    expect(readlineMocks.question).not.toHaveBeenCalled();
+    expect(JSON.parse(collectLogPayloads(vi.mocked(console.log))[0]!)).toEqual({
+      dataDir,
+      deleted: false,
+      deletedEntries: [],
+    });
+    expect(await readdir(dataDir)).toEqual([SERVER_MOVED_FILE_NAME]);
+  });
+
+  it("keeps everything when the confirmation is declined", async () => {
+    const dataDir = await makeTempDir("omnyo-cli-server-old-copy-");
+    await writeDataFile(dataDir, "app.db", "old server");
+    await writeLegacyMovedMarkerV1(dataDir, movedLock());
+    readlineMocks.question.mockResolvedValue("n");
+
+    await runCommand(
+      ["server", "delete-old-copy", "--data-dir", dataDir],
+      register,
+    );
+
+    expect(await readFile(join(dataDir, "app.db"), "utf8")).toBe("old server");
+    expect((await readServerMovedFile(dataDir))?.oldCopyEntries).toEqual(
+      movedLock().oldCopyEntries,
+    );
+    expect(await readdir(dataDir)).not.toContain(SERVER_IMPORT_FILE_NAME);
+  });
+});

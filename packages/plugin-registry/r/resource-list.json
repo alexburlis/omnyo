@@ -1,0 +1,25 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "resource-list",
+  "type": "registry:ui",
+  "title": "resource-list",
+  "description": "Omnyo ui \"resource-list\" — vendored from the Omnyo app's own source (version-matched to this Omnyo release).",
+  "registryDependencies": [
+    "@omnyo/resource-atoms",
+    "@omnyo/resource-collection",
+    "@omnyo/resource-detail-controls",
+    "@omnyo/resource-detail-sections",
+    "@omnyo/resource-detail-shell",
+    "@omnyo/resource-route-label",
+    "@omnyo/resource-row",
+    "@omnyo/resource-toolbar"
+  ],
+  "files": [
+    {
+      "path": "registry/components/ui/resource-list.tsx",
+      "content": "export {\n  ResourceCardStat,\n  ResourceIconFrame,\n  ResourceMeta,\n  ResourceStatus,\n  type ResourceStatusTone,\n} from \"./resource/atoms\";\n\nexport { useResourceRouteLabel } from \"./resource-route-label\";\n\nexport {\n  ResourceControlButton,\n  ResourceMultiSelectMenuItems,\n  ResourceSortMenuItems,\n  type ResourceOption,\n  ResourceCreateButton,\n  type ResourceCreateMenuAction,\n  type ResourceCreateTemplateGroup,\n  ResourceFilterMenu,\n  ResourceMultiSelectMenu,\n  ResourceSortMenu,\n  ResourceToolbar,\n  ResourceTabDescription,\n} from \"./resource/toolbar\";\n\nexport {\n  ResourceActionButton,\n  ResourceListPanel,\n  ResourceListState,\n  ResourceOverflowMenu,\n  type ResourceOverflowMenuItem,\n  ResourceRow,\n  ResourceRowDetailChevron,\n  targetsResourceAction,\n} from \"./resource/row\";\n\nexport {\n  ResourceDetailCollection,\n  ResourceDetailPanel,\n  ResourceDetailStack,\n  ResourcePromptPreview,\n} from \"./resource/detail-shell\";\n\nexport {\n  ResourceActivitySection,\n  ResourceDefinitionSection,\n  ResourceDetailConfigurationSection,\n  ResourceDetailIncludesSection,\n  ResourceDetailOverviewSection,\n  ResourceDetailPage,\n  ResourceDetailReleaseSection,\n} from \"./resource/detail-sections\";\n\nexport {\n  ResourceInstallControl,\n  ResourceInstalledControl,\n} from \"./resource/detail-controls\";\n\nexport {\n  ResourceBrowseCard,\n  ResourceBrowseGrid,\n  ResourceCollectionPage,\n  ResourceCollectionViewport,\n  ResourceShelfSeeAllAction,\n  ResourceShelfAction,\n  ResourceSourceShelf,\n  ResourceTemplateBrowseCard,\n} from \"./resource/collection\";\n",
+      "type": "registry:ui",
+      "target": "components/ui/resource-list.tsx"
+    }
+  ]
+}

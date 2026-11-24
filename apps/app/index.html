@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en" class="omnyo-app-shell-root">
+  <head>
+    <script>
+      (function () {
+        if (typeof fetch !== "function") return;
+        var nativeRoot = window.omnyo;
+        var surface =
+          window.omnyoDesktop !== undefined
+            ? "desktop"
+            : nativeRoot && nativeRoot.native
+              ? "mobile"
+              : "web";
+        var boot = {
+          version: 1,
+          startedAt: Date.now(),
+          settled: false,
+          result: null,
+        };
+        boot.promise = fetch("/api/v1/boot", {
+          credentials: "same-origin",
+          cache: "no-store",
+          headers: { "x-omnyo-app-surface": surface },
+        })
+          .then(function (response) {
+            return response.text().then(function (text) {
+              return {
+                status: response.status,
+                text: text,
+                receivedAt: Date.now(),
+              };
+            });
+          })
+          .then(
+            function (result) {
+              boot.settled = true;
+              boot.result = result;
+              return result;
+            },
+            function (error) {
+              boot.settled = true;
+              throw error;
+            },
+          );
+        boot.promise.catch(function () {});
+        window.__omnyoBootV1 = boot;
+      })();
+    </script>
+    <script>
+      (function () {
+        var scriptElement = window.HTMLScriptElement;
+        if (
+          scriptElement &&
+          typeof scriptElement.supports === "function" &&
+          scriptElement.supports("importmap")
+        )
+          return;
+        document.addEventListener("DOMContentLoaded", function () {
+          var message = document.createElement("p");
+          message.setAttribute("role", "alert");
+          message.style.cssText =
+            "font: 16px/1.5 -apple-system, system-ui, sans-serif; max-width: 32rem; margin: 20vh auto 0; padding: 0 24px; text-align: center;";
+          message.textContent =
+            "This version of Omnyo needs Safari 16.4 or later. On an iPhone or iPad, update to iOS 16.4 or later, then open Omnyo again.";
+          document.body.replaceChildren(message);
+        });
+      })();
+    </script>
+    <script>
+      window.__omnyoBrowserStorageAdmission = new Promise(function (
+        resolve,
+        reject,
+      ) {
+        if (!navigator.locks || typeof navigator.locks.request !== "function") {
+          reject(new Error("Browser storage ownership cannot be verified"));
+          return;
+        }
+        var beginAdmission = function () {
+          navigator.locks
+            .request(
+              "omnyo-browser-origin-admission-v1",
+              { mode: "shared", ifAvailable: true },
+              function (lock) {
+                if (!lock)
+                  throw new Error("Browser storage transfer is in progress");
+                if (
+                  localStorage.getItem("omnyo.origin-transfer.v1:source") !==
+                  null
+                )
+                  throw new Error(
+                    "This browser origin is fenced for migration",
+                  );
+                var adoption = localStorage.getItem(
+                  "omnyo.origin-transfer.v1:adoption",
+                );
+                if (adoption !== null) {
+                  var admitted = JSON.parse(adoption);
+                  if (
+                    !admitted ||
+                    admitted.version !== 1 ||
+                    admitted.phase !== "accepted"
+                  )
+                    throw new Error(
+                      "Every selected browser window must finish migration before the app starts",
+                    );
+                }
+                for (var index = 0; index < sessionStorage.length; index++) {
+                  var key = sessionStorage.key(index);
+                  if (key && key.indexOf("omnyo.origin-transfer.v1:") === 0) {
+                    var receipt = JSON.parse(sessionStorage.getItem(key));
+                    var metadata =
+                      /^omnyo\.origin-transfer\.v1:(database-inventory|native-complete|native-window|window):([a-f0-9]{64})$/.exec(
+                        key,
+                      );
+                    if (metadata) {
+                      if (
+                        !receipt ||
+                        receipt.version !== 1 ||
+                        (metadata[1] === "window"
+                          ? receipt.phase !== "restored" ||
+                            typeof receipt.windowKey !== "string"
+                          : !admitted ||
+                            receipt.adoptionId !== admitted.adoptionId ||
+                            receipt.id !== metadata[2] ||
+                            (metadata[1] === "native-window"
+                              ? receipt.admitted !== true
+                              : metadata[1] === "native-complete"
+                                ? !/^[a-f0-9]{64}$/.test(
+                                    receipt.originPayloadSha256,
+                                  ) ||
+                                  !/^[a-f0-9]{64}$/.test(
+                                    receipt.targetStageSha256,
+                                  )
+                                : !receipt.source ||
+                                  !receipt.target ||
+                                  receipt.source.version !== 1 ||
+                                  receipt.target.version !== 1 ||
+                                  !/^[a-f0-9]{64}$/.test(
+                                    receipt.source.sha256,
+                                  ) ||
+                                  !/^[a-f0-9]{64}$/.test(
+                                    receipt.target.sha256,
+                                  )))
+                      )
+                        throw new Error(
+                          "Saved migration controller metadata changed",
+                        );
+                      continue;
+                    }
+                    if (
+                      !/^omnyo\.origin-transfer\.v1:(?:[a-f0-9]{64}|target-window:[a-f0-9]{64})$/.test(
+                        key,
+                      )
+                    )
+                      throw new Error(
+                        "An unknown migration controller key requires its owner",
+                      );
+                    if (
+                      !receipt ||
+                      receipt.version !== 1 ||
+                      receipt.phase !== "accepted" ||
+                      receipt.adoptionAccepted !== true ||
+                      !admitted ||
+                      !receipt.ticket ||
+                      receipt.ticket.adoptionId !== admitted.adoptionId ||
+                      JSON.stringify(receipt.ticket.selectedIds) !==
+                        JSON.stringify(admitted.selectedIds)
+                    )
+                      throw new Error(
+                        "Browser storage transfer has not admitted its first write",
+                      );
+                  }
+                }
+                resolve();
+                return new Promise(function () {});
+              },
+            )
+            .catch(reject);
+        };
+        window.__omnyoBeginBrowserStorageAdmissionV1 = beginAdmission;
+        if (window.__omnyoOriginSessionRestoreV1 === undefined)
+          beginAdmission();
+      });
+      window.__omnyoBrowserStorageAdmission.catch(function () {
+        document.documentElement.dataset.omnyoStorageMigrationError = "origin";
+      });
+    </script>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
+    />
+    <meta name="theme-color" content="#ffffff" id="theme-color" />
+    <!-- iOS ignores the manifest's display mode, so these opt the home-screen
+         app into standalone (chrome-less) launch. The translucent status bar
+         and viewport-fit=cover let app surfaces paint edge-to-edge; layout
+         chrome and overlays apply safe-area padding to their content. -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
+    <meta name="apple-mobile-web-app-title" content="Omnyo" />
+    <title>Omnyo</title>
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="32x32"
+      href="/favicon-32x32.png"
+      id="favicon-32"
+    />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="16x16"
+      href="/favicon-16x16.png"
+      id="favicon-16"
+    />
+    <link
+      rel="apple-touch-icon"
+      sizes="180x180"
+      href="/apple-touch-icon.png"
+      id="apple-touch-icon"
+    />
+    <link
+      rel="manifest"
+      href="/manifest.webmanifest"
+      id="app-manifest"
+      crossorigin="use-credentials"
+    />
+    <script>
+      window.__omnyoBrowserStorageAdmission
+        .then(function () {
+          (function () {
+            try {
+              var preferenceCopies = [];
+              [
+                ["bb.theme", "omnyo.theme", /^(light|dark|system)$/],
+                [
+                  "bb.faviconColor",
+                  "omnyo.faviconColor",
+                  /^(default|red|orange|yellow|green|teal|blue|purple|pink)$/,
+                ],
+                ["bb.appThemeCss", "omnyo.appThemeCss", null],
+              ].forEach(function (pair) {
+                var oldValue = localStorage.getItem(pair[0]);
+                var newValue = localStorage.getItem(pair[1]);
+                if (
+                  pair[2] &&
+                  ((oldValue !== null && !pair[2].test(oldValue)) ||
+                    (newValue !== null && !pair[2].test(newValue)))
+                )
+                  throw new Error("Invalid saved preference");
+                if (
+                  oldValue !== null &&
+                  newValue !== null &&
+                  oldValue !== newValue
+                )
+                  throw new Error("Saved preference conflict");
+                if (oldValue !== null)
+                  preferenceCopies.push([pair[0], pair[1], oldValue, newValue]);
+              });
+              preferenceCopies.forEach(function (copy) {
+                if (copy[3] === null) localStorage.setItem(copy[1], copy[2]);
+                if (localStorage.getItem(copy[1]) !== copy[2])
+                  throw new Error("Preference copy could not be verified");
+              });
+              preferenceCopies.forEach(function (copy) {
+                if (localStorage.getItem(copy[0]) !== copy[2])
+                  throw new Error("Saved preference changed");
+                localStorage.removeItem(copy[0]);
+              });
+              delete document.documentElement.dataset
+                .omnyoStorageMigrationError;
+            } catch {
+              document.documentElement.dataset.omnyoStorageMigrationError =
+                "preferences";
+              return;
+            }
+            var dev = "%MODE%" === "development";
+            function setFavicon(dark) {
+              var s = dev ? "-dev" : dark ? "-dark" : "";
+              document.getElementById("favicon-32").href =
+                "/favicon-32x32" + s + ".png";
+              document.getElementById("favicon-16").href =
+                "/favicon-16x16" + s + ".png";
+            }
+            var mq = window.matchMedia("(prefers-color-scheme: dark)");
+            setFavicon(mq.matches);
+            if (!dev)
+              mq.addEventListener("change", function (e) {
+                setFavicon(e.matches);
+              });
+            function getFaviconColorSuffix() {
+              try {
+                var color = localStorage.getItem("omnyo.faviconColor");
+                return /^(red|orange|yellow|green|teal|blue|purple|pink)$/.test(
+                  color,
+                )
+                  ? "-" + color
+                  : "";
+              } catch {
+                return "";
+              }
+            }
+            var faviconColorSuffix = getFaviconColorSuffix();
+            document.getElementById("app-manifest").href =
+              "/manifest" + faviconColorSuffix + ".webmanifest";
+            document.getElementById("apple-touch-icon").href =
+              "/apple-touch-icon" + faviconColorSuffix + ".png";
+            // Pre-paint browser-chrome color so PWA/status-bar chrome doesn't
+            // flash the wrong shade before the app boots; useTheme.ts owns the
+            // meta tag afterwards. Mirrors the omnyo.theme preference resolution and
+            // the --canvas values in theme.css (#0f1116 = oklch(0.178 0.011 268)).
+            var theme = null;
+            try {
+              theme = localStorage.getItem("omnyo.theme");
+            } catch {}
+            var darkTheme =
+              theme === "dark" || (theme !== "light" && mq.matches);
+            document.getElementById("theme-color").content = darkTheme
+              ? "#0f1116"
+              : "#ffffff";
+            // theme.css keys every dark token off the `dark` class, so add it
+            // before the stylesheet applies. Otherwise the first paint is the
+            // light palette until main.tsx (behind ~1.5 MB of JS) toggles it,
+            // which reads as a white flash on every cold load. useTheme.ts owns
+            // the class afterwards and reconciles it with the same preference.
+            if (darkTheme) document.documentElement.classList.add("dark");
+          })();
+        })
+        .catch(function () {
+          document.documentElement.dataset.omnyoStorageMigrationError =
+            "preferences";
+        });
+    </script>
+  </head>
+  <body class="omnyo-app-shell">
+    <div id="root"></div>
+    <script>
+      // Pre-paint the palette (Nord, Dracula, a custom theme, ...) cached by
+      // applyAppThemeCss from the previous load, so a non-default palette does
+      // not flash the default one until main.tsx runs. Runs at the end of
+      // <body> so the <style> lands after the app stylesheet Vite injects into
+      // <head>, where its :root/.dark overrides win by source order.
+      // applyCachedAppThemeCss reuses this element by id and re-appends it if
+      // anything (dev-mode style tags) got inserted after it.
+      window.__omnyoBrowserStorageAdmission
+        .then(function () {
+          (function () {
+            if (document.documentElement.dataset.omnyoStorageMigrationError)
+              return;
+            var css = null;
+            try {
+              css = localStorage.getItem("omnyo.appThemeCss");
+            } catch {}
+            if (!css) return;
+            var style = document.createElement("style");
+            style.id = "omnyo-app-theme";
+            style.textContent = css;
+            document.head.appendChild(style);
+          })();
+        })
+        .catch(function () {
+          document.documentElement.dataset.omnyoStorageMigrationError =
+            "preferences";
+        });
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

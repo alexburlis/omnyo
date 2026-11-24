@@ -1,0 +1,56 @@
+{
+  "name": "omnyo-plugin-omnyo-account",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Signs this Omnyo in to your omnyo.link account and holds its server credential for remote access.",
+  "author": {
+    "name": "bb",
+    "url": "https://github.com/get-bb"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/get-bb/bb.git",
+    "directory": "plugins/bb-account"
+  },
+  "engines": {
+    "omnyo": ">=1.0.129",
+    "omnyoPluginSdk": ">=0.5.24 >=0.6.44"
+  },
+  "omnyo": {
+    "name": "Omnyo Account",
+    "description": "Signs this Omnyo in to your omnyo.link account and holds its server credential for remote access.",
+    "branding": {
+      "icon": "UserRound"
+    },
+    "server": "./src/server.ts",
+    "app": "./app.tsx"
+  },
+  "keywords": [
+    "omnyo-plugin"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --config vitest.config.ts",
+    "prepare:bundled": "omnyo-plugin-build prepare-bundled"
+  },
+  "dependencies": {
+    "@omnyo/connect-client": "workspace:*",
+    "@omnyo/shared-ui": "workspace:*",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@omnyo/plugin-build": "workspace:*",
+    "@omnyo/plugin-sdk": "workspace:*",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/ws": "^8.18.1",
+    "jsdom": "^29.0.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vitest": "4.1.11",
+    "ws": "^8.18.0"
+  }
+}

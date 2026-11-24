@@ -1,0 +1,97 @@
+import { machineGitHealth } from "./git-credentials.js";
+import { getAppSettings, type DbConnection } from "@omnyo/db";
+import type { SecretVault } from "@omnyo/secret-storage";
+import {
+  readMachineEnvironment,
+  decryptMachineEnvironment,
+} from "./environment-storage.js";
+import type { HostDaemonContributedEnvEntry } from "@omnyo/host-daemon-contract";
+
+export { replaceMachineEnvironment } from "./environment-storage.js";
+
+export async function resolveUserMachineEnvironment(
+  db: DbConnection,
+  vault: SecretVault,
+  projectId: string | null = null,
+): Promise<HostDaemonContributedEnvEntry[]> {
+  const rows = readMachineEnvironment(db, projectId);
+
+  return Promise.all(
+    rows.map(async (row) => ({
+      name: row.name,
+      value: await decryptMachineEnvironment(vault, row),
+      reason:
+        row.note ??
+        (projectId === null
+          ? "Global machine environment setting"
+          : "Project machine environment setting"),
+      source: {
+        core:
+          projectId === null ? "machine-environment" : "project-environment",
+      },
+    })),
+  );
+}
+
+export async function machineEnvironmentView(db: DbConnection) {
+  const variables = readMachineEnvironment(db).map((row) => ({
+    name: row.name,
+    value: null,
+    secret: true as const,
+    note: row.note,
+  }));
+
+  const overridden = variables.some((row) => row.name === "GH_TOKEN");
+  const enabled = getAppSettings(db).machineGitCredentialsEnabled;
+
+  const health =
+    overridden || !enabled
+      ? {
+          status: "ready",
+          statusMessage:
+            "The built-in gh token is overridden by Machine environment.",
+        }
+      : await machineGitHealth();
+
+  return {
+    variables,
+    builtInGit: {
+      status: overridden
+        ? ("overridden" as const)
+        : !enabled
+          ? ("disabled" as const)
+          : health.status === "ready"
+            ? ("logged in" as const)
+            : ("not logged in" as const),
+      statusMessage:
+        !enabled && !overridden
+          ? "Automatic GitHub credentials are disabled."
+          : health.statusMessage,
+    },
+  };
+}
+
+export async function projectMachineEnvironmentView(
+  db: DbConnection,
+  projectId: string,
+) {
+  const global = await machineEnvironmentView(db);
+
+  const variables = readMachineEnvironment(db, projectId).map((row) => ({
+    name: row.name,
+    value: null,
+    secret: true as const,
+    note: row.note,
+  }));
+
+  return {
+    builtInGit: variables.some((row) => row.name === "GH_TOKEN")
+      ? {
+          status: "overridden" as const,
+          statusMessage: "Overridden by this project.",
+        }
+      : global.builtInGit,
+    variables,
+    inheritedVariables: global.variables,
+  };
+}

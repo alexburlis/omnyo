@@ -1,0 +1,1865 @@
+@import "@/components/ui/theme.css";
+
+@theme inline {
+  --color-timeline-meta: var(--timeline-meta);
+  --color-timeline-figure: var(--timeline-figure);
+  --color-timeline-rail: var(--timeline-rail);
+}
+
+:root,
+.dark {
+  --timeline-meta: color-mix(in oklch, var(--ink) 52%, var(--canvas));
+  --timeline-figure: color-mix(in oklch, var(--ink) 38%, var(--canvas));
+  --timeline-rail: color-mix(in oklch, var(--ink) 15%, var(--canvas));
+}
+
+@layer base {
+  /*
+   * Keep the real app shell from becoming a second scroll container. These
+   * selectors are class-scoped because Ladle imports app.css but does not use
+   * the Vite index.html shell classes.
+   *
+   * Use the dynamic viewport height in browser tabs so native/in-app browser
+   * chrome cannot leave the percentage-height containing block taller than
+   * the visible window.
+   *
+   * iOS standalone subtracts the top safe-area inset from the small and
+   * dynamic viewports but not from the large one. On a 852pt screen with a
+   * 59pt inset, innerHeight/100svh/100dvh/height:100% all report 793 while
+   * 100lvh reports the true 852. The shell starts at y=0 under the
+   * translucent status bar, so a 793pt shell leaves a 59pt dead band at the
+   * bottom. 100lvh is the only value that spans the screen.
+   *
+   * Scoped to standalone: in a Safari tab, lvh is the toolbars-retracted
+   * height, which is taller than what the user can see.
+   *
+   * `position: fixed` elements cannot inherit the shell height: a percentage
+   * height on them resolves against the initial containing block, which is the
+   * short 793pt viewport. They have to name the unit themselves, so this
+   * variable is the single switch both they and the shell root read.
+   */
+  :root {
+    --omnyo-app-chrome-row-height: 3rem;
+    --omnyo-window-title-bar-height: 2.5rem;
+    --omnyo-macos-traffic-light-axis: 26px;
+    --omnyo-chrome-control-gap: 0.25rem;
+    --omnyo-panel-chrome-padding: 1rem;
+    --omnyo-shell-height: 100dvh;
+    --omnyo-window-frame-top: 0px;
+    --omnyo-window-frame-lip: 0px;
+    --omnyo-app-footer-height: 30px;
+    --omnyo-sidebar-rail-padding: 8px;
+    --omnyo-sidebar-control-size: 28px;
+    --omnyo-sidebar-control-icon-size: 16px;
+    --omnyo-nav-rail-width: max(
+      3.5rem,
+      calc(
+        var(--omnyo-sidebar-control-size) + 2 *
+          var(--omnyo-sidebar-rail-padding)
+      )
+    );
+  }
+
+  @media (max-width: 767px) {
+    :root {
+      --omnyo-app-footer-height: 0px;
+    }
+  }
+
+  @media (width < 48rem) and (pointer: coarse) {
+    :root {
+      --omnyo-sidebar-rail-padding: 12px;
+      --omnyo-sidebar-control-size: 36px;
+      --omnyo-sidebar-control-icon-size: 20px;
+    }
+  }
+
+  :where(
+    [data-sidebar="sidebar"] [data-sidebar="footer"] > [data-resources-sidebar]
+  ) {
+    display: none;
+  }
+
+  [data-sidebar-header-slot]
+    :where(
+      button,
+      a,
+      input,
+      select,
+      textarea,
+      [role="button"],
+      [role="link"],
+      [tabindex]
+    ) {
+    -webkit-app-region: no-drag;
+    app-region: no-drag;
+  }
+
+  html.omnyo-app-shell-root {
+    height: var(--omnyo-shell-height);
+    touch-action: pan-x pan-y;
+  }
+
+  body.omnyo-app-shell,
+  body.omnyo-app-shell #root {
+    height: 100%;
+  }
+
+  @media (display-mode: standalone) {
+    :root {
+      --omnyo-shell-height: 100lvh;
+    }
+  }
+
+  html.omnyo-app-shell-root,
+  body.omnyo-app-shell {
+    overflow: hidden;
+    /*
+     * Suppress vertical rubber-banding without blocking the native horizontal
+     * two-finger back/forward gesture.
+     */
+    overscroll-behavior-y: none;
+  }
+
+  /*
+   * App chrome (sidebar, page headers, composer toolbars) opts out of text
+   * selection with `select-none` so drags and Select All only pick up
+   * content. `user-select: auto` resolves from the parent, so WebKit would
+   * carry that opt-out into editable controls inside those regions (the
+   * inline thread-title rename, for example) and refuse to select their text.
+   * Restore native selection on the controls themselves.
+   */
+  .select-none
+    :where(input, textarea, [contenteditable]:not([contenteditable="false"])) {
+    user-select: text;
+  }
+
+  .chat-prompt-box {
+    padding-bottom: 0.5rem;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--foreground) 20%, transparent)
+      transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  *::-webkit-scrollbar-track,
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklab, var(--foreground) 20%, transparent);
+    border-radius: 9999px;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklab, var(--foreground) 40%, transparent);
+  }
+
+  /*
+   * Default the keyboard focus ring to the app's achromatic `--ring` instead of
+   * the browser's native outline, which `color-scheme` renders in the OS accent
+   * (blue in dark, the system accent in light) and clashes with the chroma-0
+   * design. Components that supply their own `focus-visible:outline-none` + ring
+   * override this from the utilities layer, so this only catches elements that
+   * would otherwise fall through to the UA focus ring.
+   */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
+  }
+
+  /* Keep the drag cursor stable while crossing rows whose normal pointer
+   * cursor would otherwise override the cursor inherited from the body.
+   * Only the sidebar panel's rows carry their own cursor rules, so the
+   * descendant override is scoped to that panel rather than the whole
+   * document, and the rules exist only for fine pointers: a touch drag has
+   * no cursor, and a document-wide `*` rule would restyle every mounted
+   * timeline node when the body attribute flips at drag start and end. */
+  @media (pointer: fine) {
+    body[data-sidebar-dragging="true"],
+    body[data-sidebar-dragging="true"] [data-sidebar="panel"] * {
+      cursor: grabbing !important;
+    }
+  }
+
+  /* A sidebar drag projects the dragged row into the hovered list, which can
+   * grow or shrink content above the scrolled viewport. Scroll anchoring would
+   * then move scrollTop to keep the visible rows still, but dnd-kit offsets
+   * its measured droppable rects by that scroll delta even though nothing
+   * moved on screen, so `over` resolves against the wrong rows and the
+   * projection flips back and forth (#1830). Keep scrollTop stable while a
+   * sidebar drag is active so the measured geometry matches the pointer. */
+  body[data-sidebar-dragging="true"] [data-sidebar="content"] {
+    overflow-anchor: none;
+  }
+}
+
+.omnyo-sidebar-hover-actions-row:not(
+    [data-sidebar-row-presentation="owned"]
+  ):has(a[data-needs-you="callback"])
+  [data-sidebar-thread-trailing-indicator]
+  > * {
+  color: var(--timeline-accent);
+}
+
+@layer components {
+  .omnyo-sidebar-selected-row:not([data-sidebar-touch-armed="true"]),
+  [data-sidebar-sticky-stack]
+    [data-sidebar-sticky-tier].omnyo-sidebar-selected-row:not(
+      [data-sidebar-touch-armed="true"]
+    ) {
+    --omnyo-sidebar-selected-tint: color-mix(
+      in oklab,
+      var(--timeline-accent) 22%,
+      transparent
+    );
+    background-image:
+      linear-gradient(
+        var(--omnyo-sidebar-selected-tint),
+        var(--omnyo-sidebar-selected-tint)
+      ),
+      linear-gradient(var(--sidebar-accent), var(--sidebar-accent));
+  }
+
+  [data-app-ambient] {
+    background:
+      radial-gradient(760px 520px at 6% 14%, var(--ambient-1), transparent 70%),
+      radial-gradient(
+        640px 460px at 56% 110%,
+        var(--ambient-2),
+        transparent 70%
+      ),
+      radial-gradient(
+        520px 380px at 102% 66%,
+        var(--ambient-3),
+        transparent 70%
+      ),
+      var(--canvas);
+  }
+
+  /*
+   * Tint the prompt editor's text selection with the app's selected-surface
+   * color so it matches the background that mention pills paint on themselves
+   * when selected (mention icons are SVG and never take the native highlight,
+   * so pills can't rely on `::selection` — see PromptMentionPillNodeView).
+   */
+  .ProseMirror ::selection {
+    background-color: var(--surface-selected);
+  }
+
+  /*
+   * Mention-pill surface. PROMPT_MENTION_PILL_CLASS owns layout, radius, and
+   * border width; this paints the theme-specific face, border, and soft shadow.
+   * The --selected modifier tints the same chip for the editor's drag-select
+   * highlight (mention icons are SVG and never take the native ::selection
+   * paint, so the pill colors itself).
+   */
+  .prompt-mention-pill {
+    color: var(--pill-foreground);
+    background: var(--pill-surface);
+    border-color: var(--pill-surface-border);
+    box-shadow: var(--pill-shadow);
+  }
+
+  /* Leading mention identity: a plain near-black outline glyph (near-white in
+   * dark), with no fill. */
+  .prompt-mention-pill svg {
+    color: var(--pill-icon);
+  }
+
+  .prompt-mention-pill--selected {
+    background: var(--pill-surface-selected);
+    border-color: var(--pill-surface-selected-border);
+  }
+
+  /*
+   * The compact mobile composer is a single-line preview of a rich editor,
+   * not a separate plain-text field. Flatten every Markdown block and hard
+   * break into one clipped line. The editor expands before it can be edited, so
+   * the compact state only needs to preserve the real document and present its
+   * leading text. Mention pills remain inline-flex so their own labels can
+   * truncate without breaking the line. `!important` beats ProseMirror's
+   * unlayered `white-space: break-spaces` rule.
+   */
+  [data-promptbox-compact-content] .ProseMirror[contenteditable] {
+    width: 100%;
+    min-height: 0 !important;
+    max-height: 1.7em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap !important;
+  }
+
+  [data-promptbox-compact-content] .ProseMirror[contenteditable] > *,
+  [data-promptbox-compact-content]
+    .ProseMirror[contenteditable]
+    :where(blockquote, p) {
+    display: inline;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    color: inherit;
+    font-size: inherit;
+    font-weight: inherit;
+    line-height: inherit;
+    list-style: none;
+    white-space: inherit;
+  }
+
+  [data-promptbox-compact-content]
+    .ProseMirror[contenteditable]
+    > *
+    + *::before,
+  [data-promptbox-compact-content]
+    .ProseMirror[contenteditable]
+    :where(blockquote)
+    > *
+    + *::before {
+    content: " ";
+  }
+
+  [data-promptbox-compact-content] .ProseMirror[contenteditable] br {
+    display: inline;
+    content: " ";
+  }
+
+  [data-promptbox-compact-content] .ProseMirror[contenteditable] br::after {
+    content: " ";
+  }
+
+  [data-promptbox-compact-content] .prompt-mention-pill > span:last-child {
+    min-width: 0;
+  }
+
+  [data-promptbox-editor-content]
+    .ProseMirror
+    p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
+  }
+
+  /*
+   * Light up the `ultracode` keyword in the prompt editor with animated purple
+   * sparkles (mirrors Claude Code). The wrapping span is added as a ProseMirror
+   * inline decoration (see prompt-ultracode-highlight-extension.ts); it stays
+   * editable text, so this is paint-only. `background-clip: text` shimmers a
+   * purple gradient through the glyphs, and two pseudo-element glints twinkle at
+   * opposite corners. `prefers-reduced-motion` keeps the purple, drops motion.
+   */
+  .prompt-ultracode-highlight {
+    position: relative;
+    font-weight: 600;
+    background: linear-gradient(
+      90deg,
+      oklch(0.62 0.21 300) 0%,
+      oklch(0.74 0.18 318) 30%,
+      oklch(0.82 0.15 286) 50%,
+      oklch(0.74 0.18 318) 70%,
+      oklch(0.62 0.21 300) 100%
+    );
+    background-size: 200% 100%;
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: ultracode-shimmer 3s linear 2 forwards;
+  }
+
+  .prompt-ultracode-highlight::before,
+  .prompt-ultracode-highlight::after {
+    content: "✦";
+    position: absolute;
+    font-size: 0.62em;
+    line-height: 1;
+    color: oklch(0.84 0.16 308);
+    /* `-webkit-text-fill-color` is inherited, so the transparent fill above
+     * would hide these glyphs — repaint them solid. */
+    -webkit-text-fill-color: oklch(0.84 0.16 308);
+    pointer-events: none;
+    opacity: 0;
+    animation: ultracode-sparkle 1.8s var(--motion-ease-in-out) 2;
+  }
+
+  .prompt-ultracode-highlight::before {
+    top: -0.32em;
+    right: -0.42em;
+  }
+
+  .prompt-ultracode-highlight::after {
+    bottom: -0.22em;
+    left: -0.42em;
+    animation-delay: 0.9s;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .prompt-ultracode-highlight {
+      animation: none;
+      background-position: 50% 0%;
+    }
+
+    .prompt-ultracode-highlight::before,
+    .prompt-ultracode-highlight::after {
+      animation: none;
+      opacity: 0.9;
+    }
+  }
+
+  [data-promptbox] {
+    container: promptbox / inline-size;
+  }
+
+  [data-promptbox-shell] {
+    container: promptbox-shell / inline-size;
+  }
+
+  /*
+   * The thread pane (timeline + composer footer) is a size container so a
+   * short stacked split can compact the follow-up composer. Its dimensions
+   * are determined by the split track, making size containment safe here.
+   */
+  [data-thread-window] {
+    container: thread-pane / size;
+  }
+
+  [data-follow-up-composer] {
+    container-name: follow-up-composer;
+  }
+
+  [data-scroll-overlay] {
+    container: scroll-overlay / inline-size;
+  }
+
+  [data-thread-toc="rail"] {
+    display: none;
+  }
+
+  @container scroll-overlay (min-width: 56rem) {
+    [data-thread-toc="rail"] {
+      display: block;
+    }
+  }
+
+  [data-promptbox-compact-label] {
+    display: none;
+    min-inline-size: 0;
+    max-inline-size: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  @container promptbox (max-width: 30rem) {
+    [data-promptbox] [data-promptbox-full-label],
+    [data-promptbox] [data-promptbox-hide-compact] {
+      display: none !important;
+    }
+
+    [data-promptbox] [data-promptbox-compact-label] {
+      display: block;
+      flex: 1 1 auto;
+    }
+
+    [data-promptbox] [data-promptbox-icon-only-control] {
+      flex-shrink: 0;
+    }
+
+    [data-promptbox] [data-promptbox-shrinkable-control] {
+      flex-shrink: 1 !important;
+    }
+  }
+
+  @container promptbox-shell (max-width: 34rem) {
+    [data-promptbox-shell] [data-promptbox-full-label],
+    [data-promptbox-shell] [data-promptbox-hide-compact] {
+      display: none !important;
+    }
+
+    [data-promptbox-shell] [data-promptbox-compact-label] {
+      display: block;
+      flex: 1 1 auto;
+    }
+
+    [data-promptbox-shell] [data-promptbox-icon-only-control] {
+      flex-shrink: 0;
+    }
+
+    [data-promptbox-shell] [data-promptbox-shrinkable-control] {
+      flex-shrink: 1 !important;
+    }
+
+    [data-promptbox-shell] [data-promptbox-project-control] {
+      flex-shrink: 0;
+      max-inline-size: 10rem;
+    }
+  }
+
+  @container promptbox-shell (max-width: 22rem) {
+    [data-promptbox-shell] [data-promptbox-hide-tiny] {
+      display: none !important;
+    }
+  }
+
+  @media (width < 48rem) and (pointer: coarse) {
+    [data-new-thread-footer] button {
+      min-block-size: 2.75rem;
+    }
+  }
+
+  @media (width < 48rem) {
+    [data-new-thread-footer]
+      [data-promptbox-shrinkable-control]:has(~ :not(:empty)) {
+      flex-shrink: 0 !important;
+    }
+
+    [data-new-thread-footer]
+      [data-promptbox-shrinkable-control]:has(~ :not(:empty))
+      [data-promptbox-compact-label] {
+      display: none !important;
+    }
+
+    [data-new-thread-footer]
+      [data-promptbox-icon-only-control]
+      [data-promptbox-full-label] {
+      display: block !important;
+    }
+
+    [data-new-thread-footer] [data-promptbox-icon-only-control] {
+      flex-shrink: 1;
+    }
+  }
+}
+
+/*
+ * A narrow prompt shell or short thread pane sets the same custom-property
+ * flag on the follow-up composer. The style query below applies its one-line
+ * presentation once for either condition, then lets focus expand it. This is
+ * intentionally unlayered so it can override the prompt's utility classes.
+ * The mobile path still owns its React state so software-keyboard expansion
+ * remains synchronized with visualViewport changes.
+ */
+[data-plugin-shelf] {
+  container: plugin-shelf / inline-size;
+}
+
+[data-plugin-shelf-grid] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@container plugin-shelf (min-width: 32.5rem) {
+  [data-plugin-shelf-grid] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container plugin-shelf (min-width: 49rem) {
+  [data-plugin-shelf-grid] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@container promptbox-shell (max-width: 30rem) {
+  [data-follow-up-composer] {
+    --follow-up-composer-container-compact: true;
+  }
+}
+
+@container thread-pane ((min-height: 1px) and (max-height: 26rem)) {
+  [data-follow-up-composer] {
+    --follow-up-composer-container-compact: true;
+  }
+}
+
+@container follow-up-composer style(--follow-up-composer-container-compact: true) {
+  [data-follow-up-composer] [data-promptbox-layout] {
+    height: 100%;
+  }
+
+  [data-follow-up-composer] [data-promptbox-main] {
+    position: static;
+  }
+
+  [data-follow-up-composer] [data-promptbox-submit-group] {
+    position: static;
+    z-index: 1;
+  }
+
+  [data-follow-up-composer] [data-promptbox-submit-action] {
+    width: auto;
+    aspect-ratio: 1;
+    margin-left: 0;
+  }
+
+  [data-follow-up-composer] [data-promptbox-submit-label] {
+    display: none;
+  }
+
+  [data-follow-up-composer]:not([data-follow-up-composer-expanded])
+    [data-promptbox]:not([data-promptbox-voice-active]) {
+    overflow: hidden;
+  }
+
+  [data-follow-up-composer]:not([data-follow-up-composer-expanded])
+    [data-promptbox]:not([data-promptbox-voice-active])
+    [data-promptbox-action-row] {
+    flex-wrap: nowrap;
+    gap: 0;
+    padding: 0 0.5rem 0 0;
+  }
+
+  [data-follow-up-composer]:not([data-follow-up-composer-expanded])
+    [data-promptbox]:not([data-promptbox-voice-active])
+    [data-promptbox-main] {
+    display: flex;
+    align-items: center;
+    height: 3rem;
+  }
+
+  [data-follow-up-composer]:not([data-follow-up-composer-expanded])
+    [data-promptbox]:not([data-promptbox-voice-active])
+    [data-promptbox-input-region] {
+    flex: 1 1 0%;
+    min-width: 0;
+  }
+
+  [data-follow-up-composer]:not([data-follow-up-composer-expanded])
+    [data-promptbox]:not([data-promptbox-voice-active])
+    [data-promptbox-expanded-only] {
+    display: none !important;
+  }
+
+  [data-follow-up-composer]:not([data-follow-up-composer-expanded])
+    [data-promptbox]:not([data-promptbox-voice-active])
+    [data-promptbox-editor-scroll] {
+    height: 3rem !important;
+    min-height: 3rem !important;
+    max-height: 3rem !important;
+    overflow: hidden;
+    padding-top: 0;
+    padding-bottom: 0;
+    padding-right: 0.5rem;
+  }
+
+  [data-follow-up-composer]:not([data-follow-up-composer-expanded])
+    [data-promptbox]:not([data-promptbox-voice-active])
+    [data-promptbox-editor-content] {
+    display: flex;
+    align-items: center;
+    height: 100%;
+  }
+
+  [data-follow-up-composer]:not([data-follow-up-composer-expanded])
+    [data-promptbox]:not([data-promptbox-voice-active])
+    [data-promptbox-editor-content]
+    .ProseMirror[contenteditable] {
+    width: 100%;
+    min-height: 0 !important;
+    max-height: 1.7em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap !important;
+  }
+
+  [data-follow-up-composer]:not([data-follow-up-composer-expanded])
+    [data-promptbox]:not([data-promptbox-voice-active])
+    [data-promptbox-editor-content]
+    .ProseMirror[contenteditable]
+    > *,
+  [data-follow-up-composer]:not([data-follow-up-composer-expanded])
+    [data-promptbox]:not([data-promptbox-voice-active])
+    [data-promptbox-editor-content]
+    .ProseMirror[contenteditable]
+    :where(blockquote, p) {
+    display: inline;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    color: inherit;
+    font-size: inherit;
+    font-weight: inherit;
+    line-height: inherit;
+    list-style: none;
+    white-space: inherit;
+  }
+
+  [data-follow-up-composer]:not([data-follow-up-composer-expanded])
+    [data-promptbox]:not([data-promptbox-voice-active])
+    [data-promptbox-editor-content]
+    .ProseMirror[contenteditable]
+    > *
+    + *::before,
+  [data-follow-up-composer]:not([data-follow-up-composer-expanded])
+    [data-promptbox]:not([data-promptbox-voice-active])
+    [data-promptbox-editor-content]
+    .ProseMirror[contenteditable]
+    :where(blockquote)
+    > *
+    + *::before {
+    content: " ";
+  }
+
+  [data-follow-up-composer]:not([data-follow-up-composer-expanded])
+    [data-promptbox]:not([data-promptbox-voice-active])
+    [data-promptbox-editor-content]
+    .ProseMirror[contenteditable]
+    br {
+    display: inline;
+    content: " ";
+  }
+
+  [data-follow-up-composer]:not([data-follow-up-composer-expanded])
+    [data-promptbox]:not([data-promptbox-voice-active])
+    [data-promptbox-editor-content]
+    .ProseMirror[contenteditable]
+    br::after {
+    content: " ";
+  }
+
+  [data-follow-up-composer]:not([data-follow-up-composer-expanded])
+    [data-promptbox]:not([data-promptbox-voice-active])
+    [data-promptbox-editor-content]
+    .prompt-mention-pill
+    > span:last-child {
+    min-width: 0;
+  }
+
+  [data-follow-up-composer]:not([data-follow-up-composer-expanded])
+    [data-promptbox]:not([data-promptbox-voice-active])
+    [data-promptbox-editor-content]
+    .ProseMirror
+    p.is-editor-empty:first-child:not([data-placeholder=""])::before {
+    content: var(--promptbox-container-compact-placeholder);
+  }
+}
+
+@layer base {
+  /*
+   * Sonner clips collapsed native toasts on the toast node. Our custom card
+   * lives inside that node, so clip it there too when it is behind the front
+   * toast in the stack.
+   */
+  :where(
+    [data-sonner-toast].omnyo-app-toast[data-expanded="false"][data-front="false"]
+  ) {
+    overflow: hidden;
+    border-radius: var(--radius-xl);
+  }
+
+  /*
+   * Opt out of the global thin scrollbar for horizontally-scrolling strips
+   * (e.g. the secondary-panel tab strip) where the scrollbar would clutter a
+   * short row. The element still scrolls; only the scrollbar chrome is hidden.
+   */
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /*
+   * Keep reading surfaces visually quiet at rest while preserving the native
+   * scroll container, its hit area, and its layout geometry. The scroll owner
+   * briefly sets `data-scrollbar-scrolling` for real scroll events, matching
+   * the platform's transient scrollbar behavior without making content reflow
+   * as the thumb appears.
+   */
+  .thread-scrollbar,
+  .transient-scrollbar {
+    scrollbar-color: transparent transparent;
+  }
+
+  .thread-scrollbar::-webkit-scrollbar-thumb,
+  .thread-scrollbar::-webkit-scrollbar-thumb:hover,
+  .transient-scrollbar::-webkit-scrollbar-thumb,
+  .transient-scrollbar::-webkit-scrollbar-thumb:hover {
+    background-color: transparent;
+  }
+
+  .thread-scrollbar[data-scrollbar-scrolling="true"],
+  .transient-scrollbar[data-scrollbar-scrolling="true"] {
+    scrollbar-color: color-mix(in oklab, var(--foreground) 20%, transparent)
+      transparent;
+  }
+
+  .thread-scrollbar[data-scrollbar-scrolling="true"]::-webkit-scrollbar-thumb,
+  .transient-scrollbar[data-scrollbar-scrolling="true"]::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklab, var(--foreground) 20%, transparent);
+  }
+
+  .thread-scrollbar[data-scrollbar-scrolling="true"]::-webkit-scrollbar-thumb:hover,
+  .transient-scrollbar[data-scrollbar-scrolling="true"]::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklab, var(--foreground) 40%, transparent);
+  }
+
+  @media (hover: none) and (pointer: coarse) {
+    .thread-scrollbar,
+    [data-sidebar="content"] {
+      scrollbar-width: none;
+    }
+
+    .thread-scrollbar::-webkit-scrollbar,
+    [data-sidebar="content"]::-webkit-scrollbar {
+      display: none;
+    }
+  }
+
+  [data-vaul-drawer-direction] [data-sidebar="content"] {
+    scrollbar-color: transparent transparent;
+  }
+
+  [data-vaul-drawer-direction]
+    [data-sidebar="content"]::-webkit-scrollbar-thumb,
+  [data-vaul-drawer-direction]
+    [data-sidebar="content"]::-webkit-scrollbar-thumb:hover {
+    background-color: transparent;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    [data-vaul-drawer-direction] [data-sidebar="content"]:hover {
+      scrollbar-color: color-mix(in oklab, var(--foreground) 20%, transparent)
+        transparent;
+    }
+
+    [data-vaul-drawer-direction]
+      [data-sidebar="content"]:hover::-webkit-scrollbar-thumb {
+      background-color: color-mix(in oklab, var(--foreground) 20%, transparent);
+    }
+
+    [data-vaul-drawer-direction]
+      [data-sidebar="content"]:hover::-webkit-scrollbar-thumb:hover {
+      background-color: color-mix(in oklab, var(--foreground) 40%, transparent);
+    }
+  }
+
+  /*
+   * Opt out of the global thin scrollbar into always-visible classic
+   * scrollbars for two-axis data surfaces (e.g. the CSV table preview).
+   * Native thin scrollbars render as macOS overlay bars that fade out and
+   * give a wide table no persistent horizontal-scroll affordance. Chromium
+   * only honors `::-webkit-scrollbar` customization when `scrollbar-width`
+   * and `scrollbar-color` are both `auto`, so those resets are what
+   * re-enable the persistent chrome below.
+   */
+  .persistent-scrollbar {
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+  }
+
+  .persistent-scrollbar::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  .persistent-scrollbar::-webkit-scrollbar-track,
+  .persistent-scrollbar::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  .persistent-scrollbar::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklab, var(--foreground) 20%, transparent);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  .persistent-scrollbar::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklab, var(--foreground) 40%, transparent);
+  }
+}
+
+/* Sweep the purple gradient across the `ultracode` glyphs. */
+@keyframes ultracode-shimmer {
+  0% {
+    background-position: 200% 0%;
+  }
+  100% {
+    background-position: -200% 0%;
+  }
+}
+
+/* Twinkle each corner sparkle: fade in, scale up, and spin a quarter turn. */
+@keyframes ultracode-sparkle {
+  0%,
+  100% {
+    opacity: 0;
+    transform: scale(0.4) rotate(0deg);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1) rotate(90deg);
+  }
+}
+
+@keyframes omnyo-search-flash {
+  0%,
+  25% {
+    background-color: var(--state-hover);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.omnyo-search-flash {
+  border-radius: var(--radius-lg, 0.5rem);
+  background-color: var(--state-hover);
+  animation: omnyo-search-flash 1.6s var(--motion-ease-standard) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .omnyo-search-flash {
+    animation: none;
+  }
+}
+
+/*
+ * The working dot breathes while a soft ring drifts outward and fades. Both
+ * animate only `transform` and `opacity`, which run on the compositor, so a
+ * live chat costs the main thread nothing per frame.
+ */
+@keyframes omnyo-working-breathe {
+  0%,
+  100% {
+    opacity: 0.6;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes omnyo-working-ping {
+  0% {
+    opacity: 0.45;
+    transform: scale(1);
+  }
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(2.8);
+  }
+}
+
+.omnyo-working-breathe {
+  animation: omnyo-working-breathe 2s var(--motion-ease-in-out) infinite;
+}
+
+.omnyo-working-ping {
+  animation: omnyo-working-ping 2s var(--motion-ease-out) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .omnyo-working-breathe {
+    animation: none;
+  }
+
+  .omnyo-working-ping {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+@keyframes omnyo-working-tab-in {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+}
+
+@keyframes omnyo-working-tab-out {
+  to {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+}
+
+@keyframes omnyo-working-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@keyframes omnyo-working-halo {
+  0%,
+  100% {
+    opacity: 0.18;
+    transform: scale(0.7);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.15);
+  }
+}
+
+@keyframes omnyo-working-sheen {
+  0% {
+    opacity: 0;
+    transform: translateX(-100%);
+  }
+  12% {
+    opacity: 1;
+  }
+  64% {
+    opacity: 1;
+    transform: translateX(225%);
+  }
+  76%,
+  100% {
+    opacity: 0;
+    transform: translateX(225%);
+  }
+}
+
+.omnyo-working-tab {
+  background-image: linear-gradient(
+    to bottom,
+    color-mix(in oklab, var(--timeline-accent) 9%, transparent),
+    transparent 60%
+  );
+  box-shadow:
+    inset 0 0 0 0.5px var(--material-line),
+    var(--shadow-lift);
+}
+
+.omnyo-working-tab[data-state="open"] {
+  animation: omnyo-working-tab-in var(--motion-duration-slow)
+    var(--motion-ease-snappy) both;
+}
+
+.omnyo-working-tab[data-state="closed"] {
+  animation: omnyo-working-tab-out var(--motion-duration-base)
+    var(--motion-ease-in) forwards;
+}
+
+.omnyo-working-tab-sheen {
+  position: absolute;
+  inset-inline: 0.625rem;
+  top: 0;
+  height: 1px;
+  overflow: hidden;
+}
+
+.omnyo-working-tab-sheen::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 45%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklab, var(--timeline-accent) 90%, transparent),
+    transparent
+  );
+  animation: omnyo-working-sheen 3.2s var(--motion-ease-in-out) infinite;
+  will-change: transform;
+}
+
+.omnyo-working-orb {
+  position: relative;
+  display: flex;
+  width: 0.875rem;
+  height: 0.875rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+.omnyo-working-orb-halo {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: var(--timeline-accent);
+  filter: blur(4px);
+  animation: omnyo-working-halo 2.4s var(--motion-ease-in-out) infinite;
+}
+
+.omnyo-working-orb-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: conic-gradient(
+    transparent 0turn 0.3turn,
+    color-mix(in oklab, var(--timeline-accent) 35%, transparent) 0.65turn,
+    var(--timeline-accent) 1turn
+  );
+  -webkit-mask: radial-gradient(
+    farthest-side,
+    transparent calc(100% - 1.5px),
+    black calc(100% - 1px)
+  );
+  mask: radial-gradient(
+    farthest-side,
+    transparent calc(100% - 1.5px),
+    black calc(100% - 1px)
+  );
+  animation: omnyo-working-spin 0.9s linear infinite;
+}
+
+.omnyo-working-orb-core {
+  position: relative;
+  width: 0.3125rem;
+  height: 0.3125rem;
+  border-radius: 9999px;
+  background: var(--timeline-accent);
+  animation: omnyo-working-breathe 2.4s var(--motion-ease-in-out) infinite;
+}
+
+.omnyo-working-orb.omnyo-working-orb-fill {
+  width: 100%;
+  height: 100%;
+}
+
+.omnyo-working-orb-fill .omnyo-working-orb-halo {
+  inset: 2px;
+}
+
+.omnyo-sidebar-working-row {
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--timeline-accent) 11%, transparent),
+    transparent 60%
+  );
+  box-shadow: inset 2px 0 0
+    color-mix(in oklab, var(--timeline-accent) 60%, transparent);
+}
+
+.omnyo-working-tab[data-activity="thinking"] .omnyo-working-orb-ring {
+  animation-duration: 1.8s;
+}
+
+.omnyo-working-tab[data-activity="thinking"] .omnyo-working-orb-halo {
+  animation-duration: 3.2s;
+}
+
+@keyframes omnyo-composer-glow-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes omnyo-composer-glow-out {
+  to {
+    opacity: 0;
+  }
+}
+
+[data-composer-working]
+  > .omnyo-composer-working-frame
+  [data-promptbox]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--timeline-accent) 32%, transparent),
+    inset 0 18px 24px -22px
+      color-mix(in oklab, var(--timeline-accent) 45%, transparent),
+    0 -6px 26px -16px
+      color-mix(in oklab, var(--timeline-accent) 65%, transparent);
+  animation: omnyo-composer-glow-in var(--motion-duration-slow)
+    var(--motion-ease-out) both;
+}
+
+[data-composer-working="closed"]
+  > .omnyo-composer-working-frame
+  [data-promptbox]::after {
+  animation: omnyo-composer-glow-out var(--motion-duration-base)
+    var(--motion-ease-in) forwards;
+}
+
+.omnyo-composer-working-sweep {
+  position: absolute;
+  top: 0;
+  inset-inline: 1rem;
+  height: 0.75rem;
+  overflow: hidden;
+  pointer-events: none;
+  animation: omnyo-composer-glow-in var(--motion-duration-slow)
+    var(--motion-ease-out) both;
+}
+
+[data-composer-working="closed"] .omnyo-composer-working-sweep {
+  animation: omnyo-composer-glow-out var(--motion-duration-fast)
+    var(--motion-ease-in) forwards;
+}
+
+.omnyo-composer-working-sweep::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 45%;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--timeline-accent),
+    transparent
+  );
+  box-shadow: 0 0 10px 1px
+    color-mix(in oklab, var(--timeline-accent) 40%, transparent);
+  animation: omnyo-working-sheen 3.2s var(--motion-ease-in-out) 0.5s infinite
+    both;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .omnyo-working-tab[data-state] {
+    animation: none;
+  }
+
+  .omnyo-working-tab[data-state="closed"] {
+    opacity: 0;
+  }
+
+  .omnyo-composer-working-sweep {
+    display: none;
+  }
+
+  [data-composer-working]
+    > .omnyo-composer-working-frame
+    [data-promptbox]::after {
+    animation: none;
+  }
+
+  [data-composer-working="closed"]
+    > .omnyo-composer-working-frame
+    [data-promptbox]::after {
+    opacity: 0;
+  }
+
+  .omnyo-working-tab-sheen::after,
+  .omnyo-working-orb-ring,
+  .omnyo-working-orb-halo,
+  .omnyo-working-orb-core {
+    animation: none;
+  }
+
+  .omnyo-working-orb-halo {
+    opacity: 0.3;
+  }
+}
+
+@keyframes omnyo-rail-wiggle {
+  0%,
+  100% {
+    rotate: -2.5deg;
+  }
+  50% {
+    rotate: 2.5deg;
+  }
+}
+
+.omnyo-rail-wiggle {
+  animation: omnyo-rail-wiggle 0.3s var(--motion-ease-in-out) infinite;
+}
+
+.omnyo-rail-wiggle[data-dragging] {
+  animation: none;
+  scale: 1.08;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .omnyo-rail-wiggle {
+    animation: none;
+  }
+}
+
+@keyframes omnyo-count-flash {
+  0%,
+  35% {
+    background-color: var(--foreground);
+    color: var(--background);
+  }
+}
+
+@keyframes omnyo-count-roll-in {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+}
+
+@keyframes omnyo-count-roll-out {
+  to {
+    opacity: 0;
+    transform: translateY(-100%);
+  }
+}
+
+.omnyo-count-flash {
+  animation: omnyo-count-flash 1.2s var(--motion-ease-standard);
+}
+
+.omnyo-count-roll-in {
+  animation: omnyo-count-roll-in var(--motion-duration-base)
+    var(--motion-ease-smooth);
+}
+
+.omnyo-count-roll-out {
+  animation: omnyo-count-roll-out var(--motion-duration-base)
+    var(--motion-ease-smooth) forwards;
+}
+
+@keyframes omnyo-queue-card-enter {
+  from {
+    height: 0;
+    margin-bottom: 0;
+    padding-bottom: 0;
+    opacity: 0;
+  }
+}
+
+@keyframes omnyo-queue-row-enter {
+  from {
+    opacity: 0;
+    translate: 0 0.375rem;
+  }
+}
+
+.omnyo-queue-card-enter {
+  animation: omnyo-queue-row-enter var(--motion-duration-base)
+    var(--motion-ease-out);
+}
+
+@supports (interpolate-size: allow-keywords) {
+  .omnyo-queue-card-enter {
+    interpolate-size: allow-keywords;
+    animation: omnyo-queue-card-enter var(--motion-duration-base)
+      var(--motion-ease-smooth);
+  }
+}
+
+.omnyo-queue-row-enter {
+  animation: omnyo-queue-row-enter var(--motion-duration-base)
+    var(--motion-ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .omnyo-queue-card-enter,
+  .omnyo-queue-row-enter {
+    animation: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .omnyo-count-roll-in {
+    animation: none;
+  }
+
+  .omnyo-count-roll-out {
+    display: none;
+  }
+}
+
+@keyframes omnyo-handoff-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes omnyo-handoff-settle {
+  from {
+    opacity: 0.6;
+  }
+}
+
+@keyframes omnyo-handoff-row-enter {
+  from {
+    opacity: 0;
+    translate: 0 0.25rem;
+  }
+}
+
+@keyframes omnyo-handoff-row-grow {
+  from {
+    height: 0;
+    margin-top: -0.5rem;
+    overflow: clip;
+  }
+
+  to {
+    overflow: clip;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :where([data-thread-handoff]) :where([data-app-page-header]) {
+    animation: omnyo-handoff-fade-in var(--motion-duration-fast)
+      var(--motion-ease-out);
+  }
+
+  :where([data-thread-handoff]) :where([data-scroll-footer] [data-promptbox]) {
+    animation: omnyo-handoff-settle var(--motion-duration-fast)
+      var(--motion-ease-out);
+  }
+
+  :where([data-thread-handoff])
+    :where(
+      [data-timeline-row-list="top-level"]
+        > [data-timeline-row-kind]:not([data-timeline-row-kind="user"])
+    ) {
+    animation: omnyo-handoff-row-enter var(--motion-duration-base)
+      var(--motion-ease-out);
+  }
+
+  @supports (interpolate-size: allow-keywords) {
+    :where([data-thread-handoff])
+      :where(
+        [data-timeline-row-list="top-level"]
+          > [data-timeline-row-kind]:not([data-timeline-row-kind="user"])
+      ) {
+      min-height: 0;
+      interpolate-size: allow-keywords;
+      animation:
+        omnyo-handoff-row-enter var(--motion-duration-base)
+          var(--motion-ease-out),
+        omnyo-handoff-row-grow var(--motion-duration-base)
+          var(--motion-ease-smooth);
+    }
+  }
+}
+
+:where([data-pending-thread-chat]) :where([data-new-thread-footer]) {
+  display: none;
+}
+
+.omnyo-spotlight[data-state="open"] {
+  animation:
+    omnyo-spotlight-fade-in var(--motion-duration-fast) var(--motion-ease-out),
+    omnyo-spotlight-rise var(--motion-duration-slow) var(--motion-ease-smooth);
+}
+
+.omnyo-spotlight[data-state="closed"] {
+  pointer-events: none !important;
+  animation: omnyo-spotlight-dismiss var(--motion-duration-fast)
+    var(--motion-ease-standard) forwards;
+}
+
+.omnyo-spotlight[data-state="closed"][data-launcher-exit="send"] {
+  animation:
+    omnyo-spotlight-send var(--motion-duration-fast) var(--motion-ease-in)
+      forwards,
+    omnyo-spotlight-fade-out var(--motion-duration-fast)
+      var(--motion-ease-standard) forwards;
+}
+
+.omnyo-spotlight-backdrop[data-state="open"] {
+  animation: omnyo-spotlight-fade-in var(--motion-duration-base)
+    var(--motion-ease-out);
+}
+
+.omnyo-spotlight-backdrop[data-state="closed"] {
+  pointer-events: none !important;
+  animation: omnyo-spotlight-fade-out var(--motion-duration-fast)
+    var(--motion-ease-standard) forwards;
+}
+
+@keyframes omnyo-spotlight-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes omnyo-spotlight-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes omnyo-spotlight-rise {
+  from {
+    transform: translate3d(0, 8px, 0) scale(0.97);
+  }
+}
+
+@keyframes omnyo-spotlight-dismiss {
+  to {
+    opacity: 0;
+    transform: translate3d(0, 4px, 0) scale(0.98);
+  }
+}
+
+@keyframes omnyo-spotlight-send {
+  to {
+    transform: translate3d(0, -12px, 0) scale(0.98);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .omnyo-spotlight[data-state="open"] {
+    animation: omnyo-spotlight-fade-in var(--motion-duration-fast)
+      var(--motion-ease-standard);
+  }
+
+  .omnyo-spotlight[data-state="closed"],
+  .omnyo-spotlight[data-state="closed"][data-launcher-exit="send"] {
+    animation: omnyo-spotlight-fade-out var(--motion-duration-fast)
+      var(--motion-ease-standard) forwards;
+  }
+}
+
+/* Browse hero (Plugins → Browse plugins): the archetype chips orbiting the mini Omnyo
+ * window drift slowly so the hero reads as alive without competing with the
+ * composer sitting in the middle of it. Duration and delay are per-chip custom
+ * properties so each chip drifts out of phase with its neighbours from one
+ * shared rule. */
+@keyframes omnyo-hero-drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -6px, 0);
+  }
+}
+
+.omnyo-hero-chip {
+  animation: omnyo-hero-drift var(--omnyo-hero-drift-duration, 6s)
+    var(--motion-ease-in-out) infinite;
+  animation-delay: var(--omnyo-hero-drift-delay, 0s);
+}
+
+.omnyo-hero-chip[data-paused="true"] {
+  animation-play-state: paused;
+}
+
+/* Autoplay progress for the active slide segment. The element is keyed by slide
+ * in React, so a slide change remounts it and restarts the animation from zero
+ * rather than needing an imperative reset. */
+@keyframes omnyo-hero-progress {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.omnyo-hero-progress-fill {
+  transform-origin: left center;
+  animation: omnyo-hero-progress var(--omnyo-hero-slide-duration, 5s) linear
+    forwards;
+}
+
+.omnyo-hero-progress-fill[data-paused="true"] {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .omnyo-hero-chip {
+    animation: none;
+  }
+
+  /* No autoplay under reduced motion, so the segment shows a resting full
+   * state instead of an animation frozen at zero width. */
+  .omnyo-hero-progress-fill {
+    animation: none;
+    transform: scaleX(1);
+  }
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-styled="true"] {
+  border: 0;
+  border-radius: var(--radius-xl);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: var(--material-shadow-float);
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-styled="true"]:focus-visible {
+  box-shadow:
+    var(--material-shadow-float),
+    0 0 0 2px var(--ring);
+}
+
+[data-sonner-toaster] [data-sonner-toast] {
+  transition-timing-function:
+    var(--motion-ease-smooth), var(--motion-ease-standard),
+    var(--motion-ease-smooth), var(--motion-ease-standard);
+}
+
+[data-sonner-toaster] [data-sonner-toast].omnyo-instant-toast,
+[data-sonner-toaster] [data-sonner-toast].omnyo-instant-toast > * {
+  transition: none !important;
+  animation: none !important;
+}
+
+@keyframes omnyo-streaming-block-enter {
+  from {
+    opacity: 0;
+    filter: blur(3px);
+  }
+}
+
+@layer base {
+  @media (prefers-reduced-motion: no-preference) {
+    [data-streaming-block-enter] {
+      animation: omnyo-streaming-block-enter var(--motion-duration-base)
+        var(--motion-ease-out);
+    }
+  }
+}
+
+@layer utilities {
+  [data-page-content-column]:has(
+      + [data-scroll-footer]
+        [data-omnyo-plugin="glance"][data-omnyo-plugin-slot-id="glance-ready/ready"]:not(
+          :empty
+        )
+    )
+    > :only-child {
+    justify-content: safe flex-end;
+  }
+
+  [data-page-content-column]:is(
+    :has(> .timeline-working):has(+ [data-scroll-footer]),
+    :has(
+      + [data-scroll-footer]
+        [data-omnyo-plugin="glance"][data-omnyo-plugin-slot-id="glance-ready/ready"]:not(
+          :empty
+        )
+    )
+  ) {
+    @apply pb-1;
+  }
+
+  [data-page-content-column]:has(> .timeline-working)
+    + [data-scroll-footer]
+    > div
+    > [data-overflow-fade="above"],
+  [data-scroll-footer]:has(
+      [data-omnyo-plugin="glance"][data-omnyo-plugin-slot-id="glance-ready/ready"]:not(
+          :empty
+        )
+    )
+    > div
+    > [data-overflow-fade="above"] {
+    @apply -top-1 h-1;
+  }
+
+  [data-message-column] [data-markdown-preview],
+  [data-message-body] [data-markdown-preview] {
+    font-size: var(--text-prose);
+    line-height: var(--text-prose--line-height);
+  }
+}
+
+@layer components {
+  [data-unread-divider-rule] {
+    transform-origin: left center;
+  }
+
+  [data-unread-divider][data-retracted] [data-unread-divider-rule] {
+    opacity: 0;
+    transform: scaleX(0);
+  }
+
+  [data-unread-divider][data-retracted] [data-unread-divider-word] {
+    opacity: 0;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    [data-unread-divider-rule] {
+      transition:
+        transform var(--motion-duration-slow) var(--motion-ease-smooth),
+        opacity var(--motion-duration-slow) var(--motion-ease-smooth);
+    }
+
+    [data-unread-divider-word] {
+      transition: opacity var(--motion-duration-base) var(--motion-ease-out)
+        var(--motion-duration-slow);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-unread-divider-rule],
+    [data-unread-divider-word] {
+      transition: opacity var(--motion-duration-fast)
+        var(--motion-ease-standard);
+    }
+
+    [data-unread-divider][data-retracted] [data-unread-divider-rule] {
+      transform: none;
+    }
+  }
+}
+
+@keyframes omnyo-stagger-in {
+  from {
+    opacity: 0;
+    translate: 0 0.375rem;
+  }
+}
+
+@keyframes omnyo-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes omnyo-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes omnyo-step-travel-in-forward {
+  from {
+    translate: 0.5rem 0;
+  }
+}
+
+@keyframes omnyo-step-travel-in-back {
+  from {
+    translate: -0.5rem 0;
+  }
+}
+
+@keyframes omnyo-step-travel-out-forward {
+  to {
+    translate: -0.25rem 0;
+  }
+}
+
+@keyframes omnyo-step-travel-out-back {
+  to {
+    translate: 0.25rem 0;
+  }
+}
+
+@keyframes omnyo-check-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes omnyo-check-badge-in {
+  from {
+    opacity: 0;
+    scale: 0.6;
+  }
+}
+
+@layer components {
+  .omnyo-stagger-item {
+    animation: omnyo-stagger-in var(--motion-duration-base)
+      var(--motion-ease-out) both;
+    animation-delay: calc(
+      min(var(--omnyo-stagger-index, 0), var(--omnyo-stagger-count, 1) - 1) *
+        min(
+          var(--motion-duration-stagger),
+          var(--motion-duration-fast) /
+            max(var(--omnyo-stagger-count, 1) - 1, 1)
+        )
+    );
+  }
+
+  .omnyo-step-enter {
+    animation:
+      omnyo-fade-in var(--motion-duration-base) var(--motion-ease-out) both,
+      omnyo-step-travel-in-forward var(--motion-duration-slow)
+        var(--motion-ease-smooth) both;
+  }
+
+  .omnyo-step-enter[data-step-direction="back"] {
+    animation-name: omnyo-fade-in, omnyo-step-travel-in-back;
+  }
+
+  .omnyo-step-exit {
+    pointer-events: none;
+    animation:
+      omnyo-fade-out var(--motion-duration-fast) var(--motion-ease-standard)
+        both,
+      omnyo-step-travel-out-forward var(--motion-duration-fast)
+        var(--motion-ease-in) both;
+  }
+
+  .omnyo-step-exit[data-step-direction="back"] {
+    animation-name: omnyo-fade-out, omnyo-step-travel-out-back;
+  }
+
+  .omnyo-check-draw {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 0;
+    animation: omnyo-check-draw var(--motion-duration-base)
+      var(--motion-ease-snappy) both;
+    animation-delay: calc(var(--motion-duration-fast) / 3);
+  }
+
+  .omnyo-check-badge {
+    animation: omnyo-check-badge-in var(--motion-duration-base)
+      var(--motion-ease-snappy) both;
+  }
+
+  .omnyo-card-lift {
+    position: relative;
+    transition: translate var(--motion-duration-base) var(--motion-ease-smooth);
+  }
+
+  .omnyo-card-lift::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: var(--shadow-card-hover);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--motion-duration-base) var(--motion-ease-standard);
+  }
+
+  @media (hover: hover) {
+    .omnyo-card-lift:hover {
+      translate: 0 -1px;
+    }
+
+    .omnyo-card-lift:hover::after {
+      opacity: 1;
+    }
+  }
+
+  .omnyo-card-lift:active {
+    translate: none;
+    transition-duration: var(--motion-duration-fast);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .omnyo-stagger-item,
+    .omnyo-check-draw,
+    .omnyo-check-badge {
+      animation: none;
+    }
+
+    .omnyo-step-enter,
+    .omnyo-step-enter[data-step-direction="back"] {
+      animation: omnyo-fade-in var(--motion-duration-fast)
+        var(--motion-ease-standard) both;
+    }
+
+    .omnyo-step-exit,
+    .omnyo-step-exit[data-step-direction="back"] {
+      animation: omnyo-fade-out var(--motion-duration-fast)
+        var(--motion-ease-standard) both;
+    }
+
+    .omnyo-card-lift,
+    .omnyo-card-lift:hover {
+      translate: none;
+    }
+  }
+}

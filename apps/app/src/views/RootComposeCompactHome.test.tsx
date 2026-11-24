@@ -1,0 +1,137 @@
+// @vitest-environment jsdom
+
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { RootComposeCompactHome } from "./RootComposeCompactHome";
+import { COMPOSER_EDITOR_AVAILABLE_HEIGHT_PROPERTY } from "@/components/promptbox/ComposerEditorSlot";
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+function renderCompactHome() {
+  return render(
+    <RootComposeCompactHome composer={<div data-testid="composer" />}>
+      <div data-testid="homepage-content" />
+    </RootComposeCompactHome>,
+  );
+}
+
+describe("RootComposeCompactHome", () => {
+  it("keeps the composer above a scroll viewport that runs behind it", () => {
+    renderCompactHome();
+
+    const viewport = screen.getByTestId("root-compose-compact-scroll-viewport");
+    const composer = screen.getByTestId("root-compose-compact-composer");
+
+    expect(viewport.className).toContain("bottom-0");
+    expect(viewport.className).toContain("overflow-y-auto");
+    expect(composer.className).toContain("absolute");
+    expect(composer.className).toContain("bottom-0");
+    expect(composer.className).toContain("z-10");
+    expect(composer.contains(screen.getByTestId("composer"))).toBe(true);
+    expect(viewport.contains(screen.getByTestId("homepage-content"))).toBe(
+      true,
+    );
+  });
+
+  it("starts the scroll viewport under the app chrome row and spaces content above the composer before paint", () => {
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(
+      function (this: HTMLElement) {
+        if (this.dataset.testid === "root-compose-compact-home") return 852;
+
+        if (this.dataset.testid === "root-compose-compact-composer") {
+          return 188;
+        }
+
+        return 0;
+      },
+    );
+
+    renderCompactHome();
+
+    const viewport = screen.getByTestId("root-compose-compact-scroll-viewport");
+
+    const bottomSpacer = screen.getByTestId(
+      "root-compose-compact-bottom-spacer",
+    );
+
+    expect(viewport.style.top).toBe("56px");
+    expect(bottomSpacer.style.height).toBe("188px");
+  });
+
+  it("caps the editor so a tall draft keeps the composer below the app chrome row", () => {
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(
+      function (this: HTMLElement) {
+        if (this.dataset.testid === "root-compose-compact-home") return 480;
+
+        if (this.dataset.testid === "root-compose-compact-composer") {
+          return 682;
+        }
+
+        if (this.hasAttribute("data-promptbox-editor-scroll")) return 540;
+
+        return 0;
+      },
+    );
+
+    render(
+      <RootComposeCompactHome
+        composer={<div data-promptbox-editor-scroll="" />}
+      >
+        <div />
+      </RootComposeCompactHome>,
+    );
+
+    const composer = screen.getByTestId("root-compose-compact-composer");
+    expect(
+      composer.style.getPropertyValue(
+        COMPOSER_EDITOR_AVAILABLE_HEIGHT_PROPERTY,
+      ),
+    ).toBe(`${480 - 56 - (682 - 540)}px`);
+  });
+
+  it("rests content that fits on the composer instead of under the app chrome row", () => {
+    renderCompactHome();
+
+    const content = screen.getByTestId("root-compose-compact-scroll-content");
+    expect(content.className).toContain("min-h-full");
+    expect(content.className).toContain("justify-end");
+    expect(content.lastElementChild).toBe(
+      screen.getByTestId("root-compose-compact-bottom-spacer"),
+    );
+  });
+
+  it("drops the composer fade when nothing scrolls behind it", () => {
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(534);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(534);
+
+    renderCompactHome();
+
+    expect(screen.getByTestId("root-compose-compact-fade").hidden).toBe(true);
+  });
+
+  it("keeps the composer fade while content overflows behind it", () => {
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(873);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(534);
+
+    renderCompactHome();
+
+    expect(screen.getByTestId("root-compose-compact-fade").hidden).toBe(false);
+  });
+
+  it("renders a strong fade so content dissolves into the composer", () => {
+    renderCompactHome();
+
+    const composer = screen.getByTestId("root-compose-compact-composer");
+    const fade = composer.querySelector('[data-overflow-fade="above"]');
+
+    if (!(fade instanceof HTMLElement)) {
+      throw new Error("Expected an above fade over the composer");
+    }
+
+    expect(fade.className).toContain("h-24");
+    expect(fade.className).toContain("-top-24");
+  });
+});

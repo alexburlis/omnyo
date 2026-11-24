@@ -1,0 +1,394 @@
+import {
+  QUESTION_SELECT_APP_COMMAND_IDS,
+  RAIL_JUMP_APP_COMMAND_IDS,
+  PANE_FOCUS_APP_COMMAND_IDS,
+  THREAD_JUMP_APP_COMMAND_IDS,
+  type AppCommandId,
+} from "@omnyo/domain";
+
+interface AppCommandMetadata {
+  command: AppCommandId;
+  description: string;
+  label: string;
+  paletteVisible: boolean;
+}
+
+interface AppCommandGroup {
+  commands: readonly AppCommandMetadata[];
+  label: string;
+}
+
+function command(
+  id: AppCommandId,
+  label: string,
+  description: string,
+): AppCommandMetadata {
+  return { command: id, description, label, paletteVisible: true };
+}
+
+function paletteHiddenCommand(
+  id: AppCommandId,
+  label: string,
+  description: string,
+): AppCommandMetadata {
+  return { command: id, description, label, paletteVisible: false };
+}
+
+export const APP_COMMAND_GROUPS: readonly AppCommandGroup[] = [
+  {
+    label: "Projects",
+    commands: RAIL_JUMP_APP_COMMAND_IDS.map((id, index) =>
+      paletteHiddenCommand(
+        id,
+        index === 0 ? "Open Inbox" : `Open project ${index}`,
+        index === 0
+          ? "Show Inbox in the sidebar."
+          : `Show project ${index} in displayed rail order.`,
+      ),
+    ),
+  },
+  {
+    label: "Threads",
+    commands: [
+      command(
+        "thread.new",
+        "New thread",
+        "Start a thread in the active project.",
+      ),
+      command(
+        "thread.search",
+        "Search threads",
+        "Search threads in the quick palette.",
+      ),
+      command("thread.rename", "Rename thread", "Rename the focused thread."),
+      command(
+        "thread.archive",
+        "Archive thread",
+        "Archive the focused thread.",
+      ),
+      command(
+        "thread.shelve",
+        "Shelve thread",
+        "Move the focused thread to the Shelf, or bring it back.",
+      ),
+      command(
+        "thread.copyLink",
+        "Copy thread link",
+        "Copy a link to the focused thread.",
+      ),
+      command(
+        "thread.group",
+        "Group selected chats",
+        "Put the chats selected in the sidebar into a new group.",
+      ),
+      command(
+        "thread.previous",
+        "Previous thread",
+        "Open the previous visible sidebar thread.",
+      ),
+      command(
+        "thread.next",
+        "Next thread",
+        "Open the next visible sidebar thread.",
+      ),
+      command(
+        "thread.unreadAbove",
+        "Scroll to unread chats above",
+        "Reveal the first unread chat above the sidebar viewport.",
+      ),
+      command(
+        "thread.unreadBelow",
+        "Scroll to unread chats below",
+        "Reveal the last unread chat below the sidebar viewport.",
+      ),
+      ...THREAD_JUMP_APP_COMMAND_IDS.map((id, index) =>
+        paletteHiddenCommand(
+          id,
+          `Open thread ${index + 1}`,
+          `Open visible sidebar thread ${index + 1}.`,
+        ),
+      ),
+    ],
+  },
+  {
+    label: "Edit",
+    commands: [
+      command(
+        "edit.undo",
+        "Undo",
+        "Undo your last action, such as Archive or a Canvas move.",
+      ),
+      command("edit.redo", "Redo", "Redo the last action you undid."),
+    ],
+  },
+  {
+    label: "Window and layout",
+    commands: [
+      paletteHiddenCommand(
+        "palette.open",
+        "Open quick palette",
+        "Search and run Omnyo commands from the keyboard.",
+      ),
+      command("window.new", "New window", "Open another Omnyo desktop window."),
+      command(
+        "window.find",
+        "Find in window",
+        "Search the text shown in the current Omnyo desktop window.",
+      ),
+      command(
+        "window.reload",
+        "Reload window",
+        "Reload the current Omnyo desktop window.",
+      ),
+      command("history.back", "Go back", "Go back in this window's history."),
+      command(
+        "history.forward",
+        "Go forward",
+        "Go forward in this window's history.",
+      ),
+      command(
+        "app.back",
+        "Back to app",
+        "Return from Settings, Plugins, or Skills to the app.",
+      ),
+      command("settings.open", "Open settings", "Open Omnyo settings."),
+      command(
+        "settings.openServers",
+        "Open server settings",
+        "Open settings to add or manage Omnyo servers.",
+      ),
+      command(
+        "sidebar.toggle",
+        "Toggle sidebar",
+        "Show or hide the app sidebar.",
+      ),
+      command(
+        "panel.previousTab",
+        "Previous panel tab",
+        "Select the previous visible right-panel tab, wrapping across panel splits.",
+      ),
+      command(
+        "panel.nextTab",
+        "Next panel tab",
+        "Select the next visible right-panel tab, wrapping across panel splits.",
+      ),
+      command(
+        "panel.previousNewTabItem",
+        "Previous New tab item",
+        "Focus the previous search, action, or recent item on the selected New tab page.",
+      ),
+      command(
+        "panel.nextNewTabItem",
+        "Next New tab item",
+        "Focus the next search, action, or recent item on the selected New tab page.",
+      ),
+      command(
+        "panel.newTab",
+        "New panel tab",
+        "Open a tab in the secondary panel.",
+      ),
+      command(
+        "panel.reopenClosedTab",
+        "Reopen closed panel tab",
+        "Reopen the most recently closed secondary panel tab.",
+      ),
+      command(
+        "panel.close",
+        "Close panel tab",
+        "Close the active panel tab or terminal.",
+      ),
+      command(
+        "panel.toggle",
+        "Toggle panel",
+        "Show or hide the secondary panel.",
+      ),
+      command(
+        "panel.fullScreen.toggle",
+        "Toggle panel full screen",
+        "Expand the right panel over the conversation, or restore the conversation.",
+      ),
+      command(
+        "pane.focus.left",
+        "Focus chat pane left",
+        "Focus the chat pane to the left of the current pane.",
+      ),
+      command(
+        "pane.focus.right",
+        "Focus chat pane right",
+        "Focus the chat pane to the right of the current pane.",
+      ),
+      command(
+        "pane.focus.up",
+        "Focus chat pane up",
+        "Focus the chat pane above the current pane.",
+      ),
+      command(
+        "pane.focus.down",
+        "Focus chat pane down",
+        "Focus the chat pane below the current pane.",
+      ),
+      command(
+        "pane.focus.previous",
+        "Focus previous chat pane",
+        "Focus the previous chat pane in reading order.",
+      ),
+      command(
+        "pane.focus.next",
+        "Focus next chat pane",
+        "Focus the next chat pane in reading order.",
+      ),
+      ...PANE_FOCUS_APP_COMMAND_IDS.map((id, index) =>
+        paletteHiddenCommand(
+          id,
+          `Focus chat pane ${index + 1}`,
+          `Focus chat pane ${index + 1} in reading order.`,
+        ),
+      ),
+      command(
+        "pane.maximize.toggle",
+        "Toggle focused chat pane size",
+        "Maximize the focused chat pane or restore its split layout.",
+      ),
+      command(
+        "pane.close",
+        "Close focused chat pane",
+        "Close the focused chat pane when more than one is open.",
+      ),
+      command(
+        "logs.openServerDaemon",
+        "Open server and daemon logs",
+        "Open the desktop log viewer for the Omnyo server and host daemon.",
+      ),
+      command(
+        "dataDirectory.open",
+        "Open data directory",
+        "Reveal the Omnyo data directory in the system file manager.",
+      ),
+      command(
+        "notifications.open",
+        "Show all notifications",
+        "Open the notification center to read and clear past notifications.",
+      ),
+      command(
+        "plugins.enterSafeMode",
+        "Turn on plugin safe mode",
+        "Stop every plugin you installed, keeping each plugin's enabled setting. Plugins included with Omnyo keep running.",
+      ),
+      command(
+        "plugins.exitSafeMode",
+        "Turn off plugin safe mode",
+        "Restart the plugins that were enabled before safe mode.",
+      ),
+      command(
+        "plugins.pruneCache",
+        "Clean up plugin cache",
+        "Delete cached plugin versions that no installed plugin uses, such as versions left by earlier Omnyo releases.",
+      ),
+    ],
+  },
+  {
+    label: "Workspace",
+    commands: [
+      command(
+        "file.quickOpen",
+        "Quick open file",
+        "Search workspace files in a new panel tab.",
+      ),
+      command(
+        "diff.toggle",
+        "Toggle diff",
+        "Open or close the environment diff.",
+      ),
+      command(
+        "terminal.open",
+        "Open terminal",
+        "Open a terminal in the secondary panel.",
+      ),
+      command(
+        "workspace.openPreferred",
+        "Open in preferred app",
+        "Open the workspace in the preferred editor or terminal.",
+      ),
+    ],
+  },
+  {
+    label: "Composer and models",
+    commands: [
+      command(
+        "composer.focus",
+        "Focus composer",
+        "Focus the active composer's input and move the caret to the end.",
+      ),
+      command(
+        "composer.terminal.toggle",
+        "Toggle composer terminal",
+        "Switch the chat composer between the message box and its terminal. Messages starting with ! run there.",
+      ),
+      command(
+        "modelPicker.toggle",
+        "Toggle model picker",
+        "Open or close the focused composer's model picker.",
+      ),
+      paletteHiddenCommand(
+        "modelPicker.cycleModel",
+        "Cycle model forward",
+        "Select the next model of the composer's provider, wrapping at the end.",
+      ),
+      paletteHiddenCommand(
+        "modelPicker.cycleModelBackward",
+        "Cycle model backward",
+        "Select the previous model of the composer's provider, wrapping at the beginning.",
+      ),
+      paletteHiddenCommand(
+        "modelPicker.cycleProvider",
+        "Cycle provider forward",
+        "Select the next provider for the composer, wrapping at the end.",
+      ),
+      paletteHiddenCommand(
+        "modelPicker.cycleProviderBackward",
+        "Cycle provider backward",
+        "Select the previous provider for the composer, wrapping at the beginning.",
+      ),
+      paletteHiddenCommand(
+        "modelPicker.cycleReasoning",
+        "Cycle reasoning effort forward",
+        "Select the next higher supported reasoning effort, wrapping after the highest.",
+      ),
+      paletteHiddenCommand(
+        "modelPicker.cycleReasoningBackward",
+        "Cycle reasoning effort backward",
+        "Select the next lower supported reasoning effort, wrapping before the lowest.",
+      ),
+    ],
+  },
+  {
+    label: "Browser",
+    commands: [
+      command(
+        "browser.focusLocation",
+        "Focus location",
+        "Focus the embedded browser address bar.",
+      ),
+      command(
+        "browser.reload",
+        "Reload page",
+        "Hard reload the active embedded browser page, bypassing its cache.",
+      ),
+      command(
+        "browser.find",
+        "Find in page",
+        "Open the find bar for the active embedded browser page.",
+      ),
+    ],
+  },
+  {
+    label: "Questions",
+    commands: QUESTION_SELECT_APP_COMMAND_IDS.map((id, index) =>
+      paletteHiddenCommand(
+        id,
+        `Choose answer ${index + 1}`,
+        `Choose visible answer ${index + 1} when Omnyo asks a question.`,
+      ),
+    ),
+  },
+];

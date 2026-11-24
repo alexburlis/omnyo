@@ -1,0 +1,32 @@
+{
+  "name": "omnyo-plugin-scripted-echo-provider",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "omnyo": ">=0.0",
+    "omnyoPluginSdk": ">=0.4.3"
+  },
+  "omnyo": {
+    "name": "Scripted echo provider (test harness)",
+    "description": "The echo bridge plus the scripted directives Omnyo's runtime and integration suites drive. Not a product plugin.",
+    "branding": {
+      "icon": "Zap"
+    },
+    "server": "./server.ts",
+    "host": "./host.ts"
+  },
+  "scripts": {
+    "test": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@omnyo/plugin-sdk": "workspace:*",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vitest": "4.1.11"
+  }
+}

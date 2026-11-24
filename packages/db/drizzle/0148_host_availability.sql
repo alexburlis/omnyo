@@ -1,0 +1,1 @@
+ALTER TABLE `hosts` ADD `availability` text DEFAULT 'available' NOT NULL;

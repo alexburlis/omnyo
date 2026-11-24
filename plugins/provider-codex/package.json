@@ -1,0 +1,69 @@
+{
+  "name": "omnyo-plugin-provider-codex",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Run omnyo threads with Codex.",
+  "author": {
+    "name": "bb",
+    "url": "https://github.com/get-bb"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/get-bb/bb.git",
+    "directory": "plugins/provider-codex"
+  },
+  "engines": {
+    "omnyo": ">=0.0",
+    "omnyoPluginSdk": ">=0.5.23 >=0.6.44"
+  },
+  "omnyo": {
+    "name": "Codex Provider",
+    "description": "Run omnyo threads with Codex.",
+    "branding": {
+      "icon": "./icons/codex.svg"
+    },
+    "server": "./server.ts",
+    "app": "./app.tsx",
+    "host": "./src/host.ts",
+    "experimental_providers": [
+      {
+        "kind": "agent",
+        "id": "codex",
+        "displayName": "Codex"
+      }
+    ]
+  },
+  "keywords": [
+    "omnyo-plugin"
+  ],
+  "scripts": {
+    "test": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint --ignore-pattern node_modules --ignore-pattern dist .",
+    "prepare:bundled": "omnyo-plugin-build prepare-bundled"
+  },
+  "devDependencies": {
+    "@omnyo/plugin-build": "workspace:*",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "better-sqlite3": "12.10.0",
+    "cron-parser": "^5.5.0",
+    "hono": "4.13.18",
+    "jsdom": "^29.0.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "typescript-7": "npm:typescript@^7.0.2",
+    "vitest": "4.1.11"
+  },
+  "dependencies": {
+    "@omnyo/shared-ui": "workspace:*",
+    "@omnyo/plugin-sdk": "workspace:*",
+    "zod": "^4.3.6"
+  }
+}

@@ -1,0 +1,478 @@
+.omnyo-intro {
+  --omnyo-intro-ink: var(--foreground);
+  --omnyo-intro-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --omnyo-intro-land: 2350ms;
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: var(--background);
+  cursor: default;
+  user-select: none;
+}
+
+.omnyo-intro[data-state="ready"] > * {
+  opacity: 0;
+}
+
+.omnyo-intro[data-state="leaving"] {
+  animation: omnyo-intro-leave 320ms var(--motion-ease-out) forwards;
+}
+
+.omnyo-intro-aurora,
+.omnyo-intro-halo {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border-radius: 9999px;
+  pointer-events: none;
+}
+
+.omnyo-intro-aurora {
+  width: 68rem;
+  height: 68rem;
+  margin: -34rem 0 0 -34rem;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    color-mix(in oklab, var(--omnyo-brand) 32%, transparent) 70deg,
+    transparent 140deg,
+    color-mix(in oklab, var(--omnyo-intro-ink) 10%, transparent) 210deg,
+    transparent 260deg,
+    color-mix(in oklab, var(--omnyo-brand) 20%, transparent) 320deg,
+    transparent 360deg
+  );
+  filter: blur(72px);
+  mask: radial-gradient(circle, black 18%, transparent 62%);
+  opacity: 0.6;
+}
+
+.omnyo-intro-halo {
+  width: 34rem;
+  height: 34rem;
+  margin: -17rem 0 0 -17rem;
+  background: radial-gradient(
+    circle,
+    color-mix(in oklab, var(--omnyo-brand) 34%, transparent) 0%,
+    color-mix(in oklab, var(--omnyo-brand) 10%, transparent) 38%,
+    transparent 66%
+  );
+  opacity: 0.45;
+}
+
+.omnyo-intro-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.75rem;
+}
+
+.omnyo-intro-mark-frame {
+  position: relative;
+  width: 9rem;
+  height: 9rem;
+}
+
+.omnyo-intro-mark {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  color: var(--omnyo-intro-ink);
+}
+
+.omnyo-intro-mark :where(.omnyo-intro-body, .omnyo-intro-orbit) {
+  transform-box: view-box;
+  transform-origin: 32px 32px;
+}
+
+.omnyo-intro-ring-fill {
+  fill: currentColor;
+}
+
+.omnyo-intro-ring-line {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 0.5;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+  opacity: 0;
+}
+
+.omnyo-intro-focus {
+  fill: none;
+  stroke: var(--omnyo-intro-ink);
+  stroke-width: 0.22;
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: 0;
+}
+
+.omnyo-intro-sheen {
+  transform: translateX(-24px);
+}
+
+.omnyo-intro-dot {
+  fill: #ff4f17;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.omnyo-intro-trail {
+  fill: var(--omnyo-brand);
+  opacity: 0;
+}
+
+.omnyo-intro-wave {
+  fill: none;
+  stroke: var(--omnyo-brand);
+  stroke-width: 0.9;
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: 0;
+}
+
+.omnyo-intro-wordmark {
+  display: flex;
+  margin: 0;
+  letter-spacing: -0.045em;
+  color: var(--omnyo-intro-ink);
+}
+
+.omnyo-intro-wordmark > span {
+  display: inline-block;
+}
+
+.omnyo-intro-tagline {
+  margin: -0.75rem 0 0;
+  letter-spacing: 0.01em;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .omnyo-intro[data-state="playing"] {
+    animation: omnyo-intro-leave 500ms var(--motion-ease-in-out) 4100ms forwards;
+  }
+
+  .omnyo-intro:not([data-state="ready"]) .omnyo-intro-aurora {
+    animation:
+      omnyo-intro-aurora-in 1600ms var(--motion-ease-out) both,
+      omnyo-intro-spin 9s linear infinite;
+  }
+
+  .omnyo-intro:not([data-state="ready"]) .omnyo-intro-halo {
+    animation:
+      omnyo-intro-halo-build var(--omnyo-intro-land) var(--motion-ease-in) both,
+      omnyo-intro-halo-flash 900ms var(--omnyo-intro-expo)
+        var(--omnyo-intro-land) forwards;
+  }
+
+  .omnyo-intro[data-state="playing"] .omnyo-intro-stage {
+    animation: omnyo-intro-stage-out 600ms var(--motion-ease-in) 4000ms forwards;
+  }
+
+  .omnyo-intro:not([data-state="ready"]) .omnyo-intro-mark {
+    animation: omnyo-intro-bump 650ms var(--omnyo-intro-expo)
+      var(--omnyo-intro-land) both;
+  }
+
+  .omnyo-intro:not([data-state="ready"]) .omnyo-intro-body {
+    animation: omnyo-intro-push var(--omnyo-intro-land) var(--motion-ease-out)
+      both;
+  }
+
+  .omnyo-intro:not([data-state="ready"]) .omnyo-intro-focus {
+    --focus-scale: 1.9;
+    --focus-at: 250ms;
+    animation: omnyo-intro-focus 560ms var(--motion-ease-out) var(--focus-at)
+      both;
+  }
+
+  .omnyo-intro:not([data-state="ready"]) .omnyo-intro-focus[data-ring="2"] {
+    --focus-scale: 1.7;
+    --focus-at: 430ms;
+  }
+
+  .omnyo-intro:not([data-state="ready"]) .omnyo-intro-focus[data-ring="3"] {
+    --focus-scale: 1.5;
+    --focus-at: 630ms;
+  }
+
+  .omnyo-intro:not([data-state="ready"]) .omnyo-intro-focus[data-ring="4"] {
+    --focus-scale: 1.3;
+    --focus-at: 850ms;
+  }
+
+  .omnyo-intro:not([data-state="ready"]) .omnyo-intro-focus[data-ring="5"] {
+    --focus-scale: 1.12;
+    --focus-at: 1050ms;
+  }
+
+  .omnyo-intro:not([data-state="ready"]) .omnyo-intro-ring-line {
+    animation: omnyo-intro-draw 1700ms var(--motion-ease-in-out) 200ms both;
+  }
+
+  .omnyo-intro:not([data-state="ready"]) .omnyo-intro-ring-fill {
+    animation: omnyo-intro-fill 900ms var(--motion-ease-in-out) 1000ms both;
+  }
+
+  .omnyo-intro:not([data-state="ready"]) .omnyo-intro-sheen {
+    animation: omnyo-intro-sheen 850ms var(--motion-ease-in-out) 2550ms both;
+  }
+
+  .omnyo-intro:not([data-state="ready"]) .omnyo-intro-orbit {
+    --trail-delay: 0ms;
+    animation: omnyo-intro-orbit 1200ms cubic-bezier(0.55, 0, 0.9, 0.45)
+      calc(1150ms + var(--trail-delay)) both;
+  }
+
+  .omnyo-intro:not([data-state="ready"]) .omnyo-intro-orbit[data-trail="1"] {
+    --trail-delay: 45ms;
+  }
+
+  .omnyo-intro:not([data-state="ready"]) .omnyo-intro-orbit[data-trail="2"] {
+    --trail-delay: 90ms;
+  }
+
+  .omnyo-intro:not([data-state="ready"]) .omnyo-intro-orbit[data-trail="3"] {
+    --trail-delay: 135ms;
+  }
+
+  .omnyo-intro:not([data-state="ready"]) .omnyo-intro-orbit[data-trail="4"] {
+    --trail-delay: 180ms;
+  }
+
+  .omnyo-intro:not([data-state="ready"]) .omnyo-intro-trail {
+    animation: omnyo-intro-trail 1200ms linear 1150ms both;
+  }
+
+  .omnyo-intro:not([data-state="ready"]) .omnyo-intro-dot {
+    animation: omnyo-intro-dot 1650ms linear 1150ms both;
+  }
+
+  .omnyo-intro:not([data-state="ready"]) .omnyo-intro-wave {
+    animation: omnyo-intro-wave 950ms var(--omnyo-intro-expo)
+      var(--omnyo-intro-land) forwards;
+  }
+
+  .omnyo-intro:not([data-state="ready"]) .omnyo-intro-wave[data-wave="wide"] {
+    animation: omnyo-intro-wave-wide 1400ms var(--omnyo-intro-expo) 2420ms
+      forwards;
+  }
+
+  .omnyo-intro:not([data-state="ready"]) .omnyo-intro-wordmark > span {
+    animation: omnyo-intro-letter 800ms var(--omnyo-intro-expo)
+      calc(2450ms + var(--letter) * 70ms) both;
+  }
+
+  .omnyo-intro:not([data-state="ready"]) .omnyo-intro-tagline {
+    animation: omnyo-intro-rise 800ms var(--omnyo-intro-expo) 3000ms both;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .omnyo-intro[data-state="playing"] {
+    animation: omnyo-intro-leave 400ms var(--motion-ease-in-out) 1800ms forwards;
+  }
+
+  .omnyo-intro:not([data-state="ready"]) .omnyo-intro-stage {
+    animation: omnyo-intro-reduced 600ms var(--motion-ease-out) both;
+  }
+}
+
+@keyframes omnyo-intro-leave {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes omnyo-intro-aurora-in {
+  from {
+    opacity: 0;
+    scale: 0.6;
+  }
+}
+
+@keyframes omnyo-intro-spin {
+  to {
+    rotate: 360deg;
+  }
+}
+
+@keyframes omnyo-intro-halo-build {
+  from {
+    opacity: 0;
+    scale: 0.35;
+  }
+}
+
+@keyframes omnyo-intro-halo-flash {
+  25% {
+    opacity: 1;
+    scale: 1.25;
+  }
+}
+
+@keyframes omnyo-intro-stage-out {
+  to {
+    opacity: 0;
+    scale: 1.06;
+    filter: blur(10px);
+  }
+}
+
+@keyframes omnyo-intro-bump {
+  35% {
+    scale: 1.045;
+  }
+}
+
+@keyframes omnyo-intro-push {
+  from {
+    scale: 0.86;
+  }
+}
+
+@keyframes omnyo-intro-focus {
+  from {
+    opacity: 0;
+    scale: var(--focus-scale);
+  }
+  35% {
+    opacity: 0.55;
+  }
+  to {
+    opacity: 0;
+    scale: 1;
+  }
+}
+
+@keyframes omnyo-intro-draw {
+  from {
+    stroke-dashoffset: 1;
+    opacity: 1;
+  }
+  60% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+
+@keyframes omnyo-intro-fill {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes omnyo-intro-sheen {
+  from {
+    transform: translateX(-24px);
+  }
+  to {
+    transform: translateX(64px);
+  }
+}
+
+@keyframes omnyo-intro-orbit {
+  from {
+    rotate: -320deg;
+  }
+  to {
+    rotate: 0deg;
+  }
+}
+
+@keyframes omnyo-intro-trail {
+  from {
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.4;
+  }
+  80% {
+    opacity: 0.22;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes omnyo-intro-dot {
+  from {
+    opacity: 0;
+    scale: 0.3;
+  }
+  8% {
+    opacity: 1;
+  }
+  72.7% {
+    scale: 0.7;
+    animation-timing-function: var(--omnyo-intro-expo);
+  }
+  80% {
+    scale: 1.35;
+  }
+  88% {
+    scale: 0.92;
+  }
+  95% {
+    scale: 1.04;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
+@keyframes omnyo-intro-wave {
+  from {
+    opacity: 0.9;
+    scale: 1;
+    stroke-width: 1.1;
+  }
+  to {
+    opacity: 0;
+    scale: 5.5;
+    stroke-width: 0.1;
+  }
+}
+
+@keyframes omnyo-intro-wave-wide {
+  from {
+    opacity: 0.5;
+    scale: 1;
+    stroke-width: 0.6;
+  }
+  to {
+    opacity: 0;
+    scale: 10;
+    stroke-width: 0.05;
+  }
+}
+
+@keyframes omnyo-intro-letter {
+  from {
+    opacity: 0;
+    translate: 0 0.5em;
+    filter: blur(10px);
+  }
+}
+
+@keyframes omnyo-intro-rise {
+  from {
+    opacity: 0;
+    translate: 0 0.6em;
+  }
+}
+
+@keyframes omnyo-intro-reduced {
+  from {
+    opacity: 0;
+  }
+}

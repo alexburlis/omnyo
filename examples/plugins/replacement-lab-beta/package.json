@@ -1,0 +1,27 @@
+{
+  "name": "omnyo-plugin-replacement-lab-beta",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "omnyoPluginSdk": ">=0.4.3 >=0.6.44"
+  },
+  "omnyo": {
+    "name": "Replacement Lab Beta",
+    "description": "A second provider for precedence and fallback testing.",
+    "branding": {
+      "icon": "Code"
+    },
+    "server": "./server.ts",
+    "app": "./app.tsx"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@omnyo/plugin-sdk": "workspace:*",
+    "@types/react": "^19.0.0",
+    "react": "^19.0.0",
+    "typescript": "npm:@typescript/typescript6@^6.0.2"
+  }
+}

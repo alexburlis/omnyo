@@ -1,0 +1,23 @@
+{
+  "extends": "@omnyo/tsconfig/base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "rootDir": ".",
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": [
+    "vite.config.ts",
+    "vite.dev.config.ts",
+    "vite-bundle-stats.ts",
+    "vite-split-prefetch.ts",
+    "vite-route-modulepreload.ts",
+    "vite-forkable-plugin-paths.ts",
+    "vite-shared-ui-seam.ts",
+    "vite-react-compiler.ts",
+    "vite-css-dependency-hash.ts",
+    "vite-startup-chunks.ts",
+    "vite-web-release.ts"
+  ]
+}

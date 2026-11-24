@@ -1,0 +1,69 @@
+import { getHost } from "@omnyo/db";
+import { ApiError } from "../../errors.js";
+import type { AppDeps } from "../../types.js";
+import {
+  requireConnectedHostSession,
+  requireNonDestroyedHostWithStatus,
+} from "../lib/entity-lookup.js";
+import { readPrimaryHostIdFromDataDir } from "./primary-host-id.js";
+
+export { readPrimaryHostIdFromDataDir };
+
+type PrimaryHostDeps = Pick<AppDeps, "config" | "db" | "hub">;
+
+interface AssertUsableHostIdArgs {
+  hostId: string;
+}
+
+function primaryHostUnavailableError(): ApiError {
+  return new ApiError(
+    502,
+    "host_unavailable",
+    "Local host daemon is not initialized",
+  );
+}
+
+export function isServerMachineHost(
+  deps: Pick<AppDeps, "config">,
+  hostId: string,
+): boolean {
+  return (
+    readPrimaryHostIdFromDataDir({ dataDir: deps.config.dataDir }) === hostId
+  );
+}
+
+export function resolvePrimaryHostId(deps: PrimaryHostDeps): string | null {
+  const configured = readPrimaryHostIdFromDataDir({
+    dataDir: deps.config.dataDir,
+  });
+
+  const configuredHost =
+    configured === null ? null : getHost(deps.db, configured);
+
+  return configuredHost?.destroyedAt === null ? configuredHost.id : null;
+}
+
+export function requirePrimaryHostId(deps: PrimaryHostDeps): string {
+  const hostId = resolvePrimaryHostId(deps);
+
+  if (!hostId) {
+    throw primaryHostUnavailableError();
+  }
+
+  return hostId;
+}
+
+export function assertUsableHostId(
+  deps: PrimaryHostDeps,
+  args: AssertUsableHostIdArgs,
+): void {
+  requireNonDestroyedHostWithStatus(deps, args.hostId);
+}
+
+export function requireConnectedPrimaryHostId(deps: PrimaryHostDeps): string {
+  const hostId = requirePrimaryHostId(deps);
+  requireNonDestroyedHostWithStatus(deps, hostId);
+  requireConnectedHostSession(deps, hostId);
+
+  return hostId;
+}

@@ -1,0 +1,192 @@
+[
+  {
+    "path": "effect/index.ts",
+    "sha256": "da7851d2c89a66b31ece6a36e88a78065d12dff6f92676d119981574bcd3669f",
+    "size": 991
+  },
+  {
+    "path": "effect/rules/no-manual-effect-error-tag.ts",
+    "sha256": "41434abb14bdb73760a2dfa4121b9e037f3ca741b0530c4f04d36f3a9e1041fd",
+    "size": 1311
+  },
+  {
+    "path": "effect/rules/no-manual-tag-comparison.ts",
+    "sha256": "f1e7c36b878f872b3cd4482e751bede505aafc21dabf93353a16e1c305bdb0bb",
+    "size": 1155
+  },
+  {
+    "path": "effect/rules/no-manual-tagged-construction.ts",
+    "sha256": "fc264fcbd8b2809f458ac11fd33f242ccc9cfbc4b605cee85ce490c9dd1d8f44",
+    "size": 995
+  },
+  {
+    "path": "effect/rules/no-service-constructor-imports.ts",
+    "sha256": "c397d1132329fbe82213dda80059c86acb99f0fe243e59615f615a86069c6fb1",
+    "size": 1657
+  },
+  {
+    "path": "effect/rules/prefer-effect-match.ts",
+    "sha256": "94309ecd136d12b6b5424fccb6fde222adb1c2c278fb8f198c4c115febbfa69c",
+    "size": 1522
+  },
+  {
+    "path": "effect/shared/tagged-values.ts",
+    "sha256": "91e65bc7ebba81eda53c049fb3a07e03982a20476546cb9b4f3cbe2e66297d1c",
+    "size": 3105
+  },
+  {
+    "path": "index.ts",
+    "sha256": "9deed4cb455b9a6251001dc3a525d5b5e2c6ef989dd1c01e804c2edf0a697415",
+    "size": 2685
+  },
+  {
+    "path": "rules/no-array-filter-map.ts",
+    "sha256": "528bba857b84712c038e35e59079cc1e6c78a0421c65bb3c6117c9d412a2f28a",
+    "size": 1475
+  },
+  {
+    "path": "rules/no-chained-type-assertions.ts",
+    "sha256": "72f8e981520f94adac0ffbdab8f8e84e5f2a4595f14e4a6471be917a85a20a15",
+    "size": 2538
+  },
+  {
+    "path": "rules/no-conditional-empty-object-spread.ts",
+    "sha256": "33f044030d208fcc10be73bb19c8172c275c5229df4b0ca8ec10f069bbe60062",
+    "size": 1552
+  },
+  {
+    "path": "rules/no-known-value-widening.ts",
+    "sha256": "321944d20912acc93f65f4b84075916202adfda6b8eaa839d96f0d8b8ec1463b",
+    "size": 13336
+  },
+  {
+    "path": "rules/no-module-mocking.ts",
+    "sha256": "e29ba7d9ba4a5aed971002840bf434beef93393f60a589e55b72c203dde4c8db",
+    "size": 2807
+  },
+  {
+    "path": "rules/no-object-parameters.ts",
+    "sha256": "2056e99dcb228604d9b2534952045e8ebf9f90af54add67d07a1211657d32941",
+    "size": 2663
+  },
+  {
+    "path": "rules/no-reduce-accumulator-copy.ts",
+    "sha256": "dce4b08ee7ac4bbedfe743f6fa4a3d423cde50b37691130b899cc4573c05d2ae",
+    "size": 4990
+  },
+  {
+    "path": "rules/no-reflect-apply.ts",
+    "sha256": "f7920a332106252d6a24cdc917a2c1a433eb438792996ccceb5a25cd6e591dbb",
+    "size": 926
+  },
+  {
+    "path": "rules/no-reflect-get.ts",
+    "sha256": "95c5aa0f8e23b10d9345b1776082e08704ec6590298176a8ede8dfdb6e7cb56f",
+    "size": 939
+  },
+  {
+    "path": "rules/no-runtime-typeof.ts",
+    "sha256": "c3ff29662f9f5a0cbad527b200aadd486cbe63ee0d9bbf10c409ce9c39ec678c",
+    "size": 2348
+  },
+  {
+    "path": "rules/no-shape-in-symbol-names.ts",
+    "sha256": "4e5edcb5ed083de77970a2e4f64e4b2090ba6c4588e9fc6bcb1f01900ae905b7",
+    "size": 1596
+  },
+  {
+    "path": "rules/no-unknown-parameters.ts",
+    "sha256": "81df45f83b1bca1bbf0bbc36e9211e10cad1aa2bb0ab604840ed9f1b94eaa2e5",
+    "size": 2530
+  },
+  {
+    "path": "rules/no-unknown-returns.ts",
+    "sha256": "67f3ac72d9f98ce29426e70be1e0c359599d94b5799f1130b7ec4cc34129f26b",
+    "size": 2817
+  },
+  {
+    "path": "rules/no-unknown-type-aliases.ts",
+    "sha256": "e34000ccdd5c496fadb1418e29b44a1df970ebc9075e89ef2412f7029ec4c15b",
+    "size": 1579
+  },
+  {
+    "path": "rules/no-unsafe-dictionary-type.ts",
+    "sha256": "6ff0b3aafe00bc42300080c514ddbee54a45508d5781cab2fb78156a19756a71",
+    "size": 4566
+  },
+  {
+    "path": "rules/no-widen-then-assert.ts",
+    "sha256": "63f2c07cc42b8ad60a7e868efbd7b29e462b9ba960fbd07bbc8f590ef9e3f879",
+    "size": 12336
+  },
+  {
+    "path": "rules/require-readable-spacing.ts",
+    "sha256": "e63084ad77e215ad25e963c452d8ee819fb1cac3aefe3401e169985a145ac4bc",
+    "size": 1855
+  },
+  {
+    "path": "rules/require-safety-comment-for-type-assertion.ts",
+    "sha256": "c8ed9f50f1c6e3592b77165dd8847d187ee9b0ef955d50f8099498d3139aa27c",
+    "size": 4022
+  },
+  {
+    "path": "shared/array-method.ts",
+    "sha256": "e360557253c56ab7c256623f3338415743e5027e9d999f801fb79d98240d217b",
+    "size": 3789
+  },
+  {
+    "path": "shared/dictionary-types.ts",
+    "sha256": "0f319a2d2cb34c7b3902fb78301c91e1a750bd663c754e73d669f31dc5026525",
+    "size": 17113
+  },
+  {
+    "path": "shared/function-parameters.ts",
+    "sha256": "ad80a650ea14847736ab9ee4c872dc89cc7d527bf60e7de20112bcb8f679545c",
+    "size": 2004
+  },
+  {
+    "path": "shared/lexical-type-parameters.ts",
+    "sha256": "1ae0aa3ec245f1dc43c4bbbd8be1e2e4230e5dc389d1ca4e8de8f51b62ceff29",
+    "size": 1817
+  },
+  {
+    "path": "shared/reflect-method.ts",
+    "sha256": "d1b7bd13ca714bf20bec15e835ed0526316b7274e06bd9a582cf623c09ac1d40",
+    "size": 1046
+  },
+  {
+    "path": "shared/scope.ts",
+    "sha256": "e38d41eeada854dbd02285e84e065d10e69460695e06e53fbe8662c963ae7eb4",
+    "size": 501
+  },
+  {
+    "path": "shared/type-alias-resolution.ts",
+    "sha256": "5520e97b177f0093af2943808ac63cef0f6c03fedd197a36137c66209d78a8e0",
+    "size": 7688
+  },
+  {
+    "path": "vendor/eslint-stylistic/LICENSE",
+    "sha256": "a429d52d537b871facb01c086191ec8a56a22bf1a10f4e641daff114bccc4a74",
+    "size": 1164
+  },
+  {
+    "path": "vendor/eslint-stylistic/UPSTREAM.md",
+    "sha256": "7080b0f37202f02f44630e7e13182643561a998b328e8044efe89d3f7d6fca74",
+    "size": 3130
+  },
+  {
+    "path": "vendor/eslint-stylistic/padding-line-ast.ts",
+    "sha256": "ae3624502620452022691c89a30ed95d669dc961a5802dbe27c44e45a647c3d0",
+    "size": 2411
+  },
+  {
+    "path": "vendor/eslint-stylistic/padding-line-between-statements.ts",
+    "sha256": "6974d23a3d2769bfcd5211f1c1fb29c966be122dd37e764c2cf84c5f639a380d",
+    "size": 25662
+  },
+  {
+    "path": "vendor/eslint-stylistic/padding-line-options.d.ts",
+    "sha256": "ff3d52f2b1c103bc429e030976641715caec676af4b8a0be802c0009874a0d58",
+    "size": 1732
+  }
+]

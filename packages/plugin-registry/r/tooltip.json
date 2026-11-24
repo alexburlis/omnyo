@@ -1,0 +1,24 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "tooltip",
+  "type": "registry:ui",
+  "title": "tooltip",
+  "description": "Omnyo ui \"tooltip\" — vendored from the Omnyo app's own source (version-matched to this Omnyo release).",
+  "dependencies": [
+    "@radix-ui/react-tooltip"
+  ],
+  "registryDependencies": [
+    "@omnyo/motion",
+    "@omnyo/overlay-trigger",
+    "@omnyo/portal-scope",
+    "@omnyo/utils"
+  ],
+  "files": [
+    {
+      "path": "registry/components/ui/tooltip.tsx",
+      "content": "import * as React from \"react\";\nimport * as TooltipPrimitive from \"@radix-ui/react-tooltip\";\n\nimport { cn } from \"../../lib/utils\";\nimport { usePortalScopeProps } from \"../../lib/portal-scope\";\nimport { TOOLTIP_MOTION } from \"./motion.js\";\nimport { isLastInputKeyboard } from \"./overlay-trigger.js\";\n\nconst TooltipProvider = TooltipPrimitive.Provider;\n\nconst Tooltip = TooltipPrimitive.Root;\n\nconst TooltipTrigger = React.forwardRef<\n  React.ComponentRef<typeof TooltipPrimitive.Trigger>,\n  React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Trigger>\n>(function TooltipTriggerComponent({ onFocus, ...props }, ref) {\n  return (\n    <TooltipPrimitive.Trigger\n      ref={ref}\n      onFocus={(event) => {\n        onFocus?.(event);\n\n        if (!event.defaultPrevented && !isLastInputKeyboard()) {\n          event.preventDefault();\n        }\n      }}\n      {...props}\n    />\n  );\n});\n\nTooltipTrigger.displayName = TooltipPrimitive.Trigger.displayName;\n\nconst TooltipContent = React.forwardRef<\n  React.ComponentRef<typeof TooltipPrimitive.Content>,\n  React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Content>\n>(function TooltipContentComponent(\n  {\n    avoidCollisions = true,\n    className,\n    collisionPadding = 8,\n    hideWhenDetached = true,\n    sideOffset = 4,\n    ...props\n  },\n  ref,\n) {\n  return (\n    <TooltipPrimitive.Portal>\n      <TooltipPrimitive.Content\n        ref={ref}\n        {...usePortalScopeProps()}\n        avoidCollisions={avoidCollisions}\n        collisionPadding={collisionPadding}\n        hideWhenDetached={hideWhenDetached}\n        sideOffset={sideOffset}\n        className={cn(\n          \"z-50 max-w-[min(20rem,var(--radix-tooltip-content-available-width))] overflow-hidden rounded-md bg-primary px-3 py-1.5 text-xs text-primary-foreground break-words origin-(--radix-tooltip-content-transform-origin)\",\n          TOOLTIP_MOTION,\n          className,\n        )}\n        {...props}\n      />\n    </TooltipPrimitive.Portal>\n  );\n});\n\nTooltipContent.displayName = TooltipPrimitive.Content.displayName;\n\nexport { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider };\n",
+      "type": "registry:ui",
+      "target": "components/ui/tooltip.tsx"
+    }
+  ]
+}

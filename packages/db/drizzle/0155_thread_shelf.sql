@@ -1,0 +1,2 @@
+ALTER TABLE `threads` ADD `shelved_at` integer;--> statement-breakpoint
+CREATE INDEX `threads_shelf_sort_idx` ON `threads` (`archived_at`,`deleted_at`,`shelved_at`,`id`) WHERE "threads"."shelved_at" IS NOT NULL;

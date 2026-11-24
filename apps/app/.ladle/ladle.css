@@ -1,0 +1,31 @@
+@import "../src/app.css";
+@source "../src";
+@source ".";
+/* Plugin-owned views render in these stories but live outside apps/app, so
+   Tailwind never saw their classes: anything a plugin used that the app did not
+   silently rendered unstyled here while working in the real app, which builds
+   the plugin's CSS separately. */
+@source "../../../plugins/automations";
+@source "../../../plugins/workflows";
+@source "../../../plugins/provider-usage";
+@source "../../../plugins/secrets";
+@source "../../../plugins/account-usage";
+@source "../../../plugins/provider-codex";
+@source "../../../plugins/thread-list";
+@source "../../../plugins/tasks";
+@source "../../../plugins/provider-acp-next";
+@source "../../../plugins/provider-pi";
+@source "../../../plugins/keep-awake";
+@source "../../../plugins/memory";
+@source "../../../plugins/push-notifications";
+
+.ladle-main {
+  padding: 0;
+}
+
+:root,
+.dark {
+  --ladle-bg-color-primary: var(--background);
+  --ladle-bg-color-secondary: var(--sidebar);
+  --ladle-color-primary: var(--foreground);
+}

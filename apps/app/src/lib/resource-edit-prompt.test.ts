@@ -1,0 +1,27 @@
+import { describe, expect, it } from "vitest";
+import {
+  buildPluginEditThreadPrompt,
+  buildSkillEditThreadPrompt,
+} from "@omnyo/shared-ui/resource-edit-prompt";
+
+describe("resource edit thread prompts", () => {
+  it("gives the thread an unambiguous writable resource locator", () => {
+    expect(
+      buildPluginEditThreadPrompt({
+        name: "Pattern Atlas",
+        path: "/Users/me/plugins/pattern-atlas",
+      }),
+    ).toBe(
+      'Edit the Omnyo plugin "Pattern Atlas" at /Users/me/plugins/pattern-atlas. I want to ',
+    );
+    expect(
+      buildSkillEditThreadPrompt({
+        id: "skill_abc123",
+        name: "Review PR",
+        path: "/Users/me/.omnyo/skills/review-pr/SKILL.md",
+      }),
+    ).toBe(
+      'Edit the Omnyo skill "Review PR" (ID skill_abc123) at /Users/me/.omnyo/skills/review-pr/SKILL.md. Inspect it with omnyo skill show skill_abc123 --json and pass that revision to omnyo skill update when saving. I want to ',
+    );
+  });
+});

@@ -1,0 +1,73 @@
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+
+export interface DesktopPathContext {
+  appPath: string;
+  isPackaged: boolean;
+  resourcesPath: string;
+}
+
+interface ResolveDesktopBridgePathArgs {
+  paths: DesktopPathContext;
+}
+
+interface ResolveDesktopIconPathArgs {
+  packagedIconFileName: string;
+  paths: DesktopPathContext;
+}
+
+interface AssertPathExistsArgs {
+  label: string;
+  path: string;
+}
+
+export function resolveDesktopBridgePath(
+  args: ResolveDesktopBridgePathArgs,
+): string {
+  if (args.paths.isPackaged) {
+    if (args.paths.appPath.endsWith(".asar")) {
+      return join(
+        `${args.paths.appPath}.unpacked`,
+        "dist",
+        "omnyo-app-bridge.mjs",
+      );
+    }
+
+    return join(
+      args.paths.resourcesPath,
+      "app",
+      "dist",
+      "omnyo-app-bridge.mjs",
+    );
+  }
+
+  return join(args.paths.appPath, "dist", "omnyo-app-bridge.mjs");
+}
+
+export function resolveDesktopMachineInstallerPath(bridgePath: string): string {
+  return join(
+    dirname(dirname(bridgePath)),
+    "node_modules",
+    "omnyo-app",
+    "server",
+    "dist",
+    "assets",
+    "install-machine.sh",
+  );
+}
+
+export function resolveDesktopIconPath(
+  args: ResolveDesktopIconPathArgs,
+): string {
+  return join(
+    args.paths.appPath,
+    "assets",
+    args.paths.isPackaged ? args.packagedIconFileName : "icon-dev.png",
+  );
+}
+
+export function assertPathExists(args: AssertPathExistsArgs): void {
+  if (!existsSync(args.path)) {
+    throw new Error(`Missing ${args.label}: ${args.path}`);
+  }
+}

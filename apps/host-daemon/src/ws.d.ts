@@ -1,0 +1,68 @@
+declare module "ws" {
+  import { EventEmitter } from "node:events";
+  import type { IncomingMessage, Server } from "node:http";
+  import type { Duplex } from "node:stream";
+
+  export type RawData = string | Buffer | ArrayBuffer | Buffer[];
+
+  export interface ClientOptions {
+    headers?: Record<string, string>;
+    handshakeTimeout?: number;
+    maxPayload?: number;
+  }
+
+  export class WebSocket extends EventEmitter {
+    constructor(address: string | URL, options?: ClientOptions);
+    constructor(
+      address: string | URL,
+      protocols?: string | string[],
+      options?: ClientOptions,
+    );
+    static readonly OPEN: number;
+    readonly readyState: number;
+    readonly bufferedAmount: number;
+    readonly protocol: string;
+    send(data: RawData | Uint8Array, callback?: (error?: Error) => void): void;
+    send(
+      data: RawData | Uint8Array,
+      options: { binary?: boolean; compress?: boolean },
+      callback?: (error?: Error) => void,
+    ): void;
+    close(code?: number, reason?: string): void;
+    terminate(): void;
+    on(event: "open", listener: () => void): this;
+    on(event: "message", listener: (data: RawData) => void): this;
+    on(
+      event: "message",
+      listener: (data: Buffer, isBinary: boolean) => void,
+    ): this;
+    on(event: "close", listener: () => void): this;
+    on(event: "close", listener: (code: number, reason: Buffer) => void): this;
+    on(event: "error", listener: (error: Error) => void): this;
+    on(
+      event: "unexpected-response",
+      listener: (request: unknown, response: IncomingMessage) => void,
+    ): this;
+    removeAllListeners(): this;
+  }
+
+  export class WebSocketServer extends EventEmitter {
+    clients: Set<WebSocket>;
+    constructor(options?: {
+      noServer?: boolean;
+      maxPayload?: number;
+      server?: Server;
+    });
+    on(
+      event: "connection",
+      listener: (socket: WebSocket, request: IncomingMessage) => void,
+    ): this;
+    handleUpgrade(
+      request: IncomingMessage,
+      socket: Duplex,
+      head: Buffer,
+      callback: (websocket: WebSocket) => void,
+    ): void;
+    close(callback?: (error?: Error) => void): void;
+  }
+}

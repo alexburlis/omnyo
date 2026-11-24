@@ -1,0 +1,12 @@
+{
+  "extends": [
+    "@omnyo/tsconfig/base.json",
+    "@omnyo/tsconfig/typecheck-overrides.json"
+  ],
+  "compilerOptions": {
+    "rootDir": ".",
+    "types": ["node"]
+  },
+  "include": ["scripts", "src", "test", "tests", "fixtures", "stories"],
+  "exclude": ["test/fixtures/plugins/bb-plugin-sdk-0.4.8-scaffold"]
+}

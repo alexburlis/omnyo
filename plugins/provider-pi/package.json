@@ -1,0 +1,76 @@
+{
+  "name": "omnyo-plugin-provider-pi",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Run omnyo threads with Pi.",
+  "author": {
+    "name": "bb",
+    "url": "https://github.com/get-bb"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/get-bb/bb.git",
+    "directory": "plugins/provider-pi"
+  },
+  "engines": {
+    "omnyo": ">=0.0",
+    "omnyoPluginSdk": ">=0.5.22 >=0.6.44"
+  },
+  "omnyo": {
+    "name": "Pi Provider",
+    "description": "Run omnyo threads with Pi.",
+    "branding": {
+      "icon": "./icons/pi.svg"
+    },
+    "server": "./server.ts",
+    "host": "./src/host.ts",
+    "app": "./app.tsx",
+    "experimental_providers": [
+      {
+        "kind": "agent",
+        "id": "pi",
+        "displayName": "Pi"
+      }
+    ],
+    "skills": [
+      "skills"
+    ]
+  },
+  "keywords": [
+    "omnyo-plugin"
+  ],
+  "scripts": {
+    "test": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint --ignore-pattern node_modules --ignore-pattern dist .",
+    "prepare:bundled": "omnyo-plugin-build prepare-bundled"
+  },
+  "dependencies": {
+    "@omnyo/shared-ui": "workspace:*",
+    "@omnyo/plugin-sdk": "workspace:*",
+    "which-command": "0.1.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@omnyo/plugin-build": "workspace:*",
+    "@earendil-works/pi-ai": "0.84.0",
+    "@earendil-works/pi-coding-agent": "0.84.0",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "better-sqlite3": "12.10.0",
+    "cron-parser": "^5.5.0",
+    "hono": "4.13.18",
+    "jsdom": "^29.0.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typebox": "1.3.7",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "typescript-7": "npm:typescript@^7.0.2",
+    "vitest": "4.1.11"
+  }
+}

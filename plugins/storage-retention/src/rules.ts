@@ -1,0 +1,3 @@
+export const LARGE_FILE_MIN_BYTES = 10 * 1024 * 1024;
+
+export const LARGE_FILE_NUDGE_MIN_BYTES = 1024 * 1024 * 1024;

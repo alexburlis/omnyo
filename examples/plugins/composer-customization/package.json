@@ -1,0 +1,31 @@
+{
+  "name": "omnyo-plugin-composer-customization",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "omnyo": ">=0.0",
+    "omnyoPluginSdk": ">=0.6.0 >=0.6.44"
+  },
+  "omnyo": {
+    "name": "Composer customization",
+    "description": "Reference implementation for every composer customization region.",
+    "branding": {
+      "icon": "Sparkles"
+    },
+    "server": "./server.ts",
+    "app": "./app.tsx"
+  },
+  "keywords": [
+    "omnyo-plugin"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@omnyo/plugin-sdk": "workspace:*",
+    "@types/react": "^19.0.0",
+    "react": "^19.0.0",
+    "typescript": "npm:@typescript/typescript6@^6.0.2"
+  }
+}

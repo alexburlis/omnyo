@@ -1,0 +1,53 @@
+{
+  "name": "omnyo-plugin-plugin-api-tester",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Exercise and inspect Omnyo plugin API surfaces during development.",
+  "author": {
+    "name": "bb",
+    "url": "https://github.com/get-bb"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/get-bb/bb.git",
+    "directory": "plugins/plugin-api-tester"
+  },
+  "engines": {
+    "omnyo": ">=0.0",
+    "omnyoPluginSdk": ">=0.4.10 >=0.6.44"
+  },
+  "omnyo": {
+    "name": "Plugin API Tester",
+    "description": "Exercise and inspect Omnyo plugin API surfaces during development.",
+    "branding": {
+      "icon": "Beaker"
+    },
+    "server": "./server.ts",
+    "app": "./app.tsx"
+  },
+  "keywords": [
+    "omnyo-plugin"
+  ],
+  "scripts": {
+    "test": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint --ignore-pattern node_modules --ignore-pattern dist .",
+    "prepare:bundled": "omnyo-plugin-build prepare-bundled"
+  },
+  "devDependencies": {
+    "@omnyo/plugin-build": "workspace:*",
+    "@omnyo/plugin-sdk": "workspace:*",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "jsdom": "^29.0.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "typescript-7": "npm:typescript@^7.0.2",
+    "vitest": "4.1.11"
+  }
+}

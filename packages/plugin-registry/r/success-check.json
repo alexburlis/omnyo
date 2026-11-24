@@ -1,0 +1,19 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "success-check",
+  "type": "registry:ui",
+  "title": "success-check",
+  "description": "Omnyo ui \"success-check\" — vendored from the Omnyo app's own source (version-matched to this Omnyo release).",
+  "registryDependencies": [
+    "@omnyo/motion",
+    "@omnyo/utils"
+  ],
+  "files": [
+    {
+      "path": "registry/components/ui/success-check.tsx",
+      "content": "import { cn } from \"../../lib/utils\";\nimport { SUCCESS_CHECK_BADGE_CLASS, SUCCESS_CHECK_DRAW_CLASS } from \"./motion\";\n\nexport function CheckMark({\n  animate = false,\n  className,\n}: {\n  animate?: boolean;\n  className?: string;\n}) {\n  return (\n    <svg\n      viewBox=\"0 0 16 16\"\n      fill=\"none\"\n      aria-hidden=\"true\"\n      className={cn(\"size-3 shrink-0\", className)}\n    >\n      <path\n        d=\"M3.75 8.25 6.75 11.25 12.25 4.75\"\n        pathLength={1}\n        stroke=\"currentColor\"\n        strokeWidth={1.75}\n        strokeLinecap=\"round\"\n        strokeLinejoin=\"round\"\n        className={animate ? SUCCESS_CHECK_DRAW_CLASS : undefined}\n      />\n    </svg>\n  );\n}\n\nconst SUCCESS_CHECK_SIZE = {\n  sm: { badge: \"size-4\", mark: \"size-2.5\" },\n  md: { badge: \"size-5\", mark: \"size-3\" },\n  lg: { badge: \"size-8\", mark: \"size-4.5\" },\n} as const;\n\nexport function SuccessCheck({\n  animate = false,\n  label,\n  size = \"md\",\n  className,\n}: {\n  animate?: boolean;\n  label?: string;\n  size?: keyof typeof SUCCESS_CHECK_SIZE;\n  className?: string;\n}) {\n  const dimensions = SUCCESS_CHECK_SIZE[size];\n\n  return (\n    <span\n      role={label === undefined ? undefined : \"img\"}\n      aria-label={label}\n      aria-hidden={label === undefined ? true : undefined}\n      className={cn(\n        \"inline-grid shrink-0 place-items-center rounded-full bg-success/15 text-success-foreground\",\n        dimensions.badge,\n        animate && SUCCESS_CHECK_BADGE_CLASS,\n        className,\n      )}\n    >\n      <CheckMark animate={animate} className={dimensions.mark} />\n    </span>\n  );\n}\n",
+      "type": "registry:ui",
+      "target": "components/ui/success-check.tsx"
+    }
+  ]
+}

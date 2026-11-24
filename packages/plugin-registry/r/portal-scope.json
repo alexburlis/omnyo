@@ -1,0 +1,15 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "portal-scope",
+  "type": "registry:lib",
+  "title": "portal-scope",
+  "description": "Omnyo lib \"portal-scope\" — vendored from the Omnyo app's own source (version-matched to this Omnyo release).",
+  "files": [
+    {
+      "path": "registry/lib/portal-scope.ts",
+      "content": "declare const __OMNYO_PLUGIN_ID__: string | undefined;\n\nexport function usePortalScopeProps(ownerPluginId?: string): {\n  \"data-omnyo-portaled-overlay\": \"\";\n  \"data-omnyo-plugin-root\"?: \"\";\n  \"data-omnyo-plugin\"?: string;\n} {\n  const pluginId =\n    ownerPluginId ??\n    (typeof __OMNYO_PLUGIN_ID__ === \"string\" ? __OMNYO_PLUGIN_ID__ : undefined);\n\n  return {\n    \"data-omnyo-portaled-overlay\": \"\",\n    \"data-omnyo-plugin-root\": \"\",\n    ...(pluginId !== undefined ? { \"data-omnyo-plugin\": pluginId } : {}),\n  };\n}\n",
+      "type": "registry:lib",
+      "target": "lib/portal-scope.ts"
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+name: OmnyoTimelineWindowingAcceptance
+options:
+  deploymentTarget:
+    iOS: "16.4"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: Apple Development
+    DEVELOPMENT_TEAM: Z7T4C33A35
+    PROVISIONING_PROFILE_SPECIFIER: acb1c791-ca59-4d54-b985-458ead7b6c3b
+    GENERATE_INFOPLIST_FILE: YES
+targets:
+  OmnyoTimelineWindowingAcceptance:
+    type: application
+    platform: iOS
+    sources:
+      - App
+      - path: FixtureDist
+        type: folder
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: de.burlis.omnyo.windowingacceptance
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: NO
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking: YES
+        TARGETED_DEVICE_FAMILY: "1"
+  OmnyoTimelineWindowingAcceptanceUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - UITests
+    dependencies:
+      - target: OmnyoTimelineWindowingAcceptance
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: de.burlis.omnyo.windowingacceptance.uitests
+schemes:
+  OmnyoTimelineWindowingAcceptance:
+    build:
+      targets:
+        OmnyoTimelineWindowingAcceptance: [run]
+        OmnyoTimelineWindowingAcceptanceUITests: [test]
+    test:
+      targets:
+        - OmnyoTimelineWindowingAcceptanceUITests
+      gatherCoverageData: false

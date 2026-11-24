@@ -1,0 +1,61 @@
+{
+  "name": "omnyo-plugin-omnyo--prompt-library",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Search previous prompts, star favorites, and insert them into the composer.",
+  "author": {
+    "name": "bb",
+    "url": "https://github.com/get-bb"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/get-bb/bb.git",
+    "directory": "plugins/prompt-library"
+  },
+  "engines": {
+    "omnyo": ">=0.0",
+    "omnyoPluginSdk": ">=0.6.15 >=0.6.44"
+  },
+  "omnyo": {
+    "name": "Prompt Library",
+    "description": "Search previous prompts, star favorites, and insert them into the composer.",
+    "branding": {
+      "icon": "Clock"
+    },
+    "server": "./server.ts",
+    "app": "./app.tsx"
+  },
+  "keywords": [
+    "omnyo-plugin"
+  ],
+  "scripts": {
+    "test": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint --ignore-pattern node_modules --ignore-pattern dist .",
+    "prepare:bundled": "omnyo-plugin-build prepare-bundled"
+  },
+  "dependencies": {
+    "@omnyo/shared-ui": "workspace:*",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@omnyo/plugin-build": "workspace:*",
+    "@omnyo/plugin-sdk": "workspace:*",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "better-sqlite3": "12.10.0",
+    "cron-parser": "^5.5.0",
+    "hono": "4.13.18",
+    "jsdom": "^29.0.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vitest": "4.1.11",
+    "typescript-7": "npm:typescript@^7.0.2"
+  }
+}

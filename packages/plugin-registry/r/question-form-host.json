@@ -1,0 +1,15 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "question-form-host",
+  "type": "registry:ui",
+  "title": "question-form-host",
+  "description": "Omnyo ui \"question-form-host\" — the plugin version of the Omnyo app's question-form-host, drawing on the host app at runtime (version-matched to this Omnyo release).",
+  "files": [
+    {
+      "path": "registry/components/ui/question-form-host.tsx",
+      "content": "import {\n  experimental_useQuestionFormHost,\n  type ExperimentalQuestionFormHost,\n  type ExperimentalQuestionShortcut,\n} from \"@omnyo/plugin-sdk/app\";\n\nexport type QuestionFormHost = ExperimentalQuestionFormHost;\n\nexport type QuestionShortcut = ExperimentalQuestionShortcut;\n\nexport const useQuestionFormHost = experimental_useQuestionFormHost;\n",
+      "type": "registry:ui",
+      "target": "components/ui/question-form-host.tsx"
+    }
+  ]
+}

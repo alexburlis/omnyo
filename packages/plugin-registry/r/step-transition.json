@@ -1,0 +1,19 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "step-transition",
+  "type": "registry:ui",
+  "title": "step-transition",
+  "description": "Omnyo ui \"step-transition\" — vendored from the Omnyo app's own source (version-matched to this Omnyo release).",
+  "registryDependencies": [
+    "@omnyo/motion",
+    "@omnyo/utils"
+  ],
+  "files": [
+    {
+      "path": "registry/components/ui/step-transition.tsx",
+      "content": "import { useEffect, useRef, useState, type ReactNode } from \"react\";\nimport { cn } from \"../../lib/utils\";\nimport {\n  MOTION_DURATION_MS,\n  STEP_ENTER_CLASS,\n  STEP_EXIT_CLASS,\n  TRANSITION_FALLBACK_SLACK_MS,\n} from \"./motion\";\n\nexport type StepDirection = \"forward\" | \"back\";\n\ninterface ExitingStep {\n  key: string;\n  node: ReactNode;\n  direction: StepDirection;\n}\n\nexport function StepTransition({\n  stepKey,\n  direction = \"forward\",\n  children,\n  className,\n}: {\n  stepKey: string;\n  direction?: StepDirection;\n  children: ReactNode;\n  className?: string;\n}) {\n  const rendered = useRef<{ key: string; node: ReactNode }>({\n    key: stepKey,\n    node: children,\n  });\n\n  const [shownKey, setShownKey] = useState(stepKey);\n  const [entering, setEntering] = useState<StepDirection | null>(null);\n  const [exiting, setExiting] = useState<ExitingStep | null>(null);\n\n  if (shownKey !== stepKey) {\n    setShownKey(stepKey);\n    setEntering(direction);\n    setExiting({\n      key: rendered.current.key,\n      node: rendered.current.node,\n      direction,\n    });\n  }\n\n  useEffect(() => {\n    rendered.current = { key: stepKey, node: children };\n  });\n\n  useEffect(() => {\n    if (exiting === null) return;\n\n    const timer = window.setTimeout(\n      () => setExiting(null),\n      MOTION_DURATION_MS.fast + TRANSITION_FALLBACK_SLACK_MS,\n    );\n\n    return () => window.clearTimeout(timer);\n  }, [exiting]);\n\n  return (\n    <div className={cn(\"grid min-w-0\", className)}>\n      {exiting === null ? null : (\n        <div\n          key={`exit-${exiting.key}`}\n          aria-hidden=\"true\"\n          inert\n          data-step-direction={exiting.direction}\n          className={cn(STEP_EXIT_CLASS, \"min-w-0 [grid-area:1/1]\")}\n        >\n          {exiting.node}\n        </div>\n      )}\n      <div\n        key={`step-${stepKey}`}\n        data-step-direction={entering ?? undefined}\n        className={cn(\n          entering === null ? undefined : STEP_ENTER_CLASS,\n          \"min-w-0 [grid-area:1/1]\",\n        )}\n      >\n        {children}\n      </div>\n    </div>\n  );\n}\n",
+      "type": "registry:ui",
+      "target": "components/ui/step-transition.tsx"
+    }
+  ]
+}

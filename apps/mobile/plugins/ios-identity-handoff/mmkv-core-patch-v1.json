@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "pod": "MMKVCore",
+  "podVersion": "2.4.0",
+  "files": [
+    {
+      "path": "Core/MMKV_IO.cpp",
+      "beforeSha256": "c60d4165d7161f373596d5afd3524babc1b8d09caa2b2ce47033b104e85348a5",
+      "afterSha256": "0894a79bb9510cab14dd44d78b791b5c206a6179d63c62dd70018800f0008e0d",
+      "edits": [
+        {
+          "before": "    uint32_t crcFile = 0;\n    MMBuffer *data = readWholeFile(crcPath);",
+          "after": "    uint32_t crcFile = 0;\n    uint32_t metadataSize = 0;\n    bool usesMetadataSize = false;\n    MMBuffer *data = readWholeFile(crcPath);"
+        },
+        {
+          "before": "            crcFile = metaInfo.m_crcDigest;\n        }\n        delete data;",
+          "after": "            crcFile = metaInfo.m_crcDigest;\n            usesMetadataSize = metaInfo.m_version >= MMKVVersionActualSize;\n            metadataSize = metaInfo.m_actualSize;\n        }\n        delete data;"
+        },
+        {
+          "before": "            uint32_t actualSize = 0;\n            memcpy(&actualSize, fileData->getPtr(), Fixed32Size);",
+          "after": "            uint32_t actualSize = metadataSize;\n            if (!usesMetadataSize) {\n                memcpy(&actualSize, fileData->getPtr(), Fixed32Size);\n            }"
+        },
+        {
+          "before": "    MMBuffer *data = readWholeFile(crcPath);\n    if (data) {\n        if (data->getPtr()) {",
+          "after": "    MMBuffer *data = readWholeFile(crcPath);\n    if (data) {\n        if (!data->getPtr() || data->length() < sizeof(MMKVMetaInfo)) {\n            delete data;\n            return false;\n        }\n        if (data->getPtr()) {"
+        },
+        {
+          "before": "    MMBuffer *fileData = readWholeFile(kvPath);\n    if (fileData) {\n        if (fileData->getPtr() && (fileData->length() >= Fixed32Size)) {",
+          "after": "    MMBuffer *fileData = readWholeFile(kvPath);\n    if (fileData) {\n        if (!fileData->getPtr() || fileData->length() < Fixed32Size) {\n            delete fileData;\n            return false;\n        }\n        if (fileData->getPtr() && (fileData->length() >= Fixed32Size)) {"
+        }
+      ]
+    },
+    {
+      "path": "Core/MMKV.h",
+      "beforeSha256": "7be6f455fe85076a42e668413ebdccb405bc542dc42673f249aa2c12e3c7ae30",
+      "afterSha256": "3a3185d6cf136360796009b0eeb637329c341eb83b4d74af5dbbf6da642c10e1",
+      "edits": [
+        {
+          "before": "    int32_t writeValueToBuffer(MMKVKey_t key, void *ptr, int32_t size);",
+          "after": "    int32_t writeValueToBuffer(MMKVKey_t key, void *ptr, int32_t size);\n#ifdef MMKV_APPLE\n    std::string omnyoMigrationRawDigestV1(MMKVKey_t key);\n#endif"
+        }
+      ]
+    },
+    {
+      "path": "Core/MMKV.cpp",
+      "beforeSha256": "7d05b77cbc2efc085488919bcc6223d3e21497b457357b9500b7b76c06eff746",
+      "afterSha256": "974612235e971b6c20985db1089d302470aa75eff2530e9aa376cdd906abe4a5",
+      "edits": [
+        {
+          "before": "#include <cassert>\n",
+          "after": "#include <cassert>\n#ifdef MMKV_APPLE\n#include <CommonCrypto/CommonDigest.h>\n#endif\n"
+        },
+        {
+          "before": "// enumerate\n\nbool MMKV::containsKey",
+          "after": "#ifdef MMKV_APPLE\nstd::string MMKV::omnyoMigrationRawDigestV1(MMKVKey_t key) {\n    SCOPED_LOCK(m_lock);\n    SCOPED_LOCK(m_sharedProcessLock);\n    auto raw = getRawDataForKey(key);\n    if (raw.length() > 64 * 1024 * 1024) {\n        return {};\n    }\n    uint8_t length[8];\n    for (size_t i = 0; i < sizeof(length); i++) {\n        length[sizeof(length) - 1 - i] = static_cast<uint8_t>(static_cast<uint64_t>(raw.length()) >> (8 * i));\n    }\n    CC_SHA256_CTX context;\n    CC_SHA256_Init(&context);\n    CC_SHA256_Update(&context, length, sizeof(length));\n    CC_SHA256_Update(&context, raw.getPtr(), static_cast<CC_LONG>(raw.length()));\n    unsigned char digest[CC_SHA256_DIGEST_LENGTH];\n    CC_SHA256_Final(digest, &context);\n    constexpr char alphabet[] = \"0123456789abcdef\";\n    std::string result(CC_SHA256_DIGEST_LENGTH * 2, '0');\n    for (size_t i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) {\n        result[i * 2] = alphabet[digest[i] >> 4];\n        result[i * 2 + 1] = alphabet[digest[i] & 15];\n    }\n    return result;\n}\n#endif\n\n// enumerate\n\nbool MMKV::containsKey"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "templateId": "weekly-content-feed",
+  "revision": 2,
+  "title": "Weekly Content Feed",
+  "description": "Produce seven independently reviewed Markdown drafts and a seven-day delivery calendar using your startup’s supplied facts.",
+  "inputs": [
+    {
+      "id": "startup",
+      "label": "Startup name",
+      "type": "text",
+      "default": "Mosslight Workshop"
+    },
+    {
+      "id": "audience",
+      "label": "Audience",
+      "type": "text",
+      "default": "Organizers of neighborhood seed swaps"
+    },
+    {
+      "id": "product-facts",
+      "label": "Product facts and supplied evidence",
+      "type": "text",
+      "default": "Mosslight Workshop is fictional. Members can record seed names and planned swap dates."
+    },
+    {
+      "id": "reference-urls",
+      "label": "Supplied source URLs (one per line)",
+      "type": "text",
+      "default": ""
+    },
+    {
+      "id": "inventory",
+      "label": "Existing topics and canonical inventory",
+      "type": "text",
+      "default": ""
+    },
+    {
+      "id": "example-content",
+      "label": "Example content",
+      "type": "text",
+      "default": ""
+    },
+    {
+      "id": "terminology",
+      "label": "Preferred terminology",
+      "type": "text",
+      "default": "seed swap"
+    },
+    {
+      "id": "exclusions",
+      "label": "Topics and claims to exclude",
+      "type": "text",
+      "default": "Pricing or claims about real customers"
+    },
+    {
+      "id": "output-language",
+      "label": "Output language",
+      "type": "text",
+      "default": "English"
+    },
+    {
+      "id": "output-format",
+      "label": "Output format",
+      "type": "text",
+      "default": "Markdown"
+    },
+    {
+      "id": "timezone",
+      "label": "Timezone",
+      "type": "timezone",
+      "default": "America/Toronto"
+    },
+    {
+      "id": "delivery-weekday",
+      "label": "First delivery weekday (1 is Monday, 7 is Sunday)",
+      "type": "integer",
+      "default": 4
+    }
+  ],
+  "trigger": {
+    "kind": "weekly",
+    "timezone": "America/Toronto",
+    "weekday": 1,
+    "time": "09:00"
+  },
+  "flow": {
+    "kind": "graph",
+    "engine": "weekly-content-feed",
+    "targetCount": 7,
+    "maxCandidates": 14,
+    "writer": {
+      "prompt": "Write one original draft for the recipient’s startup using the supplied facts. Return only JSON: candidateId, canonicalTopic, title, body, sources. Use only supplied evidence. Distinguish hypotheses. Do not publish or request tools."
+    },
+    "reviewer": {
+      "prompt": "Independently review the supplied draft against the supplied evidence and editorial rules. Return only JSON: candidateId, draftDigest, outcome (accepted, rejected, revise), reason. Reject unsupported claims, repeated canonical topics, and incomplete drafts. Do not publish or request tools."
+    }
+  },
+  "skills": [
+    {
+      "id": "weekly.inventory",
+      "title": "Inventory and sourcing",
+      "body": "Use the recipient’s pinned facts, reference URLs, and existing topic inventory. Prefer new canonical topics with specific evidence. Treat example content as style input only."
+    },
+    {
+      "id": "weekly.brief",
+      "title": "Brief",
+      "body": "Define one audience problem and one original angle. Plan a concrete example and check every factual claim against the supplied evidence."
+    },
+    {
+      "id": "weekly.draft",
+      "title": "Draft",
+      "body": "Draft one candidate with a concise title and useful original detail. Use the chosen language and Markdown structure. Preserve canonical topic identity and cite only the supplied URLs."
+    },
+    {
+      "id": "weekly.review",
+      "title": "Independent review",
+      "body": "Review the exact submitted draft digest against the frozen inventory and supplied evidence. Accept only original complete drafts with supported claims. Request a revision for a correctable issue or reject an unsupported or repeated topic."
+    }
+  ]
+}

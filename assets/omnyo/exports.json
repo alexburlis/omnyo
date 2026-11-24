@@ -1,0 +1,425 @@
+{
+  "formatVersion": 1,
+  "source": "assets/omnyo/mark.svg",
+  "outputs": [
+    {
+      "family": "browser",
+      "path": "apps/app/public/icon-192.png",
+      "width": 192,
+      "height": 192,
+      "canvas": "tile",
+      "variant": "black",
+      "markScale": 0.66
+    },
+    {
+      "family": "browser",
+      "path": "apps/app/public/icon-192-maskable.png",
+      "width": 192,
+      "height": 192,
+      "canvas": "opaque",
+      "variant": "black",
+      "markScale": 0.56
+    },
+    {
+      "family": "browser",
+      "path": "apps/app/public/icon-512.png",
+      "width": 512,
+      "height": 512,
+      "canvas": "tile",
+      "variant": "black",
+      "markScale": 0.66
+    },
+    {
+      "family": "browser",
+      "path": "apps/app/public/icon-512-maskable.png",
+      "width": 512,
+      "height": 512,
+      "canvas": "opaque",
+      "variant": "black",
+      "markScale": 0.56
+    },
+    {
+      "family": "browser",
+      "path": "apps/app/public/apple-touch-icon.png",
+      "width": 180,
+      "height": 180,
+      "canvas": "opaque",
+      "variant": "black",
+      "markScale": 0.66
+    },
+    {
+      "family": "browser",
+      "path": "apps/app/public/favicon-16x16.png",
+      "width": 16,
+      "height": 16,
+      "canvas": "transparent",
+      "variant": "black",
+      "markScale": 0.98
+    },
+    {
+      "family": "browser",
+      "path": "apps/app/public/favicon-16x16-dark.png",
+      "width": 16,
+      "height": 16,
+      "canvas": "transparent",
+      "variant": "white",
+      "markScale": 0.98
+    },
+    {
+      "family": "browser",
+      "path": "apps/app/public/favicon-16x16-dev.png",
+      "width": 16,
+      "height": 16,
+      "canvas": "transparent",
+      "variant": "orange",
+      "markScale": 0.98
+    },
+    {
+      "family": "browser",
+      "path": "apps/app/public/favicon-32x32.png",
+      "width": 32,
+      "height": 32,
+      "canvas": "transparent",
+      "variant": "black",
+      "markScale": 0.98
+    },
+    {
+      "family": "browser",
+      "path": "apps/app/public/favicon-32x32-dark.png",
+      "width": 32,
+      "height": 32,
+      "canvas": "transparent",
+      "variant": "white",
+      "markScale": 0.98
+    },
+    {
+      "family": "browser",
+      "path": "apps/app/public/favicon-32x32-dev.png",
+      "width": 32,
+      "height": 32,
+      "canvas": "transparent",
+      "variant": "orange",
+      "markScale": 0.98
+    },
+    {
+      "family": "desktop",
+      "path": "apps/desktop/assets/icon.png",
+      "width": 1024,
+      "height": 1024,
+      "canvas": "tile",
+      "variant": "black",
+      "markScale": 0.66
+    },
+    {
+      "family": "desktop",
+      "path": "apps/desktop/assets/icon-dev.png",
+      "width": 1024,
+      "height": 1024,
+      "canvas": "tile",
+      "variant": "green",
+      "markScale": 0.66
+    },
+    {
+      "family": "desktop",
+      "path": "apps/desktop/assets/icon-nightly.png",
+      "width": 1024,
+      "height": 1024,
+      "canvas": "tile",
+      "variant": "yellow",
+      "markScale": 0.66
+    },
+    {
+      "family": "mobile",
+      "path": "apps/mobile/assets/icon.png",
+      "width": 1024,
+      "height": 1024,
+      "canvas": "opaque",
+      "variant": "black",
+      "markScale": 0.66
+    },
+    {
+      "family": "mobile",
+      "path": "apps/mobile/assets/icon-dev.png",
+      "width": 1024,
+      "height": 1024,
+      "canvas": "opaque",
+      "variant": "orange",
+      "markScale": 0.66
+    },
+    {
+      "family": "mobile",
+      "path": "apps/mobile/assets/ios-icon-dark.png",
+      "width": 1024,
+      "height": 1024,
+      "canvas": "transparent",
+      "variant": "white",
+      "markScale": 0.66
+    },
+    {
+      "family": "mobile",
+      "path": "apps/mobile/assets/android-icon-foreground.png",
+      "width": 1024,
+      "height": 1024,
+      "canvas": "transparent",
+      "variant": "black",
+      "markScale": 0.46
+    },
+    {
+      "family": "mobile",
+      "path": "apps/mobile/assets/android-icon-foreground-dev.png",
+      "width": 1024,
+      "height": 1024,
+      "canvas": "transparent",
+      "variant": "orange",
+      "markScale": 0.46
+    },
+    {
+      "family": "mobile",
+      "path": "apps/mobile/assets/android-icon-monochrome.png",
+      "width": 1024,
+      "height": 1024,
+      "canvas": "transparent",
+      "variant": "white",
+      "markScale": 0.46,
+      "monochrome": true
+    },
+    {
+      "family": "mobile",
+      "path": "apps/mobile/assets/android-notification-icon.png",
+      "width": 384,
+      "height": 384,
+      "canvas": "transparent",
+      "variant": "white",
+      "markScale": 0.94,
+      "monochrome": true
+    },
+    {
+      "family": "mobile",
+      "path": "apps/mobile/assets/favicon.png",
+      "width": 48,
+      "height": 48,
+      "canvas": "opaque",
+      "variant": "black",
+      "markScale": 0.96
+    },
+    {
+      "family": "mobile",
+      "path": "apps/mobile/assets/favicon-dev.png",
+      "width": 48,
+      "height": 48,
+      "canvas": "transparent",
+      "variant": "orange",
+      "markScale": 0.96
+    },
+    {
+      "family": "mobile",
+      "path": "apps/mobile/assets/splash-logo.png",
+      "width": 581,
+      "height": 487,
+      "canvas": "transparent",
+      "variant": "black",
+      "markScale": 0.94
+    },
+    {
+      "family": "mobile",
+      "path": "apps/mobile/assets/splash-logo-dark.png",
+      "width": 581,
+      "height": 487,
+      "canvas": "transparent",
+      "variant": "white",
+      "markScale": 0.94
+    },
+    {
+      "family": "mobile",
+      "path": "apps/mobile/assets/splash-logo-dev.png",
+      "width": 581,
+      "height": 487,
+      "canvas": "transparent",
+      "variant": "orange",
+      "markScale": 0.94
+    },
+    {
+      "family": "root",
+      "path": "assets/omnyo-logo.svg",
+      "width": 507,
+      "height": 405,
+      "canvas": "transparent",
+      "variant": "black",
+      "markScale": 0.98
+    },
+    {
+      "family": "root",
+      "path": "assets/omnyo-logo.png",
+      "width": 568,
+      "height": 568,
+      "canvas": "transparent",
+      "variant": "black",
+      "markScale": 0.98
+    },
+    {
+      "family": "root",
+      "path": "assets/omnyo-logo-white.png",
+      "width": 568,
+      "height": 568,
+      "canvas": "transparent",
+      "variant": "white",
+      "markScale": 0.98
+    },
+    {
+      "family": "root",
+      "path": "assets/omnyo-logo-dev.png",
+      "width": 568,
+      "height": 568,
+      "canvas": "transparent",
+      "variant": "orange",
+      "markScale": 0.98
+    },
+    {
+      "family": "root",
+      "path": "assets/omnyo-logo-black-white-bg-discord.png",
+      "width": 1024,
+      "height": 1024,
+      "canvas": "opaque",
+      "variant": "black",
+      "markScale": 0.98
+    },
+    {
+      "family": "site",
+      "path": "apps/web/public/brand/omnyo-logo-flat-black.svg",
+      "width": 507,
+      "height": 405,
+      "canvas": "transparent",
+      "variant": "black",
+      "markScale": 0.98
+    },
+    {
+      "family": "site",
+      "path": "apps/web/public/brand/omnyo-logo-flat-black.png",
+      "width": 4096,
+      "height": 3272,
+      "canvas": "transparent",
+      "variant": "black",
+      "markScale": 0.98
+    },
+    {
+      "family": "site",
+      "path": "apps/web/public/brand/omnyo-logo-flat-white.svg",
+      "width": 507,
+      "height": 405,
+      "canvas": "transparent",
+      "variant": "white",
+      "markScale": 0.98
+    },
+    {
+      "family": "site",
+      "path": "apps/web/public/brand/omnyo-logo-flat-white.png",
+      "width": 4096,
+      "height": 3272,
+      "canvas": "transparent",
+      "variant": "white",
+      "markScale": 0.98
+    },
+    {
+      "family": "site",
+      "path": "apps/web/public/brand/omnyo-logo-shaded.svg",
+      "width": 507,
+      "height": 405,
+      "canvas": "transparent",
+      "variant": "shaded",
+      "markScale": 0.98
+    },
+    {
+      "family": "site",
+      "path": "apps/web/public/brand/omnyo-logo-shaded.png",
+      "width": 4096,
+      "height": 3272,
+      "canvas": "transparent",
+      "variant": "shaded",
+      "markScale": 0.98
+    },
+    {
+      "family": "site",
+      "path": "apps/web/public/favicon-16x16.png",
+      "width": 16,
+      "height": 16,
+      "canvas": "transparent",
+      "variant": "black",
+      "markScale": 0.98
+    },
+    {
+      "family": "site",
+      "path": "apps/web/public/favicon-16x16-dark.png",
+      "width": 16,
+      "height": 16,
+      "canvas": "transparent",
+      "variant": "white",
+      "markScale": 0.98
+    },
+    {
+      "family": "site",
+      "path": "apps/web/public/favicon-32x32.png",
+      "width": 32,
+      "height": 32,
+      "canvas": "transparent",
+      "variant": "black",
+      "markScale": 0.98
+    },
+    {
+      "family": "site",
+      "path": "apps/web/public/favicon-32x32-dark.png",
+      "width": 32,
+      "height": 32,
+      "canvas": "transparent",
+      "variant": "white",
+      "markScale": 0.98
+    },
+    {
+      "family": "site",
+      "path": "apps/web/public/apple-touch-icon.png",
+      "width": 180,
+      "height": 180,
+      "canvas": "opaque",
+      "variant": "black",
+      "markScale": 0.66
+    },
+    {
+      "family": "site",
+      "path": "apps/web/src/assets/omnyo-icon.png",
+      "width": 192,
+      "height": 192,
+      "canvas": "transparent",
+      "variant": "black",
+      "markScale": 0.98
+    },
+    {
+      "family": "site",
+      "path": "apps/web/src/assets/omnyo-icon-dark.png",
+      "width": 192,
+      "height": 192,
+      "canvas": "transparent",
+      "variant": "white",
+      "markScale": 0.98
+    },
+    {
+      "family": "browser",
+      "path": "apps/app/src/assets/omnyo-logo-dark.svg",
+      "width": 507,
+      "height": 405,
+      "canvas": "transparent",
+      "variant": "white",
+      "markScale": 0.98
+    }
+  ],
+  "icns": [
+    {
+      "family": "desktop",
+      "path": "apps/desktop/assets/icon.icns",
+      "png": "apps/desktop/assets/icon.png"
+    },
+    {
+      "family": "desktop",
+      "path": "apps/desktop/assets/icon-nightly.icns",
+      "png": "apps/desktop/assets/icon-nightly.png"
+    }
+  ]
+}

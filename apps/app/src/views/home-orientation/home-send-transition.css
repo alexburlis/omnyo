@@ -1,0 +1,12 @@
+html[data-home-send="travel"]::view-transition-group(*),
+html[data-home-send="travel"]::view-transition-old(*),
+html[data-home-send="travel"]::view-transition-new(*) {
+  animation-duration: var(--motion-duration-slow);
+  animation-timing-function: var(--motion-ease-smooth);
+}
+
+html[data-home-send="reduced"]::view-transition-old(root),
+html[data-home-send="reduced"]::view-transition-new(root) {
+  animation-duration: var(--motion-duration-fast);
+  animation-timing-function: var(--motion-ease-standard);
+}

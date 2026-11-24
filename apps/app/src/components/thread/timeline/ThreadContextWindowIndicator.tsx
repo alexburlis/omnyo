@@ -1,0 +1,286 @@
+import { useId, useState } from "react";
+import { Button } from "@omnyo/shared-ui/button";
+import { COARSE_POINTER_PROMPT_ICON_ACTION_BUTTON_CLASS } from "@omnyo/shared-ui/coarse-pointer-sizing";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@omnyo/shared-ui/popover";
+import type { ThreadContextWindowUsage } from "@omnyo/server-contract";
+import { useHoverPopover } from "../../ui/hooks/use-hover-popover.js";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import {
+  CONTROL_HOVER_TRANSITION,
+  DISCLOSURE_CHEVRON_TRANSITION,
+} from "@omnyo/shared-ui/motion";
+import {
+  calculateContextWindowUsagePercent,
+  formatCompactTokenCount,
+  formatUsageCost,
+} from "./thread-context-window-usage.js";
+
+import {
+  ContextWindowReveal,
+  ThreadContextWindowDetails,
+  ThreadContextWindowSegments,
+} from "./ThreadContextWindowDetails.js";
+
+interface ThreadContextWindowCardProps {
+  usage: ThreadContextWindowUsage;
+  className?: string;
+}
+
+interface ThreadContextWindowIndicatorProps {
+  usage: ThreadContextWindowUsage;
+  defaultOpen?: boolean;
+}
+
+const CONTEXT_WINDOW_POPOVER_CLOSE_DELAY_MS = 60;
+
+export function ThreadContextWindowCard({
+  usage,
+  className,
+}: ThreadContextWindowCardProps) {
+  const details = usage.snapshot?.categories.length
+    ? usage.snapshot
+    : undefined;
+
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
+  const detailsId = useId();
+  const usedPercent = calculateContextWindowUsagePercent(usage);
+  const leftPercent = Math.max(0, 100 - usedPercent);
+  const visualPercent = Math.min(Math.max(usedPercent, 0), 100);
+
+  const toneClass =
+    usedPercent >= 90
+      ? "text-destructive"
+      : usedPercent >= 75
+        ? "text-warning-text"
+        : "text-muted-foreground";
+
+  const usedTokensLabel = formatCompactTokenCount(usage.usedTokens);
+  const windowTokensLabel = formatCompactTokenCount(usage.modelContextWindow);
+  const titleLabel = usage.estimated ? "Estimated context" : "Context window";
+  const costLabel = usage.cost ? formatUsageCost(usage.cost) : null;
+
+  const detailsDurationClass =
+    details && detailsExpanded
+      ? "duration-(--motion-duration-slow)"
+      : "duration-(--motion-duration-base)";
+
+  return (
+    <div
+      className={cn(
+        "@container/context-window w-56 rounded-md border bg-popover p-2 text-popover-foreground shadow-md max-md:pointer-coarse:px-4",
+        details &&
+          "transition-[width] ease-(--motion-ease-smooth) motion-reduce:transition-none",
+        details && detailsDurationClass,
+        details && detailsExpanded && "w-90",
+        className,
+      )}
+    >
+      <div className="flex flex-col gap-2 max-md:pointer-coarse:gap-3">
+        <div className="flex items-baseline justify-between gap-2 text-xs max-md:pointer-coarse:text-sm">
+          <span
+            className={cn(
+              "text-muted-foreground",
+              details && detailsExpanded && "font-medium text-foreground",
+            )}
+          >
+            {titleLabel}
+          </span>
+          <span className={cn("font-medium tabular-nums", toneClass)}>
+            {usedPercent}% used
+          </span>
+        </div>
+        <div
+          className={cn(
+            "relative h-1.5 w-full overflow-hidden rounded-full bg-border transition-[height] ease-(--motion-ease-smooth) motion-reduce:transition-none max-md:pointer-coarse:h-2",
+            detailsDurationClass,
+            details &&
+              detailsExpanded &&
+              "order-2 h-4 max-md:pointer-coarse:h-5",
+          )}
+        >
+          <div
+            className={cn(
+              "h-full rounded-full bg-current transition-opacity motion-reduce:transition-none",
+              detailsDurationClass,
+              toneClass,
+              details && detailsExpanded && "opacity-0",
+            )}
+            style={{ width: `${visualPercent}%` }}
+          />
+          {details ? (
+            <ThreadContextWindowSegments
+              details={details}
+              modelContextWindow={usage.modelContextWindow}
+              visible={detailsExpanded}
+            />
+          ) : null}
+        </div>
+        <div
+          className={cn(
+            "flex items-baseline justify-between gap-2 text-xs tabular-nums text-muted-foreground max-md:pointer-coarse:text-sm",
+            details && detailsExpanded && "order-1",
+          )}
+        >
+          <span>
+            <span
+              className={cn(
+                details && detailsExpanded && "font-medium text-foreground",
+              )}
+            >
+              {usedTokensLabel}
+            </span>{" "}
+            / {windowTokensLabel} tokens
+          </span>
+          <span>{leftPercent}% left</span>
+        </div>
+        {costLabel ? (
+          <div
+            className={cn(
+              "flex items-baseline justify-between gap-2 text-xs tabular-nums text-muted-foreground max-md:pointer-coarse:text-sm",
+              details && detailsExpanded && "order-3",
+            )}
+          >
+            <span>Session cost</span>
+            <span>{costLabel}</span>
+          </div>
+        ) : null}
+      </div>
+      {details ? (
+        <>
+          <div className="-mx-2 max-md:pointer-coarse:-mx-4">
+            <ContextWindowReveal id={detailsId} open={detailsExpanded}>
+              <ThreadContextWindowDetails
+                details={details}
+                capacity={usage.modelContextWindow}
+              />
+            </ContextWindowReveal>
+          </div>
+          <button
+            type="button"
+            className={cn(
+              "ml-auto mt-2 flex cursor-pointer items-center gap-1.5 rounded-xs text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:pointer-coarse:mt-3 max-md:pointer-coarse:py-1 max-md:pointer-coarse:text-sm",
+              CONTROL_HOVER_TRANSITION,
+            )}
+            aria-expanded={detailsExpanded}
+            aria-controls={detailsId}
+            onClick={() => setDetailsExpanded((value) => !value)}
+          >
+            {detailsExpanded ? "Hide details" : "Show details"}
+            <svg
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1"
+              aria-hidden="true"
+              data-icon-root=""
+              className={cn(
+                "size-3",
+                DISCLOSURE_CHEVRON_TRANSITION,
+                detailsExpanded && "rotate-180",
+              )}
+            >
+              <path d="m4 6 4 4 4-4" />
+            </svg>
+          </button>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+export function ThreadContextWindowIndicator({
+  usage,
+  defaultOpen,
+}: ThreadContextWindowIndicatorProps) {
+  const details = usage.snapshot?.categories.length
+    ? usage.snapshot
+    : undefined;
+
+  const {
+    open: hoverOpen,
+    triggerHoverProps,
+    contentHoverProps,
+    handleOpenChange,
+  } = useHoverPopover({
+    closeDelayMs: details ? 200 : CONTEXT_WINDOW_POPOVER_CLOSE_DELAY_MS,
+    hoverableContent: details !== undefined,
+  });
+
+  const open = defaultOpen || hoverOpen;
+
+  const usedPercent = calculateContextWindowUsagePercent(usage);
+  const visualPercent = Math.min(Math.max(usedPercent, 0), 100);
+
+  const radius = 6.5;
+  const circumference = 2 * Math.PI * radius;
+  const dashOffset = circumference * (1 - visualPercent / 100);
+
+  const toneClass =
+    usedPercent >= 90
+      ? "text-destructive"
+      : usedPercent >= 75
+        ? "text-warning-text"
+        : "text-muted-foreground";
+
+  const titleLabel = usage.estimated ? "Estimated context" : "Context window";
+
+  return (
+    <Popover open={open} onOpenChange={handleOpenChange}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          {...triggerHoverProps}
+          className={COARSE_POINTER_PROMPT_ICON_ACTION_BUTTON_CLASS}
+          aria-label={`Context window ${usedPercent}% used`}
+        >
+          <svg
+            viewBox="0 0 16 16"
+            className={cn("size-4", toneClass)}
+            aria-hidden="true"
+          >
+            <circle
+              cx="8"
+              cy="8"
+              r={radius}
+              fill="none"
+              strokeWidth="3"
+              className="stroke-border-hairline"
+            />
+            <circle
+              cx="8"
+              cy="8"
+              r={radius}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeDasharray={circumference}
+              strokeDashoffset={dashOffset}
+              transform="rotate(-90 8 8)"
+              className="transition-[stroke-dashoffset] duration-(--motion-duration-slow) ease-(--motion-ease-smooth) motion-reduce:transition-none"
+            />
+          </svg>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        side="top"
+        align="end"
+        sideOffset={8}
+        {...contentHoverProps}
+        mobileTitle={titleLabel}
+        className="w-auto border-0 bg-transparent p-0 shadow-none max-md:p-0"
+      >
+        <ThreadContextWindowCard
+          usage={usage}
+          className="max-md:w-full max-md:rounded-none max-md:border-0 max-md:bg-transparent max-md:px-4 max-md:pt-2 max-md:pb-[max(1rem,env(safe-area-inset-bottom))] max-md:shadow-none"
+        />
+      </PopoverContent>
+    </Popover>
+  );
+}

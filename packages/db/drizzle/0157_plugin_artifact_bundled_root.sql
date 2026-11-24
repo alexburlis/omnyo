@@ -1,0 +1,1 @@
+ALTER TABLE `plugin_artifacts` ADD `bundled_root_dir` text;

@@ -1,0 +1,2 @@
+ALTER TABLE `threads` ADD `launched_by_thread_id` text REFERENCES `threads`(`id`) ON DELETE set null;--> statement-breakpoint
+CREATE INDEX `threads_launched_by_idx` ON `threads` (`launched_by_thread_id`);

@@ -1,0 +1,244 @@
+:where(
+  .omnyo-intro,
+  .omnyo-onboarding-stage,
+  .omnyo-onboarding-mark,
+  .omnyo-onboarding-steps
+) {
+  --omnyo-brand: oklch(0.67 0.22 35.9);
+}
+
+:where(.dark)
+  :where(
+    .omnyo-intro,
+    .omnyo-onboarding-stage,
+    .omnyo-onboarding-mark,
+    .omnyo-onboarding-steps
+  ) {
+  --omnyo-brand: oklch(0.704 0.192 37.1);
+}
+
+.omnyo-onboarding-mark-dot {
+  fill: #ff4f17;
+}
+
+.omnyo-onboarding-stage-grid {
+  background-image: radial-gradient(
+    color-mix(in oklab, var(--ink) 16%, transparent) 1px,
+    transparent 1.4px
+  );
+  background-size: 22px 22px;
+  mask: radial-gradient(
+    ellipse 70% 60% at 50% 50%,
+    black 30%,
+    transparent 100%
+  );
+}
+
+.omnyo-onboarding-stage-glow {
+  background: radial-gradient(
+    ellipse 55% 45% at 50% 46%,
+    color-mix(in oklab, var(--omnyo-brand) 9%, transparent),
+    transparent 70%
+  );
+}
+
+.omnyo-onboarding-stage-focus {
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--omnyo-brand) 14%, transparent);
+}
+
+.omnyo-onboarding-steps {
+  --omnyo-step-sweep: 720ms;
+  --omnyo-step-lead: 140ms;
+  --omnyo-step-stagger-delay: 70ms;
+}
+
+.omnyo-onboarding-step-fill {
+  transform-origin: left center;
+}
+
+.omnyo-onboarding-step-fill[data-filled="false"] {
+  transform: scaleX(0);
+}
+
+[data-motion="fill"] .omnyo-onboarding-step-fill {
+  animation: omnyo-onboarding-step-sweep var(--omnyo-step-sweep)
+    var(--motion-ease-smooth) var(--omnyo-step-lead) both;
+}
+
+[data-motion="complete"] .omnyo-onboarding-step-fill {
+  animation: omnyo-onboarding-step-dim var(--motion-duration-slow)
+    var(--motion-ease-standard)
+    calc(var(--step-stagger) * var(--omnyo-step-stagger-delay)) backwards;
+}
+
+[data-motion="retract"] .omnyo-onboarding-step-fill {
+  animation: omnyo-onboarding-step-retract var(--motion-duration-slow)
+    var(--motion-ease-smooth)
+    calc(var(--step-stagger) * var(--omnyo-step-stagger-delay)) backwards;
+}
+
+[data-motion="reopen"] .omnyo-onboarding-step-fill {
+  animation: omnyo-onboarding-step-brighten var(--motion-duration-slow)
+    var(--motion-ease-standard) backwards;
+}
+
+.omnyo-onboarding-step-comet {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  animation:
+    omnyo-onboarding-step-comet-travel var(--omnyo-step-sweep)
+      var(--motion-ease-smooth) var(--omnyo-step-lead) both,
+    omnyo-onboarding-step-comet-fade
+      calc(var(--omnyo-step-sweep) + var(--motion-duration-slow)) linear
+      var(--omnyo-step-lead) both;
+}
+
+.omnyo-onboarding-step-comet::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: min(100%, 40px);
+  height: 100%;
+  border-radius: 9999px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    color-mix(in oklab, var(--omnyo-brand) 85%, transparent)
+  );
+}
+
+.omnyo-onboarding-step-comet::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: -2.5px;
+  width: 5px;
+  height: 5px;
+  border-radius: 9999px;
+  background: var(--omnyo-brand);
+  box-shadow:
+    0 0 0 2px color-mix(in oklab, var(--omnyo-brand) 22%, transparent),
+    0 0 10px 2px color-mix(in oklab, var(--omnyo-brand) 55%, transparent);
+  transform: translateY(-50%);
+}
+
+[data-motion="complete"] .omnyo-onboarding-step-check {
+  animation: omnyo-onboarding-step-check-open var(--motion-duration-base)
+    var(--motion-ease-smooth)
+    calc(var(--step-stagger) * var(--omnyo-step-stagger-delay)) backwards;
+}
+
+[data-motion="complete"] .omnyo-onboarding-step-check > svg {
+  animation: omnyo-onboarding-step-check-draw var(--motion-duration-slow)
+    var(--motion-ease-out)
+    calc(
+      var(--step-stagger) * var(--omnyo-step-stagger-delay) +
+        var(--motion-duration-fast)
+    )
+    backwards;
+}
+
+[data-motion="reopen"] .omnyo-onboarding-step-check {
+  animation: omnyo-onboarding-step-check-close var(--motion-duration-base)
+    var(--motion-ease-smooth) forwards;
+}
+
+@keyframes omnyo-onboarding-step-sweep {
+  from {
+    transform: scaleX(0);
+  }
+
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes omnyo-onboarding-step-retract {
+  from {
+    transform: scaleX(1);
+  }
+
+  to {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes omnyo-onboarding-step-dim {
+  from {
+    opacity: 1;
+  }
+}
+
+@keyframes omnyo-onboarding-step-brighten {
+  from {
+    opacity: 0.5;
+  }
+}
+
+@keyframes omnyo-onboarding-step-comet-travel {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes omnyo-onboarding-step-comet-fade {
+  0% {
+    opacity: 0;
+  }
+
+  12% {
+    opacity: 1;
+  }
+
+  65% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes omnyo-onboarding-step-check-open {
+  from {
+    width: 0;
+    opacity: 0;
+  }
+}
+
+@keyframes omnyo-onboarding-step-check-close {
+  to {
+    width: 0;
+    opacity: 0;
+  }
+}
+
+@keyframes omnyo-onboarding-step-check-draw {
+  from {
+    clip-path: inset(0 100% 0 0);
+    transform: scale(0.96);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .omnyo-onboarding-step-comet {
+    display: none;
+  }
+
+  [data-motion="fill"] .omnyo-onboarding-step-fill,
+  [data-motion="retract"] .omnyo-onboarding-step-fill,
+  [data-motion] .omnyo-onboarding-step-check,
+  [data-motion] .omnyo-onboarding-step-check > svg {
+    animation: none;
+  }
+
+  [data-motion="reopen"] .omnyo-onboarding-step-check {
+    display: none;
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "delayed-loading",
+  "type": "registry:ui",
+  "title": "delayed-loading",
+  "description": "Omnyo ui \"delayed-loading\" — vendored from the Omnyo app's own source (version-matched to this Omnyo release).",
+  "dependencies": [
+    "@radix-ui/react-slot"
+  ],
+  "files": [
+    {
+      "path": "registry/components/ui/delayed-loading.tsx",
+      "content": "import {\n  Fragment,\n  isValidElement,\n  useEffect,\n  useState,\n  type ReactNode,\n} from \"react\";\nimport { Slot } from \"@radix-ui/react-slot\";\n\nconst LOADING_REVEAL_DELAY_MS = 200;\n\nconst LOADING_REVEAL_MOTION_CLASS =\n  \"animate-in fade-in-0 duration-(--motion-duration-fast)\";\n\nexport function DelayedLoading({ children }: { children: ReactNode }) {\n  const [visible, setVisible] = useState(false);\n\n  useEffect(() => {\n    const timeout = window.setTimeout(\n      () => setVisible(true),\n      LOADING_REVEAL_DELAY_MS,\n    );\n\n    return () => window.clearTimeout(timeout);\n  }, []);\n\n  if (!visible) return null;\n\n  return isValidElement(children) && children.type !== Fragment ? (\n    <Slot className={LOADING_REVEAL_MOTION_CLASS}>{children}</Slot>\n  ) : (\n    children\n  );\n}\n",
+      "type": "registry:ui",
+      "target": "components/ui/delayed-loading.tsx"
+    }
+  ]
+}

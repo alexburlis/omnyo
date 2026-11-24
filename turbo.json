@@ -1,0 +1,1714 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalEnv": ["OMNYO_BUILD_TOOLCHAIN", "OMNYO_DESKTOP_RELEASE_CHANNEL"],
+  "globalPassThroughEnv": ["npm_config_store_dir", "pnpm_config_store_dir"],
+  "tasks": {
+    "@omnyo/plugin-sdk#pack:private": {
+      "dependsOn": ["build", "build:types"],
+      "inputs": ["$TURBO_DEFAULT$", "dist/**", "bundled-types/**"],
+      "outputs": ["private-artifact/**"]
+    },
+    "@omnyo/db#db:generate": { "cache": false },
+    "@omnyo/desktop#smoke:browser-broker": {
+      "cache": false,
+      "dependsOn": [
+        "@omnyo/templates#generate:templates",
+        "@omnyo/plugin-sdk#build:types",
+        "@omnyo/cli#build"
+      ],
+      "outputs": []
+    },
+    "@omnyo/desktop#smoke:browser-cdp": {
+      "cache": false,
+      "dependsOn": ["topo"],
+      "passThroughEnv": ["DISPLAY"]
+    },
+    // Mirrors "build" but also caches bundle-stats.json, which the
+    // omnyo:bundle-stats Vite plugin writes beside dist for the boot-payload
+    // budget check. Without it a cache hit would leave CI checking a stale
+    // file, or none at all.
+    // The docs' UI-anatomy manifest is the contract this test checks the real
+    // app components against, so a manifest edit must re-run it.
+    "@omnyo/client-core#test": {
+      "env": ["OMNYO_CLIENT_PROJECTION_MEASUREMENT_OUTPUT"],
+      "dependsOn": ["topo"]
+    },
+    "@omnyo/app#check:pwa-icons": {
+      "inputs": [
+        "scripts/generate-pwa-icons.mjs",
+        "public/icon-*.png",
+        "public/apple-touch-icon*.png",
+        "public/manifest*.webmanifest",
+        "package.json",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/pnpm-lock.yaml",
+        "$TURBO_ROOT$/pnpm-workspace.yaml"
+      ],
+      "outputs": []
+    },
+    "@omnyo/app#test": {
+      "env": [
+        "OMNYO_MARKDOWN_MEASUREMENT_OUTPUT",
+        "OMNYO_SIDEBAR_MEASUREMENT_OUTPUT"
+      ],
+      "dependsOn": ["//#ensure-native-modules", "check:pwa-icons", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/changelog-metadata.ts",
+        "$TURBO_ROOT$/changelog-parser.ts",
+        "$TURBO_ROOT$/plugins/plugin-api-docs/src/anatomy-manifest.json",
+        "$TURBO_ROOT$/plugins/theme-preview/taxonomy.ts",
+        "$TURBO_ROOT$/vitest*.ts"
+      ]
+    },
+    "@omnyo/app#build": {
+      "env": [
+        "NODE_OPTIONS",
+        "NODE_ENV",
+        "BABEL_*",
+        "ENABLE_REACT_COMPILER_TIMINGS",
+        "VITE_*"
+      ],
+      "dependsOn": ["topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/.env*",
+        ".env*",
+        "$TURBO_ROOT$/changelog-metadata.ts",
+        "$TURBO_ROOT$/changelog-parser.ts",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/packages/tsconfig/*.json",
+        "$TURBO_ROOT$/pnpm-lock.yaml",
+        "$TURBO_ROOT$/pnpm-workspace.yaml",
+        "$TURBO_ROOT$/scripts/build-node-entry.mjs",
+        "$TURBO_ROOT$/scripts/build-package.mjs",
+        "$TURBO_ROOT$/scripts/build-utils.mjs",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs",
+        "$TURBO_ROOT$/packages/plugin-build/src/zod-locale-stub.mjs",
+        "$TURBO_ROOT$/scripts/precompress-app-dist.mjs",
+        "$TURBO_ROOT$/turbo.json"
+      ],
+      "outputs": ["bundle-stats.json", "dist/**"]
+    },
+    "build": {
+      "dependsOn": ["topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/packages/tsconfig/*.json",
+        "$TURBO_ROOT$/pnpm-lock.yaml",
+        "$TURBO_ROOT$/pnpm-workspace.yaml",
+        "$TURBO_ROOT$/scripts/build-node-entry.mjs",
+        "$TURBO_ROOT$/scripts/build-package.mjs",
+        "$TURBO_ROOT$/scripts/build-utils.mjs",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs",
+        "$TURBO_ROOT$/packages/plugin-build/src/zod-locale-stub.mjs",
+        "$TURBO_ROOT$/scripts/precompress-app-dist.mjs",
+        "$TURBO_ROOT$/turbo.json"
+      ],
+      "outputs": ["dist/**"]
+    },
+    "@omnyo/sdk#test": {
+      "dependsOn": ["//#ensure-native-modules", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/apps/*/package.json",
+        "$TURBO_ROOT$/apps/*/scripts/**",
+        "$TURBO_ROOT$/apps/*/src/**",
+        "$TURBO_ROOT$/apps/*/tsconfig.json",
+        "$TURBO_ROOT$/apps/*/vite.config.ts",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/packages/*/package.json",
+        "$TURBO_ROOT$/packages/*/scripts/**",
+        "$TURBO_ROOT$/packages/*/src/**",
+        "$TURBO_ROOT$/packages/*/tsconfig.json",
+        "$TURBO_ROOT$/packages/db/drizzle/**",
+        "$TURBO_ROOT$/packages/tsconfig/*.json",
+        "$TURBO_ROOT$/pnpm-lock.yaml",
+        "$TURBO_ROOT$/pnpm-workspace.yaml",
+        "$TURBO_ROOT$/scripts/*.mjs",
+        "$TURBO_ROOT$/turbo.json",
+        "$TURBO_ROOT$/vitest*.ts"
+      ]
+    },
+    "@omnyo/server#build": {
+      "dependsOn": ["topo"],
+      "outputs": ["dist/**"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/apps/app/.env*",
+        "$TURBO_ROOT$/apps/app/*.html",
+        "$TURBO_ROOT$/apps/app/package.json",
+        "$TURBO_ROOT$/apps/app/scripts/**",
+        "$TURBO_ROOT$/apps/app/src/**",
+        "$TURBO_ROOT$/apps/app/tsconfig*.json",
+        "$TURBO_ROOT$/apps/app/vite*.ts",
+        "$TURBO_ROOT$/packages/desktop-contract/package.json",
+        "$TURBO_ROOT$/packages/desktop-contract/src/**",
+        "$TURBO_ROOT$/packages/desktop-contract/tsconfig*.json",
+        "$TURBO_ROOT$/plugins/omnyo-guide/skills/**",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/packages/tsconfig/*.json",
+        "$TURBO_ROOT$/pnpm-lock.yaml",
+        "$TURBO_ROOT$/pnpm-workspace.yaml",
+        "$TURBO_ROOT$/scripts/build-node-entry.mjs",
+        "$TURBO_ROOT$/scripts/build-package.mjs",
+        "$TURBO_ROOT$/scripts/build-utils.mjs",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs",
+        "$TURBO_ROOT$/packages/plugin-build/src/zod-locale-stub.mjs",
+        "$TURBO_ROOT$/turbo.json"
+      ]
+    },
+    "@omnyo/plugin-build#build": {
+      "dependsOn": ["topo", "generate"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/scripts/build-utils.mjs",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs",
+        "$TURBO_ROOT$/packages/plugin-build/src/zod-locale-stub.mjs",
+        "$TURBO_ROOT$/scripts/build-node-entry.mjs"
+      ],
+      "outputs": ["dist/**"]
+    },
+    "prepare:bundled": {
+      "dependsOn": ["topo", "^build", "@omnyo/plugin-sdk#pack:private"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!.bundled-runtime/**",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ],
+      "outputs": [".bundled-runtime/**"]
+    },
+    "@omnyo/bundled-plugins#build": {
+      "dependsOn": [
+        "^prepare:bundled",
+        "@omnyo/server#generate:omnyo-official-marketplace"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/apps/server/src/services/plugins/builtin-registry.ts",
+        "$TURBO_ROOT$/apps/server/src/services/plugin-catalog/bundled-marketplace-paths.ts"
+      ],
+      "outputs": ["dist/**"]
+    },
+    "omnyo-app#build": {
+      "cache": false,
+      "passThroughEnv": ["OMNYO_RUNTIME_MAC_SIGNING_TEAM"],
+      "dependsOn": [
+        "@omnyo/app#build",
+        "@omnyo/server#build",
+        "@omnyo/bundled-plugins#build",
+        "@omnyo/host-daemon#build",
+        "@omnyo/cli#build",
+        "@omnyo/sdk#build",
+        "@omnyo/plugin-sdk#build",
+        "@omnyo/plugin-sdk#pack:private"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/omnyo-app/package.json",
+        "$TURBO_ROOT$/packages/omnyo-app/scripts/**",
+        "$TURBO_ROOT$/packages/omnyo-app/src/**",
+        "$TURBO_ROOT$/packages/omnyo-app/tsconfig.json",
+        "$TURBO_ROOT$/packages/sdk/package.json",
+        "$TURBO_ROOT$/packages/sdk/src/**",
+        "$TURBO_ROOT$/packages/sdk/tsconfig.json",
+        "$TURBO_ROOT$/packages/shared-ui/package.json",
+        "$TURBO_ROOT$/packages/shared-ui/src/**",
+        "$TURBO_ROOT$/packages/shared-ui/tsconfig.json",
+        "$TURBO_ROOT$/packages/tsconfig/*.json",
+        "$TURBO_ROOT$/scripts/*.mjs",
+        "$TURBO_ROOT$/packages/plugin-sdk/scripts/private-artifact.mjs",
+        "$TURBO_ROOT$/packages/plugin-sdk/private-artifact/**"
+      ],
+      "outputs": ["app/**", "dist/**", "host-daemon/**", "server/**"]
+    },
+    "omnyo-app#build:host": {
+      "dependsOn": [
+        "@omnyo/host-daemon#build",
+        "@omnyo/plugin-sdk#pack:private"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/apps/host-daemon/dist/**",
+        "$TURBO_ROOT$/packages/omnyo-app/package.json",
+        "$TURBO_ROOT$/packages/omnyo-app/scripts/build-host.mjs",
+        "$TURBO_ROOT$/packages/omnyo-app/src/**",
+        "$TURBO_ROOT$/packages/omnyo-app/tsconfig.json",
+        "$TURBO_ROOT$/packages/config/package.json",
+        "$TURBO_ROOT$/packages/config/src/**",
+        "$TURBO_ROOT$/packages/config/tsconfig.json",
+        "$TURBO_ROOT$/packages/tsconfig/*.json",
+        "$TURBO_ROOT$/scripts/build-utils.mjs",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs",
+        "$TURBO_ROOT$/packages/plugin-build/src/zod-locale-stub.mjs",
+        "$TURBO_ROOT$/packages/plugin-sdk/scripts/private-artifact.mjs",
+        "$TURBO_ROOT$/packages/plugin-sdk/private-artifact/**"
+      ],
+      "outputs": ["host-package/**"]
+    },
+    "omnyo-plugin-tasks#build": {
+      // The tasks plugin's app bundle imports the @omnyo/plugin-sdk root at
+      // runtime (shared RPC contract), so the SDK dist must exist first.
+      "dependsOn": ["topo", "@omnyo/plugin-sdk#build"]
+    },
+    "@omnyo/desktop#build": {
+      "dependsOn": ["omnyo-app#build"],
+      "env": ["OMNYO_DESKTOP_RELEASE_CHANNEL"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/apps/desktop/**",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs",
+        "$TURBO_ROOT$/packages/omnyo-app/app/**",
+        "$TURBO_ROOT$/packages/omnyo-app/dist/**",
+        "$TURBO_ROOT$/packages/omnyo-app/host-daemon/**",
+        "$TURBO_ROOT$/packages/omnyo-app/package.json",
+        "$TURBO_ROOT$/packages/omnyo-app/server/**",
+        "$TURBO_ROOT$/pnpm-lock.yaml",
+        "$TURBO_ROOT$/pnpm-workspace.yaml",
+        "$TURBO_ROOT$/turbo.json"
+      ],
+      "outputs": ["dist/**", "dist-public-beta/**"]
+    },
+    "@omnyo/desktop#desktop:build": {
+      "dependsOn": ["omnyo-app#build", "@omnyo/desktop#build"],
+      "cache": false,
+      "outputs": ["release/**"],
+      "passThroughEnv": ["*"]
+    },
+    "@omnyo/desktop#desktop:build:linux": {
+      "dependsOn": ["omnyo-app#build", "@omnyo/desktop#build"],
+      "cache": false,
+      "outputs": ["release/**"],
+      "passThroughEnv": ["*"]
+    },
+    "@omnyo/desktop#desktop:build:win": {
+      "dependsOn": ["omnyo-app#build", "@omnyo/desktop#build"],
+      "cache": false,
+      "outputs": ["release/**"],
+      "passThroughEnv": ["*"]
+    },
+    "@omnyo/desktop#smoke:packaged": {
+      "cache": false,
+      "outputs": [],
+      "passThroughEnv": ["*"]
+    },
+    "@omnyo/desktop#smoke:packaged-npm": {
+      "cache": false,
+      "outputs": [],
+      "passThroughEnv": ["OMNYO_DESKTOP_RELEASE_CHANNEL"]
+    },
+    "@omnyo/desktop#package": {
+      "dependsOn": ["omnyo-app#build", "@omnyo/desktop#build"],
+      "cache": false,
+      "outputs": ["release/**"],
+      "passThroughEnv": ["*"]
+    },
+    "@omnyo/desktop#package:linux": {
+      "dependsOn": ["omnyo-app#build", "@omnyo/desktop#build"],
+      "cache": false,
+      "outputs": ["release/**"],
+      "passThroughEnv": ["*"]
+    },
+    "@omnyo/desktop#package:win": {
+      "dependsOn": ["omnyo-app#build", "@omnyo/desktop#build"],
+      "cache": false,
+      "outputs": ["release/**"],
+      "passThroughEnv": ["*"]
+    },
+    "@omnyo/desktop#smoke:appimage-lifecycle": {
+      "cache": false,
+      "outputs": [],
+      "passThroughEnv": ["*"]
+    },
+    "@omnyo/desktop#dev": {
+      "dependsOn": ["omnyo-app#build"],
+      "cache": false,
+      "persistent": true,
+      "passThroughEnv": ["*"]
+    },
+    "@omnyo/desktop#start": {
+      "dependsOn": ["omnyo-app#build"],
+      "cache": false,
+      "persistent": true,
+      "passThroughEnv": ["*"]
+    },
+    "@omnyo/app#dev": {
+      "dependsOn": ["@omnyo/templates#generate:templates"],
+      "cache": false,
+      "persistent": true,
+      "passThroughEnv": ["*"]
+    },
+    "@omnyo/mobile#theme:generate": {
+      "cache": false
+    },
+    "@omnyo/mobile#test": {
+      "dependsOn": ["//#ensure-native-modules", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/vitest*.ts",
+        "$TURBO_ROOT$/apps/app/src/components/ui/theme.css",
+        "$TURBO_ROOT$/apps/app/src/lib/themes/**"
+      ]
+    },
+    "@omnyo/mobile#dev": {
+      "cache": false,
+      "persistent": true,
+      "passThroughEnv": ["*"]
+    },
+    "@omnyo/mobile#build:android:local": {
+      "cache": false,
+      "outputs": ["build-output/**"],
+      "passThroughEnv": ["*"]
+    },
+    "@omnyo/mobile#build:android:dev": {
+      "cache": false,
+      "outputs": ["build-output/**"],
+      "passThroughEnv": ["*"]
+    },
+    "@omnyo/mobile#e2e:android": {
+      "cache": false,
+      "passThroughEnv": ["*"]
+    },
+    "storybook": {
+      "dependsOn": ["@omnyo/templates#generate:templates"],
+      "cache": false,
+      "persistent": true,
+      "passThroughEnv": ["*"]
+    },
+    "@omnyo/host-daemon#dev": {
+      // The source daemon injects apps/cli/bin/omnyo into agent shells. Build its
+      // gitignored runtime before the daemon starts so a sandboxed thread never
+      // has to write back into the daemon's checkout to bootstrap `omnyo`.
+      "dependsOn": [
+        "@omnyo/cli#build",
+        "@omnyo/templates#generate:templates",
+        "@omnyo/plugin-build#generate"
+      ],
+      "cache": false,
+      "persistent": true,
+      "passThroughEnv": ["*"]
+    },
+    "@omnyo/server#dev": {
+      // The server installs first-party provider plugins during startup and
+      // builds their host artifacts. Those builds resolve the published
+      // `@omnyo/plugin-sdk/provider-bridge` entry from the SDK dist, so a
+      // clean worktree must build that runtime before the server starts.
+      "dependsOn": [
+        "@omnyo/server#generate:omnyo-official-marketplace",
+        "@omnyo/templates#generate:templates",
+        "@omnyo/plugin-build#generate",
+        "@omnyo/plugin-sdk#build:runtime"
+      ],
+      "cache": false,
+      "persistent": true,
+      "passThroughEnv": ["*"]
+    },
+    "clean": {
+      "cache": false
+    },
+    "lint": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/.oxlintrc.json",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/pnpm-lock.yaml",
+        "$TURBO_ROOT$/pnpm-workspace.yaml",
+        "$TURBO_ROOT$/packages/plugin-registry/r/**",
+        "$TURBO_ROOT$/scripts/forkable-plugins.json",
+        "$TURBO_ROOT$/scripts/oxlint-plugin.mjs"
+      ]
+    },
+    "//#ensure-native-modules": {
+      "cache": false,
+      "inputs": [
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/packages/db/package.json",
+        "$TURBO_ROOT$/pnpm-lock.yaml",
+        "$TURBO_ROOT$/scripts/ensure-native-modules.mjs"
+      ],
+      "outputs": []
+    },
+    // Transit node (no package defines a `topo` script; nothing executes).
+    // It exists so tasks that resolve `@omnyo/*` imports to *sources* — vitest
+    // and tsc both use the `source` export condition — hash the sources of
+    // dependency packages. Without it, a change in e.g. packages/domain
+    // would cache-hit @omnyo/server#test/#typecheck and skip them stale.
+    "topo": {
+      "dependsOn": ["^topo"]
+    },
+    // ---- Source generators --------------------------------------------------
+    // Generated modules are never committed (see .gitignore). Each generator
+    // is a turbo task with explicit inputs/outputs, so staleness is
+    // structurally impossible and the files can never merge-conflict.
+    //
+    // The owning package's `topo` node depends on its generators, so every
+    // task of that package and of every package that (transitively) depends
+    // on it — the ones that can resolve the generated sources — is ordered
+    // after them and hashes them. Unrelated packages are untouched.
+    "@omnyo/templates#topo": {
+      "dependsOn": [
+        "^topo",
+        "@omnyo/templates#generate:templates",
+        "@omnyo/templates#generate:plugin-scaffold"
+      ]
+    },
+    "@omnyo/plugin-build#topo": {
+      "dependsOn": ["^topo", "@omnyo/plugin-build#generate"]
+    },
+    "@omnyo/server#topo": {
+      "dependsOn": [
+        "^topo",
+        "@omnyo/server#generate:omnyo-official-marketplace"
+      ]
+    },
+    "@omnyo/server#generate:omnyo-official-marketplace": {
+      "dependsOn": [],
+      "inputs": [
+        "scripts/generate-omnyo-official-marketplace.ts",
+        "src/services/plugin-catalog/bundled-marketplace-paths.ts",
+        "src/services/plugins/builtin-registry.ts",
+        "$TURBO_ROOT$/packages/domain/src/plugin-catalog-category.ts",
+        "$TURBO_ROOT$/packages/domain/src/plugin-id.ts",
+        "$TURBO_ROOT$/packages/domain/src/plugin-manifest.ts",
+        "$TURBO_ROOT$/plugins/*/package.json",
+        "$TURBO_ROOT$/plugins/*/PLUGIN_OVERVIEW.md",
+        "$TURBO_ROOT$/plugins/omnyo-official.json"
+      ],
+      "outputs": ["src/generated/omnyo-official-marketplace/marketplace.json"]
+    },
+    "@omnyo/templates#generate:templates": {
+      "dependsOn": [],
+      "inputs": [
+        "scripts/generate-templates.mjs",
+        "scripts/write-generated.mjs",
+        "src/templates/**"
+      ],
+      "outputs": ["src/generated/templates.generated.ts"]
+    },
+    // The `omnyo plugin new` starter files from the (committed) component
+    // registry.
+    "@omnyo/plugin-registry#generate": {
+      "dependsOn": [],
+      "inputs": [
+        "scripts/build-registry.mjs",
+        "registry.json",
+        "flavors/**",
+        "$TURBO_ROOT$/packages/shared-ui/src/**"
+      ],
+      "outputs": ["r/**"]
+    },
+    "@omnyo/templates#generate:plugin-scaffold": {
+      "dependsOn": ["@omnyo/plugin-registry#generate"],
+      "inputs": [
+        "scripts/generate-plugin-scaffold.mjs",
+        "scripts/write-generated.mjs",
+        "$TURBO_ROOT$/apps/app/package.json",
+        "$TURBO_ROOT$/packages/plugin-build/src/runtime-shims.mjs",
+        "$TURBO_ROOT$/packages/plugin-registry/r/**"
+      ],
+      "outputs": ["src/generated/plugin-starter-files.generated.ts"]
+    },
+    // Plugin theme CSS (from the app's theme.css + tw-animate-css) and the
+    // shared-runtime export manifest (introspected from installed packages).
+    "@omnyo/plugin-build#generate": {
+      "dependsOn": [],
+      "inputs": [
+        "scripts/generate-plugin-theme.mjs",
+        "scripts/generate-runtime-export-manifest.mjs",
+        "src/runtime-shims.mjs",
+        "$TURBO_ROOT$/apps/app/package.json",
+        "$TURBO_ROOT$/apps/app/src/components/ui/theme.css",
+        "$TURBO_ROOT$/packages/plugin-sdk/src/**",
+        "$TURBO_ROOT$/packages/shared-ui/src/**",
+        "$TURBO_ROOT$/pnpm-lock.yaml"
+      ],
+      "outputs": ["src/generated/**"]
+    },
+    "typecheck": {
+      "dependsOn": ["topo"]
+    },
+    "@omnyo/app#typecheck": {
+      "dependsOn": ["topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/changelog-metadata.ts",
+        "$TURBO_ROOT$/changelog-parser.ts"
+      ]
+    },
+    "@omnyo/host-daemon#build": {
+      "dependsOn": ["topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/packages/tsconfig/*.json",
+        "$TURBO_ROOT$/pnpm-lock.yaml",
+        "$TURBO_ROOT$/pnpm-workspace.yaml",
+        "$TURBO_ROOT$/scripts/build-node-entry.mjs",
+        "$TURBO_ROOT$/scripts/build-package.mjs",
+        "$TURBO_ROOT$/scripts/build-utils.mjs",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs",
+        "$TURBO_ROOT$/packages/plugin-build/src/zod-locale-stub.mjs",
+        "$TURBO_ROOT$/scripts/precompress-app-dist.mjs",
+        "$TURBO_ROOT$/turbo.json"
+      ],
+      "outputs": ["dist/**"]
+    },
+    "@omnyo/cli#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#pack:private",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/plugins/omnyo-guide/skills/omnyo-cli/**",
+        "$TURBO_ROOT$/vitest*.ts"
+      ]
+    },
+    // Integration tests typecheck without the `source` condition, so
+    // @omnyo/plugin-sdk (reached through apps/server sources) resolves to the
+    // package's published `types`: bundled-types/.
+    "@omnyo/integration-tests#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/apps/server/package.json",
+        "$TURBO_ROOT$/apps/server/tsconfig.json",
+        "$TURBO_ROOT$/apps/server/src/**",
+        "$TURBO_ROOT$/packages/templates/package.json",
+        "$TURBO_ROOT$/packages/templates/scripts/**",
+        "$TURBO_ROOT$/packages/templates/src/**",
+        "$TURBO_ROOT$/vitest*.ts"
+      ]
+    },
+    // The source-wrapper test invokes the root `pnpm omnyo` script, which builds
+    // and executes @omnyo/cli. Model that cross-package dependency so CLI changes
+    // cannot leave this test hidden behind a stale Turbo cache entry.
+    "@omnyo/scripts#test": {
+      "dependsOn": ["//#ensure-native-modules", "@omnyo/cli#build", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/.github/actions/setup-workspace/**",
+        "$TURBO_ROOT$/.github/actions/setup-workspace-tools/**",
+        "$TURBO_ROOT$/.github/actions/cache-workspace/**",
+        "$TURBO_ROOT$/.github/workflows/ci.yml",
+        "$TURBO_ROOT$/.github/workflows/ci-cache-maintenance.yml",
+        "$TURBO_ROOT$/scripts/lib/**",
+        "$TURBO_ROOT$/scripts/forkable-plugins.json",
+        "$TURBO_ROOT$/.github/APPROVED_CONTRIBUTORS",
+        "$TURBO_ROOT$/.github/workflows/approve-contributor.yml",
+        "$TURBO_ROOT$/.github/workflows/pr-gate.yml",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/scripts/*.mjs",
+        "$TURBO_ROOT$/turbo.json",
+        "$TURBO_ROOT$/plugins/*/package.json",
+        "$TURBO_ROOT$/plugins/plugin-api-docs/src/first-party-plugins.json",
+        "$TURBO_ROOT$/apps/*/package.json",
+        "$TURBO_ROOT$/packages/*/package.json",
+        "$TURBO_ROOT$/packages/omnyo-app/scripts/build-host-artifact.mjs",
+        "$TURBO_ROOT$/pnpm-lock.yaml",
+        "$TURBO_ROOT$/apps/server/src/services/plugins/builtin-registry.ts",
+        "$TURBO_ROOT$/vitest*.ts"
+      ]
+    },
+    "@omnyo/provider-bridge-protocol#test": {
+      "dependsOn": ["//#ensure-native-modules", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/vitest*.ts",
+        "$TURBO_ROOT$/plugins/provider-codex/src/**",
+        "$TURBO_ROOT$/plugins/provider-codex/package.json",
+        "$TURBO_ROOT$/plugins/provider-claude-code/src/**",
+        "$TURBO_ROOT$/plugins/provider-claude-code/package.json",
+        "$TURBO_ROOT$/packages/plugin-sdk/src/**"
+      ]
+    },
+    "@omnyo/provider-parity#test": {
+      "dependsOn": ["//#ensure-native-modules", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-sdk/package.json",
+        "$TURBO_ROOT$/packages/plugin-sdk/src/**",
+        "$TURBO_ROOT$/plugins/provider-acp/package.json",
+        "$TURBO_ROOT$/plugins/provider-acp/src/**",
+        "$TURBO_ROOT$/plugins/provider-acp/tsconfig.json",
+        "$TURBO_ROOT$/plugins/provider-claude-code/package.json",
+        "$TURBO_ROOT$/plugins/provider-claude-code/src/**",
+        "$TURBO_ROOT$/plugins/provider-claude-code/tsconfig.json",
+        "$TURBO_ROOT$/plugins/provider-codex/package.json",
+        "$TURBO_ROOT$/plugins/provider-codex/src/**",
+        "$TURBO_ROOT$/plugins/provider-codex/tsconfig.json",
+        "$TURBO_ROOT$/plugins/provider-pi/package.json",
+        "$TURBO_ROOT$/plugins/provider-pi/src/**",
+        "$TURBO_ROOT$/plugins/provider-pi/tsconfig.json",
+        "$TURBO_ROOT$/vitest*.ts"
+      ],
+      "passThroughEnv": ["UPDATE_PARITY_ROW_COUNTS"]
+    },
+    "test": {
+      "dependsOn": ["//#ensure-native-modules", "topo"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/vitest*.ts"],
+      // Re-pin knobs a suite reads to rewrite its own committed baseline.
+      // Turbo strips undeclared variables, so a documented re-pin command
+      // (`UPDATE_PARITY_ROW_COUNTS=1 pnpm exec turbo run test …`) silently
+      // does nothing without them.
+      "passThroughEnv": [
+        "TMPDIR",
+        "UPDATE_PARITY_ROW_COUNTS",
+        "UPDATE_TRANSCRIPT_EXPECTATIONS"
+      ]
+    },
+    "@omnyo/mobile-bridge#test": {
+      "env": ["OMNYO_MOBILE_BRIDGE_MEASUREMENT_OUTPUT"],
+      "dependsOn": ["//#ensure-native-modules", "topo"]
+    },
+    "@omnyo/desktop#test:prepare": {
+      "cache": false,
+      "inputs": ["package.json", "$TURBO_ROOT$/pnpm-lock.yaml"],
+      "outputs": []
+    },
+    "@omnyo/desktop#test": {
+      "dependsOn": ["//#ensure-native-modules", "test:prepare", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/vitest*.ts",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs"
+      ],
+      "passThroughEnv": ["DISPLAY", "OMNYO_PROFILE_NATIVE_FIXTURE_MANIFEST"]
+    },
+    // plugin-scaffold-external packs @omnyo/plugin-sdk (prepack rebuilds its
+    // dist), so the SDK build is a dependency.
+    "@omnyo/templates#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build:types",
+        "@omnyo/plugin-sdk#pack:private",
+        "topo"
+      ],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/vitest*.ts"]
+    },
+    // Installs first-party provider plugins, which makes the plugin runtime
+    // build their host artifacts. esbuild resolves the plugin sources'
+    // `@omnyo/plugin-sdk/provider-bridge` import through the package export
+    // map to `packages/plugin-sdk/dist/provider-bridge.js` — the `source`
+    // condition that lets vitest read `src/` does not apply inside that
+    // bundling step — so the SDK dist must exist before the suite runs.
+    "@omnyo/server#test": {
+      "env": [
+        "OMNYO_CHAT_OPEN_FIXTURE",
+        "OMNYO_TIMELINE_MEASUREMENT_OUTPUT",
+        "OMNYO_CATALOG_MEASUREMENT_OUTPUT",
+        "OMNYO_FRONTEND_MEASUREMENT_OUTPUT",
+        "OMNYO_FRONTEND_PLAYWRIGHT_MODULE",
+        "OMNYO_FRONTEND_APP_DIST",
+        "OMNYO_FRONTEND_EXPECT_PERSISTED_DISPLAY",
+        "OMNYO_FRONTEND_EXPECT_MARKDOWN_WORKER",
+        "OMNYO_FRONTEND_SIDEBAR_PROOF_OUTPUT",
+        "OMNYO_FRONTEND_SIDEBAR_USAGE_DIR",
+        "OMNYO_FRONTEND_SIDEBAR_RESOURCES_DIR",
+        "OMNYO_FRONTEND_REQUEST_DELAY_MS",
+        "OMNYO_PERFORMANCE_SUITE",
+        "OMNYO_PERFORMANCE_BINDING",
+        "OMNYO_PERFORMANCE_SAMPLES",
+        "OMNYO_PERFORMANCE_DIAGNOSTIC"
+      ],
+      "dependsOn": [
+        "@omnyo/agent-runtime#generate:test-bridges",
+        "//#ensure-native-modules",
+        "@omnyo/plugin-build#build",
+        "@omnyo/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build:types",
+        "@omnyo/plugin-sdk#pack:private",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/plugins/*/skills/**",
+        "$TURBO_ROOT$/plugins/automations/src/**",
+        "$TURBO_ROOT$/plugins/automations/package.json",
+        "$TURBO_ROOT$/plugins/provider-retry/*.ts",
+        "$TURBO_ROOT$/plugins/provider-retry/src/**",
+        "$TURBO_ROOT$/plugins/provider-retry/package.json",
+        "$TURBO_ROOT$/tests/scripted-echo-provider/host.ts",
+        "$TURBO_ROOT$/tests/scripted-echo-provider/src/**",
+        "$TURBO_ROOT$/examples/plugins/echo-provider/*.ts",
+        "$TURBO_ROOT$/examples/plugins/echo-provider/package.json",
+        "$TURBO_ROOT$/examples/plugins/echo-provider/src/**",
+        "$TURBO_ROOT$/vitest*.ts"
+      ]
+    },
+    // The thread.stop race suite builds the scripted echo bridge artifact and
+    // serves it through the daemon's artifact cache, so it needs the SDK dist
+    // for the same reason as @omnyo/server#test.
+    "@omnyo/host-daemon#test": {
+      "passThroughEnv": ["TMPDIR"],
+      "dependsOn": [
+        "@omnyo/agent-runtime#generate:test-bridges",
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/tests/scripted-echo-provider/host.ts",
+        "$TURBO_ROOT$/tests/scripted-echo-provider/src/**",
+        "$TURBO_ROOT$/vitest*.ts"
+      ]
+    },
+    // The provider-corpus gates read a private corpus through
+    // OMNYO_PROVIDER_CORPUS_DIR and write snapshots next to it, so the task is
+    // uncacheable and must see those two variables (strict env mode strips
+    // everything undeclared). Without the variable the suites skip.
+    "@omnyo/server#test:provider-corpus": {
+      "dependsOn": ["//#ensure-native-modules", "topo"],
+      "cache": false,
+      "passThroughEnv": [
+        "OMNYO_PROVIDER_CORPUS_DIR",
+        "OMNYO_PROVIDER_CORPUS_SNAPSHOT",
+        "OMNYO_PROVIDER_CORPUS_SNAPSHOT_DIR",
+        "OMNYO_PROVIDER_CORPUS_ALLOWLIST",
+        "OMNYO_PROVIDER_CORPUS_ROW_CLASSES"
+      ]
+    },
+    // Builds real plugin host artifacts (the builtin artifacts suite, plus the
+    // fixture that pins the published bridge surface as bundled-not-stubbed),
+    // so it needs the SDK dist for the same reason as @omnyo/server#test.
+    "@omnyo/plugin-build#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build:types",
+        "topo"
+      ],
+      // The SVG validator suite reads every first-party branding SVG.
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/pnpm-workspace.yaml",
+        "$TURBO_ROOT$/vitest*.ts",
+        "$TURBO_ROOT$/plugins/*/icons/**",
+        "$TURBO_ROOT$/examples/plugins/*/icons/**"
+      ]
+    },
+    // Runtime unit suites restart the scripted echo provider repeatedly. Build
+    // the real bridge worker and bridge artifact once so each child launch
+    // executes JavaScript instead of re-transforming the TypeScript sources.
+    "@omnyo/agent-runtime#generate:test-bridges": {
+      "dependsOn": ["topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/domain/src/**",
+        "$TURBO_ROOT$/packages/plugin-sdk/src/**",
+        "$TURBO_ROOT$/packages/provider-bridge-protocol/src/**",
+        "$TURBO_ROOT$/scripts/build-utils.mjs",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs",
+        "$TURBO_ROOT$/packages/plugin-build/src/zod-locale-stub.mjs",
+        "$TURBO_ROOT$/tests/scripted-echo-provider/src/**"
+      ],
+      "outputs": ["dist/test-bridges/**"]
+    },
+    "@omnyo/agent-runtime#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/agent-runtime#generate:test-bridges",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/tests/scripted-echo-provider/src/**",
+        "$TURBO_ROOT$/vitest*.ts"
+      ]
+    },
+    // The live-CLI suite's global setup rebuilds every first-party provider
+    // bridge from source, so it needs the SDK dist too.
+    "@omnyo/agent-runtime#test:integration": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/vitest*.ts"],
+      // The live-CLI suites spawn real provider CLIs. Turbo strips undeclared
+      // variables, so without these they start unauthenticated.
+      "passThroughEnv": [
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "OMNYO_CLAUDE_CODE_EXECUTABLE"
+      ]
+    },
+    "smoke:tarball": {
+      "dependsOn": ["build"],
+      "cache": false,
+      "outputs": []
+    },
+    "smoke:boot": {
+      "dependsOn": ["build", "//#ensure-native-modules"],
+      "cache": false,
+      "outputs": []
+    },
+    // Boots the real server, which installs the first-party provider plugins
+    // and builds their host artifacts; those bundles resolve
+    // `@omnyo/plugin-sdk/provider-bridge` to the SDK dist.
+    "@omnyo/integration-tests#test:local-server-move": {
+      "cache": false,
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "omnyo-app#build",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ]
+    },
+    "@omnyo/integration-tests#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "omnyo-app#build",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/apps/server/package.json",
+        "$TURBO_ROOT$/apps/server/tsconfig.json",
+        "$TURBO_ROOT$/apps/server/src/**",
+        "$TURBO_ROOT$/packages/templates/package.json",
+        "$TURBO_ROOT$/packages/templates/scripts/**",
+        "$TURBO_ROOT$/packages/templates/src/**",
+        "$TURBO_ROOT$/tests/scripted-echo-provider/host.ts",
+        "$TURBO_ROOT$/tests/scripted-echo-provider/src/**",
+        "$TURBO_ROOT$/vitest*.ts"
+      ]
+    },
+    "@omnyo/integration-tests#e2e:mobile-backend": {
+      "cache": false,
+      "persistent": true,
+      "passThroughEnv": ["*"],
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ]
+    },
+    "@omnyo/integration-tests#e2e:mobile-connect-stub": {
+      "cache": false,
+      "persistent": true,
+      "passThroughEnv": ["*"]
+    },
+    "test:integration": {
+      "dependsOn": ["//#ensure-native-modules", "topo"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/vitest*.ts"],
+      // The live-CLI suites spawn real provider CLIs. Turbo strips undeclared
+      // variables, so without these they start unauthenticated.
+      "passThroughEnv": [
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "OMNYO_CLAUDE_CODE_EXECUTABLE"
+      ]
+    },
+    "@omnyo/integration-tests#test:integration": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/agent-runtime#test:integration",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/apps/server/package.json",
+        "$TURBO_ROOT$/apps/server/tsconfig.json",
+        "$TURBO_ROOT$/apps/server/src/**",
+        "$TURBO_ROOT$/packages/templates/package.json",
+        "$TURBO_ROOT$/packages/templates/scripts/**",
+        "$TURBO_ROOT$/packages/templates/src/**",
+        "$TURBO_ROOT$/vitest*.ts"
+      ],
+      "passThroughEnv": [
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "OMNYO_CLAUDE_CODE_EXECUTABLE"
+      ]
+    },
+    // bundled-types/*.d.ts: the package's published `types` surface and the
+    // in-repo plugins' typecheck surface. ~20s (rollup-plugin-dts), so only
+    // real consumers depend on it. Generated modules are excluded from the
+    // hash: they are derived from sources already hashed here.
+    "@omnyo/plugin-sdk#build:types:backend": {
+      "dependsOn": ["topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/scripts/build-utils.mjs",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs",
+        "$TURBO_ROOT$/packages/plugin-build/src/zod-locale-stub.mjs"
+      ],
+      "outputs": [
+        "bundled-types/omnyo-plugin-sdk.d.ts",
+        "bundled-types/omnyo-plugin-sdk-environment-provider.d.ts",
+        "bundled-types/omnyo-plugin-sdk-machine-provider.d.ts",
+        "bundled-types/omnyo-plugin-sdk-provider-usage.d.ts",
+        "bundled-types/omnyo-plugin-sdk-host.d.ts"
+      ]
+    },
+    "@omnyo/plugin-sdk#build:types:providers": {
+      "dependsOn": ["topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/scripts/build-utils.mjs",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs",
+        "$TURBO_ROOT$/packages/plugin-build/src/zod-locale-stub.mjs"
+      ],
+      "outputs": [
+        "bundled-types/omnyo-plugin-sdk-provider-bridge.d.ts",
+        "bundled-types/omnyo-plugin-sdk-provider-bridge-acp.d.ts",
+        "bundled-types/omnyo-plugin-sdk-provider-bridge-acp-next.d.ts"
+      ]
+    },
+    "@omnyo/plugin-sdk#build:types:app": {
+      "dependsOn": ["topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/scripts/build-utils.mjs",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs",
+        "$TURBO_ROOT$/packages/plugin-build/src/zod-locale-stub.mjs"
+      ],
+      "outputs": ["bundled-types/omnyo-plugin-sdk-app.d.ts"]
+    },
+    "@omnyo/plugin-sdk#build:types:internal": {
+      "dependsOn": ["topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/scripts/build-utils.mjs",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs",
+        "$TURBO_ROOT$/packages/plugin-build/src/zod-locale-stub.mjs"
+      ],
+      "outputs": [
+        "bundled-types/omnyo-plugin-sdk-internal-composer-customization-validation.d.ts",
+        "bundled-types/omnyo-plugin-sdk-internal-composer-handle.d.ts",
+        "bundled-types/omnyo-plugin-sdk-internal-composer-view.d.ts",
+        "bundled-types/omnyo-plugin-sdk-internal-file-navigation-validation.d.ts",
+        "bundled-types/omnyo-plugin-sdk-internal-host-policy.d.ts",
+        "bundled-types/omnyo-plugin-sdk-internal-plugin-app-collector.d.ts"
+      ]
+    },
+    "@omnyo/plugin-sdk#build:types": {
+      "dependsOn": [
+        "topo",
+        "build:types:backend",
+        "build:types:providers",
+        "build:types:app",
+        "build:types:internal"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/scripts/build-utils.mjs",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs",
+        "$TURBO_ROOT$/packages/plugin-build/src/zod-locale-stub.mjs"
+      ],
+      "outputs": [
+        "bundled-types/omnyo-plugin-sdk-provider-bridge-testing.d.ts",
+        "bundled-types/omnyo-plugin-sdk-testing.d.ts",
+        "bundled-types/omnyo-plugin-sdk-testing-app.d.ts",
+        "bundled-types/omnyo-plugin-sdk-testing-host.d.ts"
+      ]
+    },
+    "@omnyo/plugin-sdk#build": {
+      "dependsOn": ["topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/scripts/build-utils.mjs",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs",
+        "$TURBO_ROOT$/packages/plugin-build/src/zod-locale-stub.mjs"
+      ],
+      "outputs": ["dist/**"]
+    },
+    "@omnyo/plugin-sdk#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    // Several suites read bundled-types/*.d.ts from disk.
+    "@omnyo/plugin-sdk#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build:types",
+        "topo"
+      ],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/vitest*.ts"]
+    },
+    "@omnyo/plugin-sdk#build:runtime": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/scripts/build-utils.mjs",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs",
+        "$TURBO_ROOT$/packages/plugin-build/src/zod-locale-stub.mjs"
+      ],
+      "outputs": ["dist/**"],
+      "dependsOn": ["topo"]
+    },
+    // ---- In-repo plugins typecheck against the SDK's bundled .d.ts ----------
+    // Either through a tsconfig `paths` map or through the workspace symlink's
+    // package `types` field; both land on bundled-types/, a build output.
+    "omnyo-plugin-omnyo--storage-retention#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-composer-customization#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-plugin-api-docs#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-plugin-api-docs#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-plugin-api-docs#scaffold:surface-entry": {
+      "cache": false
+    },
+    "omnyo-plugin-echo-provider#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-scripted-echo-provider#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-replacement-lab-alpha#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-replacement-lab-beta#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-thread-chat-demo#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-ask-user-question#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-ask-user-question#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-account-pool#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-account-pool#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-omnyo--wait-sources#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-omnyo--wait-sources#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ]
+    },
+    "omnyo-plugin-omnyo--git#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-omnyo--git#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-omnyo--composer-predictions#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-omnyo--composer-predictions#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-omnyo--account-usage#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-omnyo--account-usage#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-automations#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-automations#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-concurrency-limit#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-concurrency-limit#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-environment-project-checkout#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-environment-git-worktree#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-environment-personal-workspace#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-environment-temporary-copy#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-environment-personal-workspace#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ]
+    },
+    "omnyo-plugin-environment-modal-sandbox#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-environment-modal-sandbox#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-connect#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-omnyo-account#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-omnyo-guide#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-omnyo-guide#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ]
+    },
+    "omnyo-plugin-custom-instructions#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-custom-instructions#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ]
+    },
+    "omnyo-plugin-simple-notes#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-simple-notes#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-github#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-github#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-inline-vis#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-inline-vis#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-agent-annotations#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-agent-annotations#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-push-notifications#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-push-notifications#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ]
+    },
+    "omnyo-plugin-omnyo--chat-importer#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-omnyo--chat-importer#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-keep-awake#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-keep-awake#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-memory#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-memory#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-monaco-editor#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-monaco-editor#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-pdf-preview#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-pdf-preview#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ]
+    },
+    "omnyo-plugin-plugin-api-tester#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-plugin-api-tester#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ]
+    },
+    "omnyo-plugin-provider-acp#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-provider-acp#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ]
+    },
+    "omnyo-plugin-omnyo--provider-acp-next#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-omnyo--provider-acp-next#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-provider-claude-code#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-provider-claude-code#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ]
+    },
+    "omnyo-plugin-provider-codex#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-provider-codex#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ]
+    },
+    "omnyo-plugin-provider-pi#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-provider-pi#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-omnyo--prompt-library#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-omnyo--prompt-library#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ]
+    },
+    "omnyo-plugin-omnyo--provider-usage#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-omnyo--provider-usage#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-provider-retry#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-provider-retry#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ]
+    },
+    "omnyo-plugin-secrets#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-secrets#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-scheduled-send#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-scheduled-send#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-drafts#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-drafts#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ]
+    },
+    "omnyo-plugin-side-chat#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-side-chat#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-theme-preview#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-theme-preview#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-thread-list#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-thread-list#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-tasks#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-tasks#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-workflows#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-workflows#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "@omnyo/plugin-registry#typecheck": {
+      "dependsOn": ["topo"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/packages/shared-ui/src/**"]
+    },
+    "@omnyo/plugin-registry#test": {
+      "dependsOn": ["//#ensure-native-modules", "topo"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/packages/shared-ui/src/**"]
+    }
+  }
+}

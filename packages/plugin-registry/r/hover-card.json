@@ -1,0 +1,22 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "hover-card",
+  "type": "registry:ui",
+  "title": "hover-card",
+  "description": "Omnyo ui \"hover-card\" — vendored from the Omnyo app's own source (version-matched to this Omnyo release).",
+  "dependencies": [
+    "@radix-ui/react-hover-card"
+  ],
+  "registryDependencies": [
+    "@omnyo/motion",
+    "@omnyo/utils"
+  ],
+  "files": [
+    {
+      "path": "registry/components/ui/hover-card.tsx",
+      "content": "import * as React from \"react\";\nimport * as HoverCardPrimitive from \"@radix-ui/react-hover-card\";\n\nimport { cn } from \"../../lib/utils\";\nimport { FLOATING_POPOVER_MOTION } from \"./motion\";\n\nconst HoverCard = HoverCardPrimitive.Root;\n\nconst HoverCardTrigger = HoverCardPrimitive.Trigger;\n\nconst HoverCardContent = React.forwardRef<\n  React.ElementRef<typeof HoverCardPrimitive.Content>,\n  React.ComponentPropsWithoutRef<typeof HoverCardPrimitive.Content>\n>(({ className, align = \"center\", sideOffset = 4, ...props }, ref) => (\n  <HoverCardPrimitive.Content\n    ref={ref}\n    align={align}\n    sideOffset={sideOffset}\n    className={cn(\n      \"z-50 w-64 rounded-md border bg-popover p-4 text-popover-foreground shadow-md outline-none origin-(--radix-hover-card-content-transform-origin)\",\n      FLOATING_POPOVER_MOTION,\n      className,\n    )}\n    {...props}\n  />\n));\n\nHoverCardContent.displayName = HoverCardPrimitive.Content.displayName;\n\nexport { HoverCard, HoverCardTrigger, HoverCardContent };\n",
+      "type": "registry:ui",
+      "target": "components/ui/hover-card.tsx"
+    }
+  ]
+}

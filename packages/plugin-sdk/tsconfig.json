@@ -1,0 +1,12 @@
+{
+  "extends": [
+    "@omnyo/tsconfig/base.json",
+    "@omnyo/tsconfig/typecheck-overrides.json"
+  ],
+  "compilerOptions": {
+    "rootDir": ".",
+    "jsx": "react-jsx",
+    "types": ["node"]
+  },
+  "include": ["src"]
+}

@@ -1,0 +1,26 @@
+@import "../../../apps/app/src/components/ui/theme.css";
+@source "../../../plugins/inline-vis";
+@source "./fixture.tsx";
+
+html,
+body {
+  margin: 0;
+  min-width: 0;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+main {
+  max-width: 880px;
+  margin-inline: auto;
+  padding: 12px;
+}
+
+.fixture-section {
+  min-width: 0;
+  margin-bottom: 24px;
+}

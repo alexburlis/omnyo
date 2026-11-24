@@ -1,0 +1,1 @@
+ALTER TABLE `threads` ADD `plugin_home` integer DEFAULT false NOT NULL;

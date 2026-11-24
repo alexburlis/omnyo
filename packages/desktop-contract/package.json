@@ -1,0 +1,34 @@
+{
+  "name": "@omnyo/desktop-contract",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./internal/origin-adoption-v1": {
+      "source": "./src/internal/origin-adoption-v1.ts",
+      "types": "./src/internal/origin-adoption-v1.ts",
+      "default": "./src/internal/origin-adoption-v1.ts"
+    }
+  },
+  "types": "./src/index.ts",
+  "scripts": {
+    "clean": "rimraf dist tsconfig.tsbuildinfo",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --config vitest.config.ts"
+  },
+  "dependencies": {
+    "@omnyo/domain": "workspace:*",
+    "@omnyo/host-daemon-contract": "workspace:*",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@omnyo/tsconfig": "workspace:*",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "typescript-7": "npm:typescript@^7.0.2"
+  }
+}
