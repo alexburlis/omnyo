@@ -1,15 +1,18 @@
 # Configuration
 
-The native Claude profile pilot is disabled by default. On the
-coordinator's local Mac, `omnyo provider claude-profile pilot enable`
-enables its Account Pooler and composer controls. `pilot disable` hides them
-and preserves saved profiles, defaults and chat bindings. Machine and project
-defaults are set with `omnyo provider claude-profile default PROFILE_ID` and
-`--project PROJECT_ID`; `unprofiled` selects the existing authentication path.
-These defaults apply only to new chats. Sign-in remains in Claude Code's native
-storage. The pilot currently requires Claude Code 2.1.331. Unsupported hosts or
-CLI versions report unavailable. A provider limit stops the chat on its pinned
-account; it never selects another account or resends the prompt automatically.
+The native Claude profile pilot is disabled by default. On the coordinator’s
+local Mac, `omnyo provider claude-profile pilot enable` enables native accounts
+in Account Pooler. `pilot disable` hides the controls and preserves saved
+profiles, preferences, and chat bindings. Account Pooler chooses a signed-in
+profile with available usage when a new Claude chat starts. Set a preferred
+profile with `omnyo provider claude-profile default PROFILE_ID` or add
+`--project PROJECT_ID` to set it for one project. An `unprofiled` default selects
+the machine’s ordinary Claude authentication path.
+
+Sign-in stays in Claude Code’s native storage. The pilot currently requires
+Claude Code 2.1.331. Unsupported hosts or CLI versions report unavailable.
+Each chat keeps its profile after creation. A provider limit stops that chat
+on its pinned account.
 
 The Omnyo migration owner can install a versioned `stateMigration` binding in
 `config.json`. It contains an absolute journal path, the exact source and

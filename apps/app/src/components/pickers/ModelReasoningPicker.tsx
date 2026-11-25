@@ -329,6 +329,7 @@ interface ModelReasoningPickerProps {
   disabled?: boolean;
   handoff?: ModelReasoningPickerHandoff;
   presentation?: ModelPickerPresentation;
+  inline?: boolean;
   selects?: ModelPickerSelects;
 }
 
@@ -369,6 +370,7 @@ export function ModelReasoningPicker({
   disabled,
   handoff,
   presentation = "footer",
+  inline = false,
   selects = "model-and-effort",
 }: ModelReasoningPickerProps) {
   const showsEffort = selects === "model-and-effort";
@@ -376,12 +378,14 @@ export function ModelReasoningPicker({
   const isPointerCoarse = usePointerCoarse();
   const commandRunner = useAppCommandRunner();
   const { modal, modalHostRef } = usePickerModal(modalProp);
-  const [open, setOpen] = useState(false);
+  const [popoverOpen, setOpen] = useState(false);
+  const open = inline || popoverOpen;
 
   const [pickerMode, setPickerMode] =
     useState<ModelPickerSelects>("model-and-effort");
 
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const inlineRef = useRef<HTMLDivElement>(null);
   const focusComposerOnCloseRef = useRef(false);
   const registeredToggleShortcut = useAppCommandShortcut("modelPicker.toggle");
 
@@ -543,7 +547,7 @@ export function ModelReasoningPicker({
   const favoriteItems = favoritesStore?.items ?? NO_FAVORITE_ITEMS;
 
   const defaultView: PickerView =
-    favoriteItems.length === 0 ? "all" : "favorites";
+    inline || favoriteItems.length === 0 ? "all" : "favorites";
 
   const entryView: PickerView =
     pickerMode === "model" ? "all" : (viewSession?.entry ?? defaultView);
@@ -1009,12 +1013,16 @@ export function ModelReasoningPicker({
   );
 
   const focusComposer = useCallback(
-    (): boolean => commandRunner.dispatch("composer.focus", triggerRef.current),
+    (): boolean =>
+      commandRunner.dispatch(
+        "composer.focus",
+        triggerRef.current ?? inlineRef.current,
+      ),
     [commandRunner],
   );
 
   const refocusComposerAfterClose = useCallback(() => {
-    const trigger = triggerRef.current;
+    const trigger = triggerRef.current ?? inlineRef.current;
 
     if (
       isPointerCoarse ||
@@ -1024,7 +1032,7 @@ export function ModelReasoningPicker({
       return;
     }
 
-    if (isCompactViewport) {
+    if (inline || isCompactViewport) {
       window.requestAnimationFrame(() => {
         focusComposer();
       });
@@ -1033,7 +1041,7 @@ export function ModelReasoningPicker({
     }
 
     focusComposerOnCloseRef.current = true;
-  }, [focusComposer, isCompactViewport, isPointerCoarse]);
+  }, [focusComposer, inline, isCompactViewport, isPointerCoarse]);
 
   const applySelection = useCallback(
     (selection: ModelPickerSelection) => {
@@ -1180,7 +1188,10 @@ export function ModelReasoningPicker({
   const resolveCommandScope = useCallback(
     (target: EventTarget | null): ModelPickerScope => {
       const scope = resolveComposerCommandScope({
-        composer: triggerRef.current?.closest(APP_COMPOSER_SELECTOR) ?? null,
+        composer:
+          (triggerRef.current ?? inlineRef.current)?.closest(
+            APP_COMPOSER_SELECTOR,
+          ) ?? null,
         target,
         isFocusedPane,
       });
@@ -1199,23 +1210,26 @@ export function ModelReasoningPicker({
   );
 
   useEffect(() => {
-    if (!open) return;
+    if (!popoverOpen) return;
 
     const closeWhenWindowBlurs = () => setOpen(false);
 
     window.addEventListener("blur", closeWhenWindowBlurs);
 
     return () => window.removeEventListener("blur", closeWhenWindowBlurs);
-  }, [open]);
+  }, [popoverOpen]);
 
   useAppCommandContext(
     "modelPickerOpen",
-    commandShortcutsEnabled && open && !disabled,
+    commandShortcutsEnabled && popoverOpen && !disabled,
   );
 
   const ownsCycleChord = (target: EventTarget | null): boolean =>
     commandShortcutsEnabled &&
-    ownsModelPickerCycleChord({ open, ...resolveCommandScope(target) });
+    ownsModelPickerCycleChord({
+      open: popoverOpen,
+      ...resolveCommandScope(target),
+    });
 
   useAppCommandHandler(
     "modelPicker.toggle",
@@ -1223,11 +1237,17 @@ export function ModelReasoningPicker({
       if (!commandShortcutsEnabled) return false;
 
       const action = resolveModelPickerToggle({
-        open,
+        open: popoverOpen,
         ...resolveCommandScope(target),
       });
 
       if (action === "ignore") return false;
+
+      if (inline) {
+        searchInputRef.current?.focus();
+
+        return true;
+      }
 
       if (action === "open") setPickerMode("model-and-effort");
       setOpen(action === "open");
@@ -1667,6 +1687,140 @@ export function ModelReasoningPicker({
     ? effectiveServiceTierOptions
     : EMPTY_SERVICE_TIER_OPTIONS;
 
+  const pickerContents = (
+    <>
+      {handoffActive && handoff !== undefined ? (
+        <HandoffModeHeader onBack={handoff.onExit} />
+      ) : null}
+      {browseView === "all" ? (
+        <div className="flex shrink-0 items-center gap-0.5 border-b border-border px-1.5 py-1">
+          {inline || pickerMode === "model" || !preferencesReady ? null : (
+            <button
+              type="button"
+              aria-label="Back to favorites"
+              onClick={showFavorites}
+              className={cn(
+                TOOLBAR_BUTTON_CLASS_NAME,
+                "w-7 max-md:pointer-coarse:w-9",
+              )}
+            >
+              <Icon name="ChevronLeft" aria-hidden className="size-3.5" />
+            </button>
+          )}
+          <ModelSearchInput
+            inputRef={searchInputRef}
+            query={searchQuery}
+            onQueryChange={handleQueryChange}
+            gridId={gridId}
+            activeOptionId={
+              highlightedIndex >= 0 ? optionDomId(highlightedIndex) : undefined
+            }
+          />
+          {preferencesReady && pickerMode !== "model" ? (
+            <Button
+              type="button"
+              size="xs"
+              variant={editing ? "default" : "ghost"}
+              onClick={() => setEditing((current) => !current)}
+              className={cn(
+                "mr-0.5 shrink-0",
+                !editing && "text-muted-foreground",
+              )}
+            >
+              <Icon name={editing ? "Check" : "Edit"} aria-hidden />
+              {editing ? "Done" : "Edit"}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+      {browseView === "all" &&
+      editing &&
+      preferencesReady &&
+      pickerMode !== "model" ? (
+        <p
+          data-model-picker-edit-hint=""
+          className="flex w-0 min-w-full shrink-0 items-start gap-1.5 border-b border-border bg-state-hover px-3 py-1.5 text-xs text-muted-foreground"
+        >
+          <Icon
+            name="Star"
+            aria-hidden
+            className="mt-0.5 size-3 shrink-0 text-subtle-foreground"
+          />
+          <span className="min-w-0">
+            Star the levels you want in Favorites. Use the eye to move models
+            you rarely use under “more”.
+          </span>
+        </p>
+      ) : null}
+
+      <ModelReasoningMenu
+        key={browseView}
+        matrix={{
+          listRef,
+          gridId,
+          optionId: optionDomId,
+          activeDescendantId:
+            browseView !== "all" && highlightedIndex >= 0
+              ? optionDomId(highlightedIndex)
+              : undefined,
+          favorites:
+            favoritesStore === null || browseView !== "favorites"
+              ? null
+              : {
+                  rows: favoriteRows,
+                  notices: favoriteNotices,
+                  star:
+                    starRowKey === null
+                      ? null
+                      : {
+                          rowKey: starRowKey,
+                          pressed: currentIsFavorite,
+                          disabled: !canToggleCurrentFavorite,
+                          onToggle: () => {
+                            setStarredRowKey(starRowKey);
+                            toggleCurrentFavorite();
+                          },
+                        },
+                  revealedKey: revealedFavoriteKey,
+                  onPick: applyMenuFavorite,
+                  onTogglePick: toggleFavoritePick,
+                  onReveal: setRevealedFavoriteKey,
+                  onConceal: () => setRevealedFavoriteKey(null),
+                },
+          favoriteMenu:
+            favoritesStore === null || pickerMode === "model"
+              ? null
+              : { full: favoritesStore.isFull },
+          allModels:
+            browseView === "favorites"
+              ? { onOpen: () => openAllModels("") }
+              : null,
+          groups: visibleGroups,
+          columns: pickerMode === "model" ? [] : columns,
+          navIndexByKey,
+          open,
+          highlightedKey,
+          cursorVisible:
+            (isSearching && searchCursorVisible) || cursorKey !== null,
+          reasoningValue,
+          editing,
+          isSearching,
+          isFavoriteCell,
+          onCommit: commitRow,
+          onToggleMore: toggleMore,
+          onToggleHidden: toggleHidden,
+          onToggleFavorite: toggleFavoriteCell,
+          onPointerNavigation: handlePointerNavigation,
+        }}
+        agentSections={pickerMode === "model" ? [] : agentSections}
+        onAgentOptionChange={onAgentOptionChange}
+        onStartHandoff={
+          handoff !== undefined && !handoffActive ? startHandoff : null
+        }
+      />
+    </>
+  );
+
   const picker = (trigger: ReactElement) => (
     <Popover open={open} onOpenChange={setOpen} modal={modal}>
       <PopoverTrigger ref={modalHostRef} asChild>
@@ -1704,137 +1858,7 @@ export function ModelReasoningPicker({
         )}
       >
         <ResetBrowseStateOnContentUnmount onReset={resetBrowseState} />
-        {handoffActive && handoff !== undefined ? (
-          <HandoffModeHeader onBack={handoff.onExit} />
-        ) : null}
-        {browseView === "all" ? (
-          <div className="flex shrink-0 items-center gap-0.5 border-b border-border px-1.5 py-1">
-            {pickerMode === "model" || !preferencesReady ? null : (
-              <button
-                type="button"
-                aria-label="Back to favorites"
-                onClick={showFavorites}
-                className={cn(
-                  TOOLBAR_BUTTON_CLASS_NAME,
-                  "w-7 max-md:pointer-coarse:w-9",
-                )}
-              >
-                <Icon name="ChevronLeft" aria-hidden className="size-3.5" />
-              </button>
-            )}
-            <ModelSearchInput
-              inputRef={searchInputRef}
-              query={searchQuery}
-              onQueryChange={handleQueryChange}
-              gridId={gridId}
-              activeOptionId={
-                highlightedIndex >= 0
-                  ? optionDomId(highlightedIndex)
-                  : undefined
-              }
-            />
-            {preferencesReady && pickerMode !== "model" ? (
-              <Button
-                type="button"
-                size="xs"
-                variant={editing ? "default" : "ghost"}
-                onClick={() => setEditing((current) => !current)}
-                className={cn(
-                  "mr-0.5 shrink-0",
-                  !editing && "text-muted-foreground",
-                )}
-              >
-                <Icon name={editing ? "Check" : "Edit"} aria-hidden />
-                {editing ? "Done" : "Edit"}
-              </Button>
-            ) : null}
-          </div>
-        ) : null}
-        {browseView === "all" &&
-        editing &&
-        preferencesReady &&
-        pickerMode !== "model" ? (
-          <p
-            data-model-picker-edit-hint=""
-            className="flex w-0 min-w-full shrink-0 items-start gap-1.5 border-b border-border bg-state-hover px-3 py-1.5 text-xs text-muted-foreground"
-          >
-            <Icon
-              name="Star"
-              aria-hidden
-              className="mt-0.5 size-3 shrink-0 text-subtle-foreground"
-            />
-            <span className="min-w-0">
-              Star the levels you want in Favorites. Use the eye to move models
-              you rarely use under “more”.
-            </span>
-          </p>
-        ) : null}
-
-        <ModelReasoningMenu
-          key={browseView}
-          matrix={{
-            listRef,
-            gridId,
-            optionId: optionDomId,
-            activeDescendantId:
-              browseView !== "all" && highlightedIndex >= 0
-                ? optionDomId(highlightedIndex)
-                : undefined,
-            favorites:
-              favoritesStore === null || browseView !== "favorites"
-                ? null
-                : {
-                    rows: favoriteRows,
-                    notices: favoriteNotices,
-                    star:
-                      starRowKey === null
-                        ? null
-                        : {
-                            rowKey: starRowKey,
-                            pressed: currentIsFavorite,
-                            disabled: !canToggleCurrentFavorite,
-                            onToggle: () => {
-                              setStarredRowKey(starRowKey);
-                              toggleCurrentFavorite();
-                            },
-                          },
-                    revealedKey: revealedFavoriteKey,
-                    onPick: applyMenuFavorite,
-                    onTogglePick: toggleFavoritePick,
-                    onReveal: setRevealedFavoriteKey,
-                    onConceal: () => setRevealedFavoriteKey(null),
-                  },
-            favoriteMenu:
-              favoritesStore === null || pickerMode === "model"
-                ? null
-                : { full: favoritesStore.isFull },
-            allModels:
-              browseView === "favorites"
-                ? { onOpen: () => openAllModels("") }
-                : null,
-            groups: visibleGroups,
-            columns: pickerMode === "model" ? [] : columns,
-            navIndexByKey,
-            open,
-            highlightedKey,
-            cursorVisible:
-              (isSearching && searchCursorVisible) || cursorKey !== null,
-            reasoningValue,
-            editing,
-            isSearching,
-            isFavoriteCell,
-            onCommit: commitRow,
-            onToggleMore: toggleMore,
-            onToggleHidden: toggleHidden,
-            onToggleFavorite: toggleFavoriteCell,
-            onPointerNavigation: handlePointerNavigation,
-          }}
-          agentSections={pickerMode === "model" ? [] : agentSections}
-          onAgentOptionChange={onAgentOptionChange}
-          onStartHandoff={
-            handoff !== undefined && !handoffActive ? startHandoff : null
-          }
-        />
+        {pickerContents}
       </PopoverContent>
     </Popover>
   );
@@ -1847,6 +1871,26 @@ export function ModelReasoningPicker({
           value: serviceTierValue,
           onChange: onServiceTierChange,
         };
+
+  if (inline)
+    return (
+      <div className="flex min-w-0 flex-col items-start gap-1">
+        <div
+          ref={inlineRef}
+          data-inline-model-picker=""
+          className="flex max-h-64 min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-lg border border-border"
+          onKeyDown={handleContentKeyDown}
+        >
+          {pickerContents}
+        </div>
+        {speed === null ? null : (
+          <ModelSpeedControl
+            speed={speed}
+            className={MODEL_SPEED_BUTTON_CLASS_NAME}
+          />
+        )}
+      </div>
+    );
 
   return (
     <div

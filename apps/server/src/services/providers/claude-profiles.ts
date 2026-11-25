@@ -21,10 +21,12 @@ import type {
   SystemClaudeProfilesRequest,
   SystemClaudeProfilesResult,
 } from "@omnyo/server-contract";
+import { z } from "zod";
 import { ApiError } from "../../errors.js";
 import type { WorkSessionDeps } from "../../types.js";
 import { callHostOnlineRpc } from "../hosts/online-rpc.js";
 import { resolvePrimaryHostId } from "../hosts/primary-host.js";
+import { selectAccountPoolerClaudeProfile } from "../plugins/plugin-agent-contributions.js";
 import { resolveBridgeLaunchForProviderId } from "../system/provider-bridge-launch.js";
 
 export const NATIVE_CLAUDE_PROFILE_PROTOCOL = 264;
@@ -287,6 +289,12 @@ export async function manageClaudeProfiles(
   return result;
 }
 
+const routingResult = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("selected"), profileId: z.uuid() }),
+  z.object({ kind: z.literal("exhausted") }),
+  z.object({ kind: z.literal("usage-unavailable") }),
+]);
+
 export async function resolveNewThreadClaudeProfile(
   deps: WorkSessionDeps,
   args: {
@@ -320,31 +328,89 @@ export async function resolveNewThreadClaudeProfile(
     return null;
   }
 
-  const selections =
-    args.selection === undefined
-      ? defaultSelections(deps, args.hostId, args.projectId)
-      : [args.selection];
+  if (args.selection?.kind === "unprofiled") return null;
 
-  for (const selection of selections) {
-    if (selection === null) continue;
-
-    if (selection.kind === "unprofiled") return null;
+  if (args.selection?.kind === "profile") {
     requireProfileHost(deps, args.hostId);
+    const { profileId } = args.selection;
+    requireReadyProfile(await readProfileStatus(deps, args.hostId, profileId));
 
-    const status = await readProfileStatus(
-      deps,
-      args.hostId,
-      selection.profileId,
-    );
-
-    if (status === "removed" && args.selection === undefined) continue;
-
-    requireReadyProfile(status);
-
-    return { profileId: selection.profileId, hostId: args.hostId };
+    return { profileId, hostId: args.hostId };
   }
 
-  return null;
+  if (!supportedHost(deps, args.hostId)) return null;
+  const defaults = defaultSelections(deps, args.hostId, args.projectId);
+
+  if (defaults.find((selection) => selection !== null)?.kind === "unprofiled")
+    return null;
+
+  const inventory = await manageHost(deps, args.hostId, { action: "list" });
+
+  if (inventory.action !== "list") unavailable();
+
+  if (!inventory.supported) return null;
+
+  const enrolled = inventory.profiles.filter(
+    ({ status }) => status !== "removed",
+  );
+
+  if (enrolled.length === 0) return null;
+  const ready = enrolled.filter(({ status }) => status === "ready");
+
+  if (ready.length === 0)
+    throw new ApiError(
+      409,
+      "claude_profile_sign_in_required",
+      "Sign in to a Claude account in Account Pooler.",
+    );
+
+  const profileIds = ready.map(({ id }) => id);
+
+  const preferred = defaults.find(
+    (selection) =>
+      selection?.kind === "profile" && profileIds.includes(selection.profileId),
+  );
+
+  const outcome = await selectAccountPoolerClaudeProfile(
+    args.hostId,
+    preferred?.kind === "profile"
+      ? [
+          preferred.profileId,
+          ...profileIds.filter((id) => id !== preferred.profileId),
+        ]
+      : profileIds,
+  );
+
+  if (outcome === null || !outcome.ok)
+    throw new ApiError(
+      503,
+      "claude_profile_routing_unavailable",
+      "Account Pooler could not route this Claude chat.",
+    );
+
+  const result = routingResult.safeParse(outcome.result);
+
+  if (!result.success) unavailable();
+
+  if (result.data.kind === "exhausted")
+    throw new ApiError(
+      429,
+      "claude_profiles_exhausted",
+      "The Claude accounts in Account Pooler have reached their usage limits.",
+    );
+
+  if (result.data.kind === "usage-unavailable")
+    throw new ApiError(
+      503,
+      "claude_profile_usage_unavailable",
+      "Account Pooler could not read Claude usage. Try again.",
+    );
+
+  const { profileId } = result.data;
+
+  if (!profileIds.includes(profileId)) unavailable();
+
+  return { profileId, hostId: args.hostId };
 }
 
 export function requireThreadClaudeProfile(

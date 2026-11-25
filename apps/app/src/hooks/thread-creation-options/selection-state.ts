@@ -36,10 +36,7 @@ export type ScopedExecutionInputSources =
 
 export interface UsePromptModelReasoningOptions {
   claudeProfile?: ClaudeProfileSelection;
-  claudeProfileChoice?: {
-    key: string;
-    selection: ClaudeProfileSelection;
-  } | null;
+  automaticClaudeProfile?: boolean;
   claudeProjectId?: string;
   resolveClaudeProfileHostId?: (routing: SystemProvidersQuery) => string | null;
   enabled?: boolean;

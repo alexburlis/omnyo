@@ -247,7 +247,10 @@ describe("NewChatDock", () => {
         environment: {
           type: "host",
           hostId: MAC,
-          workspace: { type: "unmanaged", path: "/Users/developer/wt/escape-fix" },
+          workspace: {
+            type: "unmanaged",
+            path: "/Users/developer/wt/escape-fix",
+          },
         },
       }),
     );
@@ -330,18 +333,24 @@ describe("NewChatStageDock", () => {
     document.body.replaceChildren();
   });
 
-  it("keeps plus, model, machine and workspace in one control row", () => {
+  it("puts the model beside the machine, workspace, and new worktree controls", () => {
     renderStage();
 
     const row = document.querySelector("[data-new-chat-controls]");
 
     expect(row).not.toBeNull();
-    expect(row?.querySelector('[data-testid="stage-model"]')).not.toBeNull();
+    expect(row?.firstElementChild?.getAttribute("data-testid")).toBe(
+      "stage-model",
+    );
     expect(
       row?.querySelector('[aria-label="Machine: Mac Pro"]'),
     ).not.toBeNull();
     expect(row?.querySelector('[aria-label="Start in: main"]')).not.toBeNull();
-    expect(screen.queryByRole("button", { name: "New worktree" })).toBeNull();
+    expect(
+      screen
+        .getByRole("button", { name: "New worktree" })
+        .closest("[data-new-chat-where]"),
+    ).not.toBeNull();
   });
 
   it("moves the project tiles out of the card onto rail plates in the shelf", () => {
@@ -391,16 +400,11 @@ describe("NewChatStageDock", () => {
     ).toBeNull();
   });
 
-  it("opens the folded workspace menu from the machine picker", async () => {
+  it("opens the workspace menu directly from the settings column", async () => {
     vi.mocked(sdk.plugins.callRpc).mockResolvedValue({ worktrees: [] });
     renderStage();
 
-    fireEvent.pointerDown(
-      screen.getByRole("button", { name: "Machine: Mac Pro" }),
-      { button: 0 },
-    );
-
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Start in…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start in: main" }));
 
     expect(
       await screen.findByRole("dialog", { name: "Start in" }),

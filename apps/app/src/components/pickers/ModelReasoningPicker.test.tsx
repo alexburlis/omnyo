@@ -299,6 +299,7 @@ function renderPicker({
   preferencesReady = true,
   showFavoriteChips = false,
   insideComposer = true,
+  inline = false,
   presentation,
   selects,
   disabled = false,
@@ -340,6 +341,7 @@ function renderPicker({
   preferencesReady?: boolean;
   showFavoriteChips?: boolean;
   insideComposer?: boolean;
+  inline?: boolean;
   presentation?: ModelPickerPresentation;
   selects?: ModelPickerSelects;
   disabled?: boolean;
@@ -425,6 +427,7 @@ function renderPicker({
         onAgentOptionChange={onAgentOptionChange}
         showFavoriteChips={showFavoriteChips}
         presentation={presentation}
+        inline={inline}
         selects={selects}
         disabled={disabled}
       />
@@ -493,6 +496,23 @@ it("hides an unlisted selected model label in streamer mode without changing the
 
 describe("ModelReasoningPicker", () => {
   beforeAll(() => ModelReasoningMenu.preload());
+
+  it("lets a new-chat user choose a model without opening a menu", () => {
+    const { onSelectionChange } = renderPicker({
+      inline: true,
+      modelOptions: manyCodexModels,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "5.2" }));
+
+    expect(onSelectionChange).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ providerId: "codex", model: "gpt-5.2" }),
+    );
+    expect(screen.queryByRole("button", { name: "5.5" })).not.toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Provider, model and reasoning" }),
+    ).toBeNull();
+  });
 
   it.each([
     ["ArrowRight", "medium", "high"],

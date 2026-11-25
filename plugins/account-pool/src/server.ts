@@ -12,6 +12,7 @@ import {
 import { modelFamily } from "./quota.js";
 import { modelFamilySchema } from "./contracts.js";
 import { registerComposerPredictions } from "./composer-predictions.js";
+import { registerNativeClaudeRouting } from "./native-claude-routing.js";
 import { registerUsageSource } from "./usage-source.js";
 import {
   createUpstreamTransport,
@@ -330,6 +331,7 @@ export function createAccountPoolPlugin(
       },
     );
     registerUsageSource(api, hub);
+    registerNativeClaudeRouting(api, () => config.get().switchThreshold, now);
     registerComposerPredictions(api, hub, routing);
     registerWorkflowService(api, hub, routing);
     registerCodexResetRpc(api, hub);

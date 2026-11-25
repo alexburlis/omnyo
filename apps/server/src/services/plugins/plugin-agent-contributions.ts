@@ -29,6 +29,8 @@ type PluginAgentContributions = Pick<
       | "resolveProviderEnv"
       | "resolveProviderEnvHealth"
       | "resolveProviderModelNotice"
+      | "getRpcHandler"
+      | "invokeRpcHandler"
     >
   >;
 
@@ -118,6 +120,29 @@ export async function resolvePluginProviderModelNotice(args: {
       hostId: args.hostId,
     },
   });
+}
+
+export async function selectAccountPoolerClaudeProfile(
+  hostId: string,
+  profileIds: readonly string[],
+) {
+  const active = contributions;
+
+  if (!active?.getRpcHandler || !active.invokeRpcHandler) return null;
+
+  const method = "experimental_nativeClaudeRouting.v1.select";
+  const lookup = active.getRpcHandler("account-pool", method);
+
+  if (lookup.outcome !== "found") return null;
+
+  return active.invokeRpcHandler(
+    lookup.owner,
+    method,
+    lookup.value,
+    { hostId, profileIds },
+    { kind: "client" },
+    AbortSignal.timeout(35_000),
+  );
 }
 
 export function findPluginAgentTool(

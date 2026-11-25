@@ -24,7 +24,6 @@ import { cn } from "@omnyo/shared-ui/lib/utils";
 import { CONTROL_HOVER_TRANSITION } from "@omnyo/shared-ui/motion";
 import {
   Popover,
-  PopoverAnchor,
   PopoverContent,
   PopoverTrigger,
 } from "@omnyo/shared-ui/popover";
@@ -104,15 +103,10 @@ const CELL_CLASS_NAME = cn(
   CONTROL_HOVER_TRANSITION,
 );
 
-const STAGE_CHIP_CLASS_NAME = cn(CHIP_CLASS_NAME, "min-w-0 shrink");
-
 const MACHINE_ICON_CLASS_NAME = cn(
   CHIP_CLASS_NAME,
   "w-7.5 justify-center px-0",
 );
-
-const STAGE_FOLDING_CLASS_NAME =
-  "hidden @min-[36rem]/home-composer:inline-flex";
 
 const SHELF_CELL_CLASS_NAME = cn(
   "group/shelf-cell flex w-20 min-w-0 shrink-0 flex-col items-center gap-1.5 rounded-lg pb-1 pt-1 text-2xs text-muted-foreground outline-none",
@@ -213,35 +207,37 @@ export function NewChatDock({
         keepEditorFocus={keepEditorFocus}
         onPick={pickProject}
       />
-      <div className="flex justify-center px-3.5 pb-2 pt-1.5">{favorites}</div>
-      <WhereLine
-        where={dock.where}
-        projectId={project.value}
-        projectless={projectless}
-        environment={environment}
-        worktreeOptions={worktree.options}
-        keepEditorFocus={keepEditorFocus}
-        onPick={pickWhere}
-        trailing={
-          <>
-            {sessionOptionsControl}
-            <ComposerPlusMenuSlot
-              actions={promptActions}
-              onAttach={
-                canAttach
-                  ? () => promptBoxRef.current?.openAttachmentPicker()
-                  : undefined
-              }
-              onAction={(action) =>
-                promptBoxRef.current?.applyPromptAction(action)
-              }
-              approvals={approvals ?? undefined}
-            />
-          </>
-        }
-        environmentProviderInputsSlot={environmentProviderInputsSlot}
-        machineProviderInputsSlot={machineProviderInputsSlot}
-      />
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,9rem)] items-start gap-2 max-sm:grid-cols-1 px-3.5 pt-1.5">
+        {favorites}
+        <WhereLine
+          where={dock.where}
+          projectId={project.value}
+          projectless={projectless}
+          environment={environment}
+          worktreeOptions={worktree.options}
+          keepEditorFocus={keepEditorFocus}
+          onPick={pickWhere}
+          trailing={
+            <>
+              {sessionOptionsControl}
+              <ComposerPlusMenuSlot
+                actions={promptActions}
+                onAttach={
+                  canAttach
+                    ? () => promptBoxRef.current?.openAttachmentPicker()
+                    : undefined
+                }
+                onAction={(action) =>
+                  promptBoxRef.current?.applyPromptAction(action)
+                }
+                approvals={approvals ?? undefined}
+              />
+            </>
+          }
+          environmentProviderInputsSlot={environmentProviderInputsSlot}
+          machineProviderInputsSlot={machineProviderInputsSlot}
+        />
+      </div>
       <MachineSwitchNote
         where={dock.where}
         project={project}
@@ -296,21 +292,10 @@ export function NewChatStageDock({
   return (
     <div
       data-new-chat-controls=""
-      className="flex min-w-0 select-none items-center gap-0.5"
+      className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,9rem)] items-start gap-2 max-sm:grid-cols-1 mt-2 select-none"
     >
-      <ComposerPlusMenuSlot
-        actions={promptActions}
-        onAttach={
-          canAttach
-            ? () => promptBoxRef.current?.openAttachmentPicker()
-            : undefined
-        }
-        onAction={(action) => promptBoxRef.current?.applyPromptAction(action)}
-        approvals={approvals ?? undefined}
-      />
-      {sessionOptionsControl}
       {model}
-      <StageWhereControls
+      <WhereLine
         where={dock.where}
         projectId={project.value}
         projectless={projectless}
@@ -318,6 +303,23 @@ export function NewChatStageDock({
         worktreeOptions={worktree.options}
         keepEditorFocus={keepEditorFocus}
         onPick={pickWhere}
+        trailing={
+          <>
+            {sessionOptionsControl}
+            <ComposerPlusMenuSlot
+              actions={promptActions}
+              onAttach={
+                canAttach
+                  ? () => promptBoxRef.current?.openAttachmentPicker()
+                  : undefined
+              }
+              onAction={(action) =>
+                promptBoxRef.current?.applyPromptAction(action)
+              }
+              approvals={approvals ?? undefined}
+            />
+          </>
+        }
         environmentProviderInputsSlot={environmentProviderInputsSlot}
         machineProviderInputsSlot={machineProviderInputsSlot}
       />
@@ -672,7 +674,7 @@ function WhereLine({
   return (
     <div
       data-new-chat-where=""
-      className="flex flex-wrap items-center justify-center gap-0.5 px-3.5 pb-3"
+      className="flex min-w-0 flex-col items-start gap-0.5 [&>button]:max-w-full"
     >
       <MachineMenu
         where={where}
@@ -734,99 +736,6 @@ function WhereLine({
   );
 }
 
-function StageWhereControls({
-  where,
-  projectId,
-  projectless,
-  environment,
-  worktreeOptions,
-  keepEditorFocus,
-  onPick,
-  environmentProviderInputsSlot,
-  machineProviderInputsSlot,
-}: {
-  where: NewChatWhere;
-  projectId: string | null;
-  projectless: boolean;
-  environment: NewThreadEnvironmentConfig;
-  worktreeOptions: readonly ReuseThreadOption[];
-  keepEditorFocus: KeepEditorFocus;
-  onPick: (pick: WherePick) => void;
-  environmentProviderInputsSlot: ReactNode;
-  machineProviderInputsSlot: ReactNode;
-}) {
-  const [workspaceOpen, setWorkspaceOpen] = useState(false);
-  const workspaceTriggerRef = useRef<HTMLButtonElement>(null);
-
-  const {
-    host,
-    newWorktreeAvailable,
-    otherProviders,
-    selectedProvider,
-    rows,
-    hostless,
-    disabled,
-  } = whereOptions(where, projectless, environment);
-
-  const hasWorkspaceMenu = !projectless && host !== null && projectId !== null;
-
-  const machineMenu = (
-    <MachineMenu
-      where={where}
-      rows={rows}
-      hostless={hostless}
-      disabled={disabled}
-      keepEditorFocus={keepEditorFocus}
-      onPickHost={(hostId) => onPick({ kind: "host", hostId })}
-      onPickHostless={(providerId) => onPick({ kind: "hostless", providerId })}
-      onSetup={(target) => environment.onRequestMachineSetup?.(target)}
-      foldedWorkspace={
-        hasWorkspaceMenu
-          ? {
-              isFolded: () =>
-                workspaceTriggerRef.current !== null &&
-                workspaceTriggerRef.current.getClientRects().length === 0,
-              open: () => setWorkspaceOpen(true),
-            }
-          : undefined
-      }
-    />
-  );
-
-  return (
-    <>
-      {hasWorkspaceMenu ? (
-        <WorkspaceMenu
-          key={host.id}
-          projectId={projectId}
-          host={host}
-          workspace={where.workspace}
-          worktreeOptions={worktreeOptions}
-          newWorktreeAvailable={newWorktreeAvailable}
-          otherProviders={otherProviders}
-          disabled={disabled}
-          onPick={(workspace) => onPick({ kind: "workspace", workspace })}
-          stage={{
-            leading: machineMenu,
-            open: workspaceOpen,
-            onOpenChange: setWorkspaceOpen,
-            triggerRef: workspaceTriggerRef,
-          }}
-        />
-      ) : (
-        machineMenu
-      )}
-      {selectedProvider !== undefined && selectedProvider.inputs !== null
-        ? environmentProviderInputsSlot
-        : null}
-      {selectedProvider?.machineInputs !== undefined &&
-      selectedProvider.machineInputs !== null
-        ? machineProviderInputsSlot
-        : null}
-    </>
-  );
-}
-
 function machineLabel(
   where: NewChatWhere,
   rows: readonly NewChatMachineOption[] | null,
@@ -861,7 +770,6 @@ function MachineMenu({
   onPickHost,
   onPickHostless,
   onSetup,
-  foldedWorkspace,
 }: {
   where: NewChatWhere;
   rows: readonly NewChatMachineOption[] | null;
@@ -871,11 +779,8 @@ function MachineMenu({
   onPickHost: (hostId: string) => void;
   onPickHostless: (providerId: string) => void;
   onSetup: (host: Host) => void;
-  foldedWorkspace?: { isFolded: () => boolean; open: () => void };
 }) {
   const label = machineLabel(where, rows, hostless);
-  const [showsFoldedWorkspace, setShowsFoldedWorkspace] = useState(false);
-  const opensFoldedWorkspace = useRef(false);
 
   const selectedHostId =
     where.machine.kind === "host" ? where.machine.hostId : null;
@@ -884,16 +789,7 @@ function MachineMenu({
     where.machine.kind === "hostless" ? where.machine.providerId : null;
 
   return (
-    <DropdownMenu
-      modal={false}
-      onOpenChange={
-        foldedWorkspace === undefined
-          ? undefined
-          : (open) => {
-              if (open) setShowsFoldedWorkspace(foldedWorkspace.isFolded());
-            }
-      }
-    >
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild disabled={disabled || rows === null}>
         <button
           type="button"
@@ -912,16 +808,6 @@ function MachineMenu({
         align="center"
         mobileTitle="Machine"
         className="min-w-60"
-        onCloseAutoFocus={
-          foldedWorkspace === undefined
-            ? undefined
-            : (event) => {
-                if (!opensFoldedWorkspace.current) return;
-                opensFoldedWorkspace.current = false;
-                event.preventDefault();
-                foldedWorkspace.open();
-              }
-        }
       >
         {(rows ?? []).map((row) => (
           <DropdownMenuItem
@@ -982,23 +868,6 @@ function MachineMenu({
             ))}
           </>
         )}
-        {foldedWorkspace !== undefined && showsFoldedWorkspace ? (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onSelect={() => {
-                opensFoldedWorkspace.current = true;
-              }}
-            >
-              <Icon
-                name="GitBranch"
-                className="size-4 text-muted-foreground"
-                aria-hidden
-              />
-              <span className="min-w-0 flex-1 truncate">Start in…</span>
-            </DropdownMenuItem>
-          </>
-        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -1076,7 +945,6 @@ function WorkspaceMenu({
   otherProviders,
   disabled,
   onPick,
-  stage,
 }: {
   projectId: string;
   host: Host;
@@ -1086,16 +954,8 @@ function WorkspaceMenu({
   otherProviders: readonly SystemEnvironmentProvider[];
   disabled: boolean;
   onPick: (workspace: Exclude<NewChatWorkspace, { kind: "personal" }>) => void;
-  stage?: {
-    leading: ReactNode;
-    open: boolean;
-    onOpenChange: (open: boolean) => void;
-    triggerRef: RefObject<HTMLButtonElement | null>;
-  };
 }) {
-  const [localOpen, setLocalOpen] = useState(false);
-  const open = stage?.open ?? localOpen;
-  const setOpen = stage?.onOpenChange ?? setLocalOpen;
+  const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const branches = useProjectSourceBranches(projectId, host.id, { limit: 1 });
 
@@ -1136,74 +996,35 @@ function WorkspaceMenu({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      {stage === undefined ? null : (
-        <PopoverAnchor asChild>
-          <span className="flex min-w-0 items-center gap-0.5">
-            {stage.leading}
-            <PopoverTrigger asChild disabled={disabled}>
-              <button
-                ref={stage.triggerRef}
-                type="button"
-                aria-label={`Start in: ${label}`}
-                className={cn(STAGE_CHIP_CLASS_NAME, STAGE_FOLDING_CLASS_NAME)}
-              >
-                <Icon
-                  name={
-                    workspace.kind === "local-worktree" ||
-                    workspace.kind === "environment"
-                      ? "FolderGit"
-                      : "GitBranch"
-                  }
-                  className="size-3.5"
-                  aria-hidden
-                />
-                <span
-                  className="min-w-0 max-w-40 truncate"
-                  title={checkoutBranch?.title ?? undefined}
-                >
-                  {label}
-                </span>
-                <Icon
-                  name="ChevronDown"
-                  className="size-3 text-subtle-foreground"
-                  aria-hidden
-                />
-              </button>
-            </PopoverTrigger>
-          </span>
-        </PopoverAnchor>
-      )}
-      {stage !== undefined ? null : (
-        <PopoverTrigger asChild disabled={disabled}>
-          <button
-            type="button"
-            aria-label={`Start in: ${label}`}
-            className={CHIP_CLASS_NAME}
+      <PopoverTrigger asChild disabled={disabled}>
+        <button
+          type="button"
+          aria-label={`Start in: ${label}`}
+          className={CHIP_CLASS_NAME}
+        >
+          <Icon
+            name={
+              workspace.kind === "local-worktree" ||
+              workspace.kind === "environment"
+                ? "FolderGit"
+                : "GitBranch"
+            }
+            className="size-3.5"
+            aria-hidden
+          />
+          <span
+            className="max-w-40 truncate"
+            title={checkoutBranch?.title ?? undefined}
           >
-            <Icon
-              name={
-                workspace.kind === "local-worktree" ||
-                workspace.kind === "environment"
-                  ? "FolderGit"
-                  : "GitBranch"
-              }
-              className="size-3.5"
-              aria-hidden
-            />
-            <span
-              className="max-w-40 truncate"
-              title={checkoutBranch?.title ?? undefined}
-            >
-              {label}
-            </span>
-            <Icon
-              name="ChevronDown"
-              className="size-3 text-subtle-foreground"
-              aria-hidden
-            />
-          </button>
-        </PopoverTrigger>
-      )}
+            {label}
+          </span>
+          <Icon
+            name="ChevronDown"
+            className="size-3 text-subtle-foreground"
+            aria-hidden
+          />
+        </button>
+      </PopoverTrigger>
       <PopoverContent
         align="center"
         aria-label="Start in"

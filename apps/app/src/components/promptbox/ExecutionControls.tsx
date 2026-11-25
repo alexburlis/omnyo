@@ -102,6 +102,7 @@ export interface ExecutionControlsProps {
   handoff?: ModelReasoningPickerHandoff;
   disabled?: boolean;
   presentation?: ModelPickerPresentation;
+  inline?: boolean;
   selects?: ModelPickerSelects;
 }
 
@@ -119,6 +120,7 @@ export const ExecutionControls = memo(function ExecutionControls({
   handoff,
   disabled,
   presentation = "footer",
+  inline = false,
   selects,
 }: ExecutionControlsProps) {
   const handleServiceTierChange = serviceTier?.onChange ?? (() => {});
@@ -149,7 +151,7 @@ export const ExecutionControls = memo(function ExecutionControls({
     selectedProviderId.length > 0 ||
     handoff !== undefined;
 
-  return (
+  const controls = (
     <>
       {showModelPicker ? (
         <ModelReasoningPicker
@@ -190,10 +192,13 @@ export const ExecutionControls = memo(function ExecutionControls({
           disabled={disabled}
           handoff={handoff}
           presentation={presentation}
+          inline={inline}
           selects={selects}
         />
       ) : null}
       {accountControl?.(disabled ?? false)}
     </>
   );
+
+  return inline ? <div className="min-w-0">{controls}</div> : controls;
 });
