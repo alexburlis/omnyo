@@ -7,7 +7,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Icon } from "@/components/ui/icon";
 import { LIST_HOVER_TRANSITION } from "@/components/ui/motion";
-import { ResourceRowDetailChevron } from "@/components/ui/resource-list";
 import { cn } from "@/lib/utils";
 
 export function SettingsBadge({ children }: { children: ReactNode }) {
@@ -86,7 +85,7 @@ export function AccountListRow({
   rowRef,
   style,
   dragging = false,
-  leading = <span aria-hidden="true" className="size-8 shrink-0" />,
+  reorderHandle,
 }: {
   name: string;
   secondaryName?: string | null;
@@ -103,43 +102,29 @@ export function AccountListRow({
   rowRef?: Ref<HTMLDivElement>;
   style?: CSSProperties;
   dragging?: boolean;
-  leading?: ReactNode;
+  reorderHandle?: ReactNode;
 }) {
-  const layout =
-    "grid min-w-0 flex-1 grid-cols-1 items-center gap-y-1.5 text-left @min-[32rem]/account-row:grid-cols-[minmax(0,1fr)_auto] @min-[32rem]/account-row:gap-y-0";
+  const identityClass = "min-w-0 flex-1 space-y-1 text-left";
 
-  const content = (
+  const identity = (
     <>
-      <div className="min-w-0 flex-1 space-y-1">
-        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-          <span className="truncate text-sm font-medium text-foreground">
-            {name}
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+        <span className="truncate text-sm font-medium text-foreground">
+          {name}
+        </span>
+        {secondaryName == null ? null : (
+          <span className="min-w-0 truncate text-xs text-subtle-foreground">
+            {secondaryName}
           </span>
-          {secondaryName == null ? null : (
-            <span className="min-w-0 truncate text-xs text-subtle-foreground">
-              {secondaryName}
-            </span>
-          )}
-          {badges}
-        </div>
-        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-subtle-foreground">
-          <span className="inline-flex shrink-0 items-center gap-1.5">
-            <span className={cn("size-1.5 rounded-full", status.dot)} />
-            {status.label}
-          </span>
-          {statusDetail}
-        </div>
+        )}
+        {badges}
       </div>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 @min-[32rem]/account-row:flex-nowrap @min-[32rem]/account-row:gap-1">
-        {slots.map((slot) => (
-          <QuotaValue
-            key={slot.key}
-            slot={slot}
-            threshold={threshold}
-            refreshing={refreshing}
-          />
-        ))}
-        {slots.length === 0 ? missingUsage : null}
+      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-subtle-foreground">
+        <span className="inline-flex shrink-0 items-center gap-1.5">
+          <span className={cn("size-1.5 rounded-full", status.dot)} />
+          {status.label}
+        </span>
+        {statusDetail}
       </div>
     </>
   );
@@ -149,33 +134,51 @@ export function AccountListRow({
       ref={rowRef}
       style={style}
       className={cn(
-        "@container/account-row flex items-center gap-3 text-sm transition-[box-shadow,opacity] duration-(--motion-duration-fast)",
+        "@container/account-row text-sm transition-[box-shadow,opacity] duration-(--motion-duration-fast)",
         dragging && "relative z-10 rounded-md bg-card opacity-90 shadow-lift",
       )}
     >
-      {leading}
       <div
         className={cn(
-          "group relative -mx-2 flex min-w-0 flex-1 select-none items-center gap-2 rounded-md px-2 py-2.5 hover:bg-state-hover focus-within:bg-state-hover",
+          "relative -mx-2 flex select-none items-center gap-2 rounded-md px-2 py-2.5 hover:bg-state-hover focus-within:bg-state-hover",
           LIST_HOVER_TRANSITION,
           disabled && "opacity-55",
         )}
       >
-        {onOpen === undefined ? (
-          <div className={layout}>{content}</div>
-        ) : (
-          <button
-            type="button"
-            className={cn(
-              layout,
-              "rounded-md outline-none after:absolute after:inset-0 after:rounded-md after:content-[''] focus-visible:ring-2 focus-visible:ring-ring",
+        <div className="grid min-w-0 flex-1 items-center gap-y-1.5 @min-[32rem]/account-row:grid-cols-[minmax(0,1fr)_auto] @min-[32rem]/account-row:gap-x-2">
+          <div className="flex min-w-0 items-center gap-2">
+            {onOpen === undefined ? (
+              <div className={identityClass}>{identity}</div>
+            ) : (
+              <button
+                type="button"
+                className={cn(
+                  identityClass,
+                  "rounded-md outline-none after:absolute after:inset-0 after:rounded-md after:content-[''] focus-visible:ring-2 focus-visible:ring-ring",
+                )}
+                aria-label={`Open ${name} details`}
+                onClick={onOpen}
+              >
+                {identity}
+              </button>
             )}
-            aria-label={`Open ${name}`}
-            onClick={onOpen}
-          >
-            {content}
-          </button>
-        )}
+            {reorderHandle}
+          </div>
+          {slots.length === 0 ? (
+            missingUsage
+          ) : (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 @min-[32rem]/account-row:flex-nowrap @min-[32rem]/account-row:gap-1">
+              {slots.map((slot) => (
+                <QuotaValue
+                  key={slot.key}
+                  slot={slot}
+                  threshold={threshold}
+                  refreshing={refreshing}
+                />
+              ))}
+            </div>
+          )}
+        </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
@@ -191,16 +194,6 @@ export function AccountListRow({
             {actions}
           </DropdownMenuContent>
         </DropdownMenu>
-        {onOpen === undefined ? null : (
-          <button
-            type="button"
-            aria-label={`Open ${name} details`}
-            className="relative"
-            onClick={onOpen}
-          >
-            <ResourceRowDetailChevron />
-          </button>
-        )}
       </div>
     </div>
   );

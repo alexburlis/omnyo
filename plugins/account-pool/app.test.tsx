@@ -882,11 +882,7 @@ describe("Account Pool settings", () => {
       finishSave();
       await waitFor(() => expect(handle.hasAttribute("disabled")).toBe(false));
       expect(providerOrder()).toEqual(["Reorder Second", "Reorder First"]);
-      expect(
-        slot
-          .getByRole("button", { name: "Reorder Other" })
-          .hasAttribute("disabled"),
-      ).toBe(true);
+      expect(slot.queryByRole("button", { name: "Reorder Other" })).toBeNull();
     },
   );
 

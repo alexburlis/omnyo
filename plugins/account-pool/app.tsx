@@ -402,7 +402,8 @@ function AccountRow({
   refreshing,
   onAction,
   onOpen,
-  reorderDisabled,
+  canReorder,
+  reorderPending,
 }: {
   account: AccountSummary;
   threshold: number;
@@ -410,12 +411,14 @@ function AccountRow({
   refreshing: boolean;
   onAction: (action: (typeof ACCOUNT_ACTIONS)[number]) => void;
   onOpen: () => void;
-  reorderDisabled: boolean;
+  canReorder: boolean;
+  reorderPending: boolean;
 }) {
   const status = statusPresentation(account, threshold);
   const slots = quotaSlots(account);
   const email = secondaryEmail(account);
   const reducedMotion = usePrefersReducedMotion();
+  const reorderDisabled = pending || !canReorder || reorderPending;
 
   const {
     attributes,
@@ -427,7 +430,7 @@ function AccountRow({
     transition,
   } = useSortable({
     id: account.id,
-    disabled: pending || reorderDisabled,
+    disabled: reorderDisabled,
     transition: getSortableTransition(reducedMotion),
   });
 
@@ -460,20 +463,22 @@ function AccountRow({
       rowRef={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), transition }}
       dragging={isDragging}
-      leading={
-        <Button
-          ref={setActivatorNodeRef}
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="size-8 shrink-0 touch-none text-muted-foreground enabled:cursor-grab enabled:active:cursor-grabbing"
-          disabled={pending || reorderDisabled}
-          aria-label={`Reorder ${account.label}`}
-          {...attributes}
-          {...listeners}
-        >
-          <Icon name="DragDropVertical" aria-hidden="true" />
-        </Button>
+      reorderHandle={
+        canReorder ? (
+          <Button
+            ref={setActivatorNodeRef}
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="relative size-8 shrink-0 touch-none text-muted-foreground enabled:cursor-grab enabled:active:cursor-grabbing"
+            disabled={reorderDisabled}
+            aria-label={`Reorder ${account.label}`}
+            {...attributes}
+            {...listeners}
+          >
+            <Icon name="DragDropVertical" aria-hidden="true" />
+          </Button>
+        ) : null
       }
       actions={
         <>
@@ -1317,7 +1322,6 @@ function AccountPoolSettings() {
                   onCloseSetup={() => setClaudeSetup(null)}
                   showEmpty={status !== null && providerAccounts.length === 0}
                   threshold={threshold}
-                  hasPooledAccounts={providerAccounts.length > 0}
                 />
               ) : null}
               <div
@@ -1358,10 +1362,8 @@ function AccountPoolSettings() {
                               statusIsCached ||
                               pending.has(`refresh-${account.id}`)
                             }
-                            reorderDisabled={
-                              providerAccounts.length < 2 ||
-                              pending.has(`order-${provider.id}`)
-                            }
+                            canReorder={providerAccounts.length > 1}
+                            reorderPending={pending.has(`order-${provider.id}`)}
                             onAction={(action) =>
                               void accountAction(account, action)
                             }

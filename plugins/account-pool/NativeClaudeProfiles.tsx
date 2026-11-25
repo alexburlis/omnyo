@@ -58,7 +58,6 @@ function NativeClaudeAccountRow({
   isDefault,
   pending,
   threshold,
-  reserveReorderSpace,
   signIn,
   onRemove,
   run,
@@ -70,7 +69,6 @@ function NativeClaudeAccountRow({
   isDefault: boolean;
   pending: boolean;
   threshold: number;
-  reserveReorderSpace: boolean;
   signIn: () => Promise<void>;
   onRemove: (account: AccountToRemove) => void;
   run: (action: () => Promise<void>) => Promise<void>;
@@ -127,12 +125,12 @@ function NativeClaudeAccountRow({
 
   return (
     <AccountListRow
-      leading={reserveReorderSpace ? undefined : null}
       name={name}
       secondaryName={
         email !== null &&
         profile.label !== email &&
-        profile.label !== "Existing Claude sign-in"
+        profile.label !== "Existing Claude sign-in" &&
+        !/^Claude account \d+$/u.test(profile.label)
           ? profile.label
           : null
       }
@@ -242,13 +240,11 @@ export function NativeClaudeProfiles({
   onCloseSetup,
   showEmpty,
   threshold,
-  hasPooledAccounts = false,
 }: {
   setup: ClaudeSetup | null;
   onCloseSetup: () => void;
   showEmpty: boolean;
   threshold: number;
-  hasPooledAccounts?: boolean;
 }) {
   const sdk = useSdk();
   const profiles = useMemo(() => sdk.providers.claudeProfiles, [sdk]);
@@ -443,7 +439,6 @@ export function NativeClaudeProfiles({
             }
             pending={pending}
             threshold={threshold}
-            reserveReorderSpace={hasPooledAccounts || data.profiles.length > 1}
             signIn={() => signIn(profile.id)}
             onRemove={(target) => {
               setError(null);

@@ -114,6 +114,7 @@ describe("Native Claude accounts", () => {
     renderProfiles();
 
     expect(await screen.findByText("claude@example.com")).toBeTruthy();
+    expect(screen.getByText("Personal Claude")).toBeTruthy();
     expect(screen.getByText("Max")).toBeTruthy();
     expect(screen.getByText("30%")).toBeTruthy();
     expect(screen.queryByText("5H")).toBeNull();
@@ -177,7 +178,12 @@ describe("Native Claude accounts", () => {
   });
 
   it("shows the new account details after browser sign-in finishes", async () => {
-    const unsignedProfile = { ...profile, status: "sign-in-required" };
+    const unsignedProfile = {
+      ...profile,
+      label: "Claude account 2",
+      status: "sign-in-required",
+    };
+
     client.providers.claudeProfiles.list.mockResolvedValue({
       action: "list",
       supported: true,
@@ -201,7 +207,7 @@ describe("Native Claude accounts", () => {
       })
       .mockResolvedValue({
         action: "loginGet",
-        profile,
+        profile: { ...profile, label: unsignedProfile.label },
         loginState: "finished",
       });
     client.providers.claudeProfiles.usage.mockResolvedValue({
@@ -226,6 +232,7 @@ describe("Native Claude accounts", () => {
     ).toBeTruthy();
     expect(screen.getByText("Max")).toBeTruthy();
     expect(screen.getByText("30%")).toBeTruthy();
+    expect(screen.queryByText(unsignedProfile.label)).toBeNull();
     expect(
       screen.queryByText("Finish sign-in in the browser on Mac."),
     ).toBeNull();
