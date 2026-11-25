@@ -22,7 +22,11 @@ describe("shared Inbox snapshot", () => {
       REALTIME_THREAD_CHANGE_REGISTRY,
     )) {
       expect(
-        entry.dirty.some((handler) => handler.name === "dirtyInboxSnapshot"),
+        [...entry.dirty, ...("urgent" in entry ? entry.urgent : [])].some(
+          (handler) =>
+            handler.name === "dirtyInboxSnapshot" ||
+            handler.name === "refreshArchivedSnapshots",
+        ),
         kind,
       ).toBe(
         !["execution-changed", "events-appended", "history-compacted"].includes(

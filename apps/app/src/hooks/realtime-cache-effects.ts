@@ -26,6 +26,7 @@ import {
 } from "@/lib/document-visibility";
 import {
   applyRealtimeThreadPatches,
+  applyUrgentThreadChanges,
   collectCachedThreadIdsForEnvironment,
   createFlushOncePredicate,
   disposeTrailingActiveRefetches,
@@ -583,6 +584,8 @@ export function createRealtimeCacheEffects({
 
       switch (message.entity) {
         case "thread": {
+          applyUrgentThreadChanges(message.changes, { queryClient });
+
           if (message.id) {
             applyRealtimeThreadPatches(message.changes, {
               hasPendingInteraction: message.metadata?.hasPendingInteraction,

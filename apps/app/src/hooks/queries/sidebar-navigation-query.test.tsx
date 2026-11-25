@@ -14,6 +14,7 @@ import {
   MAX_CACHED_SIDEBAR_THREADS_PER_PROJECT,
   SIDEBAR_BOOTSTRAP_CACHE_KEY,
   resetSidebarBootstrapCacheForTest,
+  readCachedSidebarBootstrap,
 } from "@/lib/sidebar-bootstrap-cache";
 import {
   makeThreadListEntry,
@@ -334,6 +335,75 @@ describe("useSidebarNavigation", () => {
         MAX_CACHED_SIDEBAR_THREADS_PER_PROJECT,
       );
     } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not persist a canceled bootstrap when its transport resolves after the newer membership read", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const stale = createDeferredPromise<SidebarBootstrapResponse>();
+    const fresh = createDeferredPromise<SidebarBootstrapResponse>();
+
+    const before = {
+      ...BOOTSTRAP,
+      projects: [
+        {
+          ...BOOTSTRAP.projects[0]!,
+          threads: [
+            makeThreadListEntry({ id: "thr_archived", projectId: "proj_felt" }),
+          ],
+        },
+      ],
+    };
+
+    vi.mocked(request)
+      .mockReturnValueOnce(stale.promise)
+      .mockReturnValueOnce(fresh.promise);
+    const harness = createQueryClientTestHarness();
+
+    const mounted = renderHook(() => useSidebarNavigation(), {
+      wrapper: harness.wrapper,
+    });
+
+    try {
+      await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+      await act(async () => {
+        await harness.queryClient.cancelQueries(
+          {
+            queryKey: sidebarNavigationQueryKey(),
+            exact: true,
+            type: "active",
+          },
+          { revert: false, silent: true },
+        );
+        void harness.queryClient.refetchQueries({
+          queryKey: sidebarNavigationQueryKey(),
+          exact: true,
+          type: "active",
+        });
+      });
+      expect(request).toHaveBeenCalledTimes(2);
+      await act(async () => {
+        fresh.resolve(BOOTSTRAP);
+      });
+      await waitFor(() =>
+        expect(mounted.result.current.data).toEqual(BOOTSTRAP),
+      );
+      await act(async () => {
+        stale.resolve(before);
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(mounted.result.current.data?.projects[0]?.threads).toEqual([]);
+      expect(readCachedSidebarBootstrap()?.projects[0]?.threads).toEqual([]);
+
+      const stored = sidebarBootstrapResponseSchema.parse(
+        JSON.parse(window.localStorage.getItem(SIDEBAR_BOOTSTRAP_CACHE_KEY)!),
+      );
+
+      expect(stored.projects[0]?.threads).toEqual([]);
+    } finally {
+      mounted.unmount();
+      harness.queryClient.clear();
       vi.useRealTimers();
     }
   });

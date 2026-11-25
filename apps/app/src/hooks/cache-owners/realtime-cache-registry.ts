@@ -520,10 +520,9 @@ export const REALTIME_THREAD_CHANGE_REGISTRY = {
   },
   "archived-changed": {
     flush: "debounced",
-    patch: [refreshSidebarMembership],
+    urgent: [refreshArchivedSnapshots],
     dirty: [
-      dirtyInboxSnapshot,
-      dirtyThreadMembershipQueries,
+      dirtyArchivedThreadMembershipQueries,
       dirtyThreadDetailQueries,
       dirtyProjectPromptHistoryQueries,
       dirtyThreadContinuationQueries,
@@ -799,6 +798,7 @@ interface ThreadRealtimePatchContext {
 }
 
 interface ThreadChangeRule {
+  urgent?: readonly ((context: RealtimeDirtyContext) => void)[];
   patch?: readonly ((context: ThreadRealtimePatchContext) => void)[];
   dirty: readonly RealtimeDirtyHandler<ThreadRealtimeDirtyContext>[];
   flush: ThreadChangeFlushPriority;
@@ -846,6 +846,17 @@ export function executeRealtimeDirtyHandlers<
     for (const queryKey of queryKeys) {
       context.queryClient.invalidateQueries({ queryKey });
     }
+  }
+}
+
+export function applyUrgentThreadChanges(
+  changes: readonly ThreadChangeKind[],
+  context: RealtimeDirtyContext,
+): void {
+  for (const change of changes) {
+    const rule: ThreadChangeRule = REALTIME_THREAD_CHANGE_REGISTRY[change];
+
+    for (const urgent of rule.urgent ?? []) urgent(context);
   }
 }
 
@@ -927,6 +938,12 @@ function dirtyThreadMembershipQueries(
   context: ThreadRealtimeDirtyContext,
 ): void {
   if (context.threadId === undefined) refreshSidebarMembership(context);
+  invalidateThreadListQueries(context, true, false);
+}
+
+function dirtyArchivedThreadMembershipQueries(
+  context: ThreadRealtimeDirtyContext,
+): void {
   invalidateThreadListQueries(context, true, false);
 }
 
@@ -1578,6 +1595,11 @@ function dirtyEnvironmentProviderQueries(): QueryKey[] {
 
 function reconcilePluginFrontendBundles(): void {
   schedulePluginFrontendReconcile();
+}
+
+function refreshArchivedSnapshots({ queryClient }: RealtimeDirtyContext): void {
+  sidebarMembershipRefresh.invalidate(queryClient, { supersedeActive: true });
+  markInboxSnapshotDirty(queryClient, { supersedeActive: true });
 }
 
 function dirtyInboxSnapshot({ queryClient }: RealtimeDirtyContext): QueryKey[] {

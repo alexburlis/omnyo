@@ -50,7 +50,8 @@ export function useSidebarNavigation(options?: QueryOptions) {
     queryKey: sidebarNavigationQueryKey(),
     queryFn: async ({ signal }) => {
       const response = await fetchSidebarNavigation(queryClient, signal);
-      writeCachedSidebarBootstrap(response);
+
+      if (!signal.aborted) writeCachedSidebarBootstrap(response);
 
       return response;
     },

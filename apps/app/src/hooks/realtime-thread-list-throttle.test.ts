@@ -296,7 +296,7 @@ it("refreshes visible membership on the next task even inside the background coo
   }
 });
 
-it("finishes the current sidebar read and catches up once after a burst of moves", async () => {
+it("finishes the current sidebar read and catches up once after a burst of background membership changes", async () => {
   vi.useFakeTimers();
   const queryClient = new QueryClient();
   const effects = createRealtimeCacheEffects({ queryClient });
@@ -324,7 +324,7 @@ it("finishes the current sidebar read and catches up once after a burst of moves
       type: "changed",
       entity: "thread",
       id: "thr_child",
-      changes: ["archived-changed"],
+      changes: ["pin-state-changed"],
     });
 
   try {
