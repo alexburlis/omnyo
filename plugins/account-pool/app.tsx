@@ -1317,6 +1317,7 @@ function AccountPoolSettings() {
                   onCloseSetup={() => setClaudeSetup(null)}
                   showEmpty={status !== null && providerAccounts.length === 0}
                   threshold={threshold}
+                  hasPooledAccounts={providerAccounts.length > 0}
                 />
               ) : null}
               <div

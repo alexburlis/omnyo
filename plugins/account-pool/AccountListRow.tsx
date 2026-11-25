@@ -86,7 +86,7 @@ export function AccountListRow({
   rowRef,
   style,
   dragging = false,
-  leading,
+  leading = <span aria-hidden="true" className="size-8 shrink-0" />,
 }: {
   name: string;
   secondaryName?: string | null;
@@ -153,7 +153,7 @@ export function AccountListRow({
         dragging && "relative z-10 rounded-md bg-card opacity-90 shadow-lift",
       )}
     >
-      {leading ?? <span aria-hidden="true" className="size-8 shrink-0" />}
+      {leading}
       <div
         className={cn(
           "group relative -mx-2 flex min-w-0 flex-1 select-none items-center gap-2 rounded-md px-2 py-2.5 hover:bg-state-hover focus-within:bg-state-hover",
