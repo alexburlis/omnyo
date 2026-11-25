@@ -11,14 +11,21 @@ import {
   makeSidebarBootstrapResponse,
 } from "@/test/fixtures/projects";
 import {
+  archivedThreadsListQueryKey,
+  shelvedThreadsListQueryKey,
   sidebarNavigationQueryKey,
   threadListQueryKey,
   threadQueryKey,
 } from "../queries/query-keys";
-import { holdPendingThreadArchives } from "./pending-thread-archives";
+import { holdPendingThreadArchives } from "./pending-thread-membership";
+import { readSidebarNavigation } from "./query-cache";
 import {
   beginArchiveThreadAndChildrenTransaction,
+  beginUnarchiveThreadTransaction,
+  settleThreadPatchTransaction,
+  settleUnarchiveThreadTransaction,
   rollbackArchiveThreadsTransaction,
+  rollbackThreadListMutationTransaction,
   settleArchiveThreadsTransaction,
 } from "./thread-state-cache-owner";
 
@@ -207,5 +214,351 @@ describe("pending thread archives", () => {
       queryClient.getQueryData<typeof navigation>(key)?.projects[0]?.threads,
     ).toEqual([]);
     queryClient.clear();
+  });
+});
+
+describe("pending thread unarchives", () => {
+  it("keeps a restored row visible while stale sidebar, archived list and detail reads finish", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: Infinity } },
+    });
+
+    const entry = makeThreadListEntry({
+      id: "restored",
+      projectId: "project-1",
+      archivedAt: 1,
+    });
+
+    const sidebarKey = sidebarNavigationQueryKey();
+    const archivedKey = archivedThreadsListQueryKey({});
+    const empty = makeSidebarNavigation([]);
+    queryClient.setQueryData(sidebarKey, empty);
+    queryClient.setQueryData(archivedKey, {
+      pages: [[entry]],
+      pageParams: [0],
+    });
+    queryClient.setQueryData(
+      threadQueryKey(entry.id),
+      makeThreadWithRuntime({ ...entry }),
+    );
+
+    const transaction = await beginUnarchiveThreadTransaction({
+      queryClient,
+      threadId: entry.id,
+    });
+
+    try {
+      expect(
+        queryClient
+          .getQueryData<SidebarBootstrapResponse>(sidebarKey)
+          ?.projects[0]?.threads.map(({ id }) => id),
+      ).toEqual([entry.id]);
+      await queryClient.fetchQuery({
+        queryKey: sidebarKey,
+        staleTime: 0,
+        queryFn: () => readSidebarNavigation(queryClient, async () => empty),
+      });
+      expect(
+        queryClient
+          .getQueryData<SidebarBootstrapResponse>(sidebarKey)
+          ?.projects[0]?.threads.map(({ id }) => id),
+      ).toEqual([entry.id]);
+      await queryClient.fetchQuery({
+        queryKey: archivedKey,
+        staleTime: 0,
+        queryFn: async () => ({ pages: [[entry]], pageParams: [0] }),
+      });
+      expect(
+        queryClient
+          .getQueryData<{ pages: ThreadListEntry[][] }>(archivedKey)
+          ?.pages.flat(),
+      ).toEqual([]);
+      await queryClient.fetchQuery({
+        queryKey: threadQueryKey(entry.id),
+        staleTime: 0,
+        queryFn: async () => makeThreadWithRuntime({ ...entry }),
+      });
+      expect(
+        queryClient.getQueryData<ThreadWithRuntime>(threadQueryKey(entry.id))
+          ?.archivedAt,
+      ).toBeNull();
+      settleThreadPatchTransaction(transaction);
+      await queryClient.fetchQuery({
+        queryKey: sidebarKey,
+        staleTime: 0,
+        queryFn: () => readSidebarNavigation(queryClient, async () => empty),
+      });
+      expect(
+        queryClient.getQueryData<SidebarBootstrapResponse>(sidebarKey)
+          ?.projects[0]?.threads,
+      ).toEqual([]);
+    } finally {
+      settleThreadPatchTransaction(transaction);
+      queryClient.clear();
+    }
+  });
+
+  it("releases a rejected restore before a refresh can reapply it", async () => {
+    const queryClient = new QueryClient();
+
+    const entry = makeThreadListEntry({
+      id: "refused",
+      projectId: "project-1",
+      archivedAt: 1,
+    });
+
+    const key = sidebarNavigationQueryKey();
+    const empty = makeSidebarNavigation([]);
+    queryClient.setQueryData(key, empty);
+    queryClient.setQueryData(archivedThreadsListQueryKey({}), {
+      pages: [[entry]],
+      pageParams: [0],
+    });
+
+    const transaction = await beginUnarchiveThreadTransaction({
+      queryClient,
+      threadId: entry.id,
+    });
+
+    try {
+      rollbackThreadListMutationTransaction({
+        queryClient,
+        threadId: entry.id,
+        transaction,
+      });
+      await queryClient.fetchQuery({
+        queryKey: key,
+        staleTime: 0,
+        queryFn: () => readSidebarNavigation(queryClient, async () => empty),
+      });
+      expect(
+        queryClient.getQueryData<SidebarBootstrapResponse>(key)?.projects[0]
+          ?.threads,
+      ).toEqual([]);
+    } finally {
+      settleThreadPatchTransaction(transaction);
+      queryClient.clear();
+    }
+  });
+
+  it("cancels a stale sidebar read before releasing the restore hold", async () => {
+    const queryClient = new QueryClient();
+
+    const entry = makeThreadListEntry({
+      id: "restored",
+      projectId: "project-1",
+      archivedAt: 1,
+    });
+
+    const key = sidebarNavigationQueryKey();
+    const empty = makeSidebarNavigation([]);
+    queryClient.setQueryData(key, empty);
+    queryClient.setQueryData(archivedThreadsListQueryKey({}), {
+      pages: [[entry]],
+      pageParams: [0],
+    });
+
+    const transaction = await beginUnarchiveThreadTransaction({
+      queryClient,
+      threadId: entry.id,
+    });
+
+    let resolveRead = (_value: typeof empty) => {};
+
+    const response = new Promise<typeof empty>((resolve) => {
+      resolveRead = resolve;
+    });
+
+    const reading = queryClient
+      .fetchQuery({
+        queryKey: key,
+        staleTime: 0,
+        queryFn: () => readSidebarNavigation(queryClient, () => response),
+      })
+      .catch(() => undefined);
+
+    await settleUnarchiveThreadTransaction({
+      queryClient,
+      threadId: entry.id,
+      transaction,
+    });
+    resolveRead(empty);
+    await reading;
+    expect(
+      queryClient
+        .getQueryData<SidebarBootstrapResponse>(key)
+        ?.projects[0]?.threads.map(({ id }) => id),
+    ).toEqual([entry.id]);
+    queryClient.clear();
+  });
+
+  it("removes an archived shelved family immediately and keeps it hidden through a stale Shelf read", async () => {
+    const queryClient = new QueryClient();
+    const shelfKey = shelvedThreadsListQueryKey();
+
+    const root = makeThreadListEntry({
+      id: "shelved-root",
+      projectId: "project-1",
+      shelvedAt: 1,
+    });
+
+    const child = makeThreadListEntry({
+      id: "shelved-child",
+      projectId: "project-1",
+      parentThreadId: root.id,
+      shelvedAt: 1,
+    });
+
+    const other = makeThreadListEntry({
+      id: "other",
+      projectId: "project-1",
+      shelvedAt: 1,
+    });
+
+    const shelf = { pages: [[root, child, other]], pageParams: [0] };
+    queryClient.setQueryData(
+      sidebarNavigationQueryKey(),
+      makeSidebarNavigation([]),
+    );
+    queryClient.setQueryData(shelfKey, shelf);
+
+    const transaction = await beginArchiveThreadAndChildrenTransaction({
+      queryClient,
+      threadId: root.id,
+    });
+
+    try {
+      expect(transaction.archivedThreadIds).toEqual([root.id, child.id]);
+      expect(
+        queryClient
+          .getQueryData<typeof shelf>(shelfKey)
+          ?.pages.flat()
+          .map(({ id }) => id),
+      ).toEqual([other.id]);
+      await queryClient.fetchQuery({
+        queryKey: shelfKey,
+        staleTime: 0,
+        queryFn: async () => shelf,
+      });
+      expect(
+        queryClient
+          .getQueryData<typeof shelf>(shelfKey)
+          ?.pages.flat()
+          .map(({ id }) => id),
+      ).toEqual([other.id]);
+      rollbackArchiveThreadsTransaction({ queryClient, transaction });
+      expect(queryClient.getQueryData(shelfKey)).toEqual(shelf);
+    } finally {
+      transaction.releasePendingArchives();
+      queryClient.clear();
+    }
+  });
+});
+
+describe("overlapping thread membership", () => {
+  it("keeps Undo newer than an archive without reviving the superseded archive hold", async () => {
+    const queryClient = new QueryClient();
+
+    const entry = makeThreadListEntry({
+      id: "overlap",
+      projectId: "project-1",
+    });
+
+    const key = sidebarNavigationQueryKey();
+    const visible = makeSidebarNavigation([entry]);
+    queryClient.setQueryData(key, visible);
+
+    const archived = await beginArchiveThreadAndChildrenTransaction({
+      queryClient,
+      threadId: entry.id,
+    });
+
+    const restored = await beginUnarchiveThreadTransaction({
+      queryClient,
+      threadId: entry.id,
+    });
+
+    try {
+      await queryClient.fetchQuery({
+        queryKey: key,
+        staleTime: 0,
+        queryFn: async () => makeSidebarNavigation([]),
+      });
+      expect(
+        queryClient
+          .getQueryData<SidebarBootstrapResponse>(key)
+          ?.projects[0]?.threads.map(({ id }) => id),
+      ).toEqual([entry.id]);
+      settleThreadPatchTransaction(restored);
+      await queryClient.fetchQuery({
+        queryKey: key,
+        staleTime: 0,
+        queryFn: async () => visible,
+      });
+      expect(
+        queryClient
+          .getQueryData<SidebarBootstrapResponse>(key)
+          ?.projects[0]?.threads.map(({ id }) => id),
+      ).toEqual([entry.id]);
+    } finally {
+      settleThreadPatchTransaction(restored);
+      archived.releasePendingArchives();
+      queryClient.clear();
+    }
+  });
+
+  it("keeps a new archive newer than an unarchive without reviving the superseded restore hold", async () => {
+    const queryClient = new QueryClient();
+
+    const entry = makeThreadListEntry({
+      id: "overlap",
+      projectId: "project-1",
+      archivedAt: 1,
+    });
+
+    const key = sidebarNavigationQueryKey();
+    const empty = makeSidebarNavigation([]);
+    queryClient.setQueryData(key, empty);
+    queryClient.setQueryData(archivedThreadsListQueryKey({}), {
+      pages: [[entry]],
+      pageParams: [0],
+    });
+
+    const restored = await beginUnarchiveThreadTransaction({
+      queryClient,
+      threadId: entry.id,
+    });
+
+    const archived = await beginArchiveThreadAndChildrenTransaction({
+      queryClient,
+      threadId: entry.id,
+    });
+
+    try {
+      await queryClient.fetchQuery({
+        queryKey: key,
+        staleTime: 0,
+        queryFn: async () =>
+          makeSidebarNavigation([{ ...entry, archivedAt: null }]),
+      });
+      expect(
+        queryClient.getQueryData<SidebarBootstrapResponse>(key)?.projects[0]
+          ?.threads,
+      ).toEqual([]);
+      archived.releasePendingArchives();
+      await queryClient.fetchQuery({
+        queryKey: key,
+        staleTime: 0,
+        queryFn: async () => empty,
+      });
+      expect(
+        queryClient.getQueryData<SidebarBootstrapResponse>(key)?.projects[0]
+          ?.threads,
+      ).toEqual([]);
+    } finally {
+      settleThreadPatchTransaction(restored);
+      archived.releasePendingArchives();
+      queryClient.clear();
+    }
   });
 });

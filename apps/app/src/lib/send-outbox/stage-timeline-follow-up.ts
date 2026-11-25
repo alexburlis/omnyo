@@ -15,6 +15,7 @@ import {
   buildOutboxMessageInput,
   isSendOutboxAvailable,
   stageThreadMessageInOutbox,
+  trackOutboxThreadMessage,
 } from "./send-outbox";
 
 export async function stageTimelineFollowUp({
@@ -49,6 +50,14 @@ export async function stageTimelineFollowUp({
 
   addPendingSentMessage(queryClient, threadId, row);
 
+  const prediction = trackOutboxThreadMessage({
+    queryClient,
+    threadId,
+    submissionId,
+  });
+
+  let stagedInOutbox = false;
+
   try {
     if (!(await isSendOutboxAvailable())) return false;
 
@@ -69,7 +78,7 @@ export async function stageTimelineFollowUp({
       sourceOf,
     });
 
-    return (
+    stagedInOutbox =
       (await stageThreadMessageInOutbox({
         threadId,
         projectId,
@@ -80,9 +89,11 @@ export async function stageTimelineFollowUp({
           input: staged.input.map((part) => ({ ...part, submissionId })),
           messageSource: { kind: "user" },
         },
-      })) === "staged"
-    );
+      })) === "staged";
+
+    return stagedInOutbox;
   } finally {
+    if (!stagedInOutbox) prediction.discard();
     removePendingSentMessage(queryClient, threadId, row.id);
   }
 }

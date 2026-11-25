@@ -407,6 +407,45 @@ export function startInboxTurn(
   return recountInbox(placed(snapshot, runningEntry(source, label)));
 }
 
+export function queueInboxSend(
+  snapshot: InboxSnapshot,
+  threadId: string,
+  reason: string,
+  fallback?: Pick<InboxEntry, "projectId" | "title" | "shelved" | "sortAt">,
+): InboxSnapshot {
+  const source =
+    findEntry(snapshot, threadId) ??
+    (fallback === undefined
+      ? undefined
+      : {
+          ...fallback,
+          threadId,
+          automationId: null,
+          state: "finished" as const,
+          reason: { kind: "none" as const, text: "", threadId },
+          recap: null,
+          archiveReady: false,
+          optionalQuestion: null,
+          pendingResults: 0,
+          view: "inbox" as const,
+          card: null,
+          waiting: null,
+          running: null,
+          runs: null,
+          incident: null,
+          latch: "inbox" as const,
+        });
+
+  if (
+    source === undefined ||
+    source.view === "running" ||
+    !canStartTurn(source, false)
+  )
+    return snapshot;
+
+  return recountInbox(placed(snapshot, waitingEntry(source, null, reason)));
+}
+
 export function stopInboxTurn(
   snapshot: InboxSnapshot,
   threadId: string,
@@ -460,7 +499,7 @@ export function scheduleInboxSend(
 
 function waitingEntry(
   entry: InboxEntry,
-  until: number,
+  until: number | null,
   reason = "Waiting",
 ): InboxEntry {
   return {
@@ -479,7 +518,7 @@ function waitingEntry(
       checkAt: null,
       checkCount: 0,
       checking: false,
-      guaranteed: true,
+      guaranteed: until !== null,
       behind: null,
       retry: null,
       questionId: null,

@@ -1,5 +1,5 @@
 import { QueryClient } from "@tanstack/react-query";
-import { expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import {
   getPendingSentMessages,
   withPendingSentMessages,
@@ -9,11 +9,33 @@ import { pendingTimelineSubmissions } from "./timeline-submissions";
 import * as outbox from "./send-outbox";
 import type { OutboxEntry } from "./send-outbox-entry";
 
-vi.mock("./send-outbox", async (importOriginal) => ({
-  ...(await importOriginal<typeof outbox>()),
-  isSendOutboxAvailable: vi.fn(),
-  stageThreadMessageInOutbox: vi.fn(),
+vi.mock("../ws", () => ({
+  wsManager: {
+    getConnectionState: () => "connected",
+    onConnected: () => () => undefined,
+    onResumed: () => () => undefined,
+  },
 }));
+
+vi.mock("./send-outbox", async (importOriginal) => {
+  const original = await importOriginal<typeof outbox>();
+
+  return {
+    ...original,
+    trackOutboxThreadMessage: vi.fn(original.trackOutboxThreadMessage),
+    isSendOutboxAvailable: vi.fn(),
+    stageThreadMessageInOutbox: vi.fn(),
+  };
+});
+
+afterEach(() => {
+  for (const result of vi.mocked(outbox.trackOutboxThreadMessage).mock
+    .results) {
+    if (result.type === "return") result.value.discard();
+  }
+
+  vi.clearAllMocks();
+});
 
 it("renders identical sends immediately and replaces only the confirmed submission", async () => {
   const queryClient = new QueryClient();
@@ -98,3 +120,42 @@ it("renders identical sends immediately and replaces only the confirmed submissi
     ),
   ).toHaveLength(0);
 });
+
+it.each(["unavailable", "failure"] as const)(
+  "removes the click prediction after %s staging",
+  async (outcome) => {
+    vi.mocked(outbox.isSendOutboxAvailable).mockResolvedValue(
+      outcome !== "unavailable",
+    );
+    vi.mocked(outbox.stageThreadMessageInOutbox).mockRejectedValue(
+      new Error("Disk full"),
+    );
+    const queryClient = new QueryClient();
+
+    const send = stageTimelineFollowUp({
+      queryClient,
+      threadId: "thr_failed",
+      projectId: "proj_a",
+      execution: null,
+      sourceOf: () => null,
+      submission: {
+        input: [{ type: "text", text: "Send", mentions: [] }],
+        prepareInput: undefined,
+        getDraft: () => ({ text: "Send", mentions: [], attachments: [] }),
+      },
+    });
+
+    const prediction = vi
+      .mocked(outbox.trackOutboxThreadMessage)
+      .mock.results.at(-1);
+
+    if (prediction?.type !== "return") throw new Error("No click prediction");
+    const discard = vi.spyOn(prediction.value, "discard");
+
+    if (outcome === "failure") await expect(send).rejects.toThrow("Disk full");
+    else expect(await send).toBe(false);
+    expect(discard).toHaveBeenCalledOnce();
+    expect(getPendingSentMessages(queryClient, "thr_failed")).toEqual([]);
+    queryClient.clear();
+  },
+);

@@ -1,3 +1,4 @@
+import { createSnapshotInvalidator } from "./snapshot-invalidation";
 import { markInboxSnapshotDirty } from "./inbox-snapshot-cache-owner";
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import type {
@@ -380,6 +381,7 @@ function invalidateTerminalTimelineQueryKeys({
 }
 
 export function disposeTrailingActiveRefetches(queryClient: QueryClient): void {
+  sidebarMembershipRefresh.dispose(queryClient);
   const throttled = throttledActiveRefetchEntries.get(queryClient);
 
   if (throttled) {
@@ -408,9 +410,10 @@ export function disposeTrailingActiveRefetches(queryClient: QueryClient): void {
 export const REALTIME_THREAD_CHANGE_REGISTRY = {
   "thread-created": {
     flush: "debounced",
+    patch: [refreshSidebarMembership],
     dirty: [
       dirtyInboxSnapshot,
-      dirtyThreadListQueries,
+      dirtyThreadMembershipQueries,
       dirtyThreadDetailQueries,
       dirtyThreadTimelineQueries,
       dirtyProjectPromptHistoryQueries,
@@ -418,10 +421,11 @@ export const REALTIME_THREAD_CHANGE_REGISTRY = {
   },
   "thread-deleted": {
     flush: "debounced",
+    patch: [refreshSidebarMembership],
     dirty: [
       dirtyInboxSnapshot,
       purgeDeletedThreadTimelineDisplay,
-      dirtyThreadListQueries,
+      dirtyThreadMembershipQueries,
       dirtyThreadDetailQueries,
       dirtyThreadTimelineQueries,
       dirtyProjectPromptHistoryQueries,
@@ -516,9 +520,10 @@ export const REALTIME_THREAD_CHANGE_REGISTRY = {
   },
   "archived-changed": {
     flush: "debounced",
+    patch: [refreshSidebarMembership],
     dirty: [
       dirtyInboxSnapshot,
-      dirtyThreadListQueries,
+      dirtyThreadMembershipQueries,
       dirtyThreadDetailQueries,
       dirtyProjectPromptHistoryQueries,
       dirtyThreadContinuationQueries,
@@ -526,25 +531,28 @@ export const REALTIME_THREAD_CHANGE_REGISTRY = {
   },
   "pin-state-changed": {
     flush: "debounced",
+    patch: [refreshSidebarMembership],
     dirty: [
       dirtyInboxSnapshot,
-      dirtyThreadListQueries,
+      dirtyThreadMembershipQueries,
       dirtyThreadDetailQueries,
     ],
   },
   "shelf-state-changed": {
     flush: "debounced",
+    patch: [refreshSidebarMembership],
     dirty: [
       dirtyInboxSnapshot,
-      dirtyThreadListQueries,
+      dirtyThreadMembershipQueries,
       dirtyThreadDetailQueries,
     ],
   },
   "parent-changed": {
     flush: "debounced",
+    patch: [refreshSidebarMembership],
     dirty: [
       dirtyInboxSnapshot,
-      dirtyThreadListQueries,
+      dirtyThreadMembershipQueries,
       dirtyThreadDetailQueries,
     ],
   },
@@ -907,6 +915,21 @@ export function collectCachedThreadIdsForEnvironment({
   return Array.from(threadIds);
 }
 
+const sidebarMembershipRefresh = createSnapshotInvalidator(
+  sidebarNavigationQueryKey(),
+);
+
+function refreshSidebarMembership({ queryClient }: RealtimeDirtyContext): void {
+  sidebarMembershipRefresh.invalidate(queryClient);
+}
+
+function dirtyThreadMembershipQueries(
+  context: ThreadRealtimeDirtyContext,
+): void {
+  if (context.threadId === undefined) refreshSidebarMembership(context);
+  invalidateThreadListQueries(context, true, false);
+}
+
 function dirtyThreadListQueries(context: ThreadRealtimeDirtyContext): void {
   invalidateThreadListQueries(context, true);
 }
@@ -924,6 +947,7 @@ function dirtyActiveThreadListQueries(
 function invalidateThreadListQueries(
   { projectId, queryClient }: ThreadRealtimeDirtyContext,
   includePaged: boolean,
+  includeSidebar = true,
 ): void {
   const listQueryKeys = projectId
     ? [
@@ -954,7 +978,7 @@ function invalidateThreadListQueries(
   }
 
   for (const queryKey of [
-    sidebarNavigationQueryKey(),
+    ...(includeSidebar ? [sidebarNavigationQueryKey()] : []),
     threadSearchQueryKeyPrefix(),
   ]) {
     invalidateQueryKeyWithThrottledActiveRefetch({

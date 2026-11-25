@@ -38,7 +38,6 @@ it.each([
     let revision = 0;
 
     const keys = [
-      sidebarNavigationQueryKey(),
       threadListQueryKey({ archived: false }),
       threadListQueryKey({ archived: false, projectId: "project-1" }),
       threadListQueryKey({
@@ -204,7 +203,7 @@ it.each([
   }
 });
 
-it("shares one refresh interval across structural and active-only events", async () => {
+it("shares one background list refresh interval across structural and active-only events", async () => {
   vi.useFakeTimers();
 
   const queryClient = new QueryClient({
@@ -213,10 +212,7 @@ it("shares one refresh interval across structural and active-only events", async
 
   const effects = createRealtimeCacheEffects({ queryClient });
 
-  const keys = [
-    sidebarNavigationQueryKey(),
-    threadListQueryKey({ archived: false }),
-  ];
+  const keys = [threadListQueryKey({ archived: false })];
 
   const reads = keys.map(() => vi.fn(async () => []));
 
@@ -248,11 +244,103 @@ it("shares one refresh interval across structural and active-only events", async
       await vi.advanceTimersByTimeAsync(200);
     }
 
-    expect(reads.map((read) => read.mock.calls.length)).toEqual([1, 1]);
+    expect(reads.map((read) => read.mock.calls.length)).toEqual([1]);
     await vi.advanceTimersByTimeAsync(300);
-    expect(reads.map((read) => read.mock.calls.length)).toEqual([2, 2]);
+    expect(reads.map((read) => read.mock.calls.length)).toEqual([2]);
   } finally {
     stops.forEach((stop) => stop());
+    effects.dispose();
+    queryClient.clear();
+  }
+});
+
+it("refreshes visible membership on the next task even inside the background cooldown", async () => {
+  vi.useFakeTimers();
+  const queryClient = new QueryClient();
+  const effects = createRealtimeCacheEffects({ queryClient });
+  let revision = 0;
+  const read = vi.fn(async () => revision);
+
+  const observer = new QueryObserver(queryClient, {
+    queryKey: sidebarNavigationQueryKey(),
+    queryFn: read,
+    staleTime: Infinity,
+  });
+
+  const stop = observer.subscribe(() => {});
+
+  const change = (kind: ThreadChangeKind) =>
+    effects.handleChanged({
+      type: "changed",
+      entity: "thread",
+      id: "thr_child",
+      changes: [kind],
+      metadata: { projectId: "project-1" },
+    });
+
+  try {
+    await vi.advanceTimersByTimeAsync(0);
+    change("title-changed");
+    await vi.advanceTimersByTimeAsync(200);
+    read.mockClear();
+    revision++;
+    change("archived-changed");
+    change("shelf-state-changed");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(observer.getCurrentResult().data).toBe(revision);
+    expect(read).toHaveBeenCalledTimes(1);
+  } finally {
+    stop();
+    effects.dispose();
+    queryClient.clear();
+  }
+});
+
+it("finishes the current sidebar read and catches up once after a burst of moves", async () => {
+  vi.useFakeTimers();
+  const queryClient = new QueryClient();
+  const effects = createRealtimeCacheEffects({ queryClient });
+  let finish: (() => void) | undefined;
+
+  const read = vi
+    .fn(async () => 2)
+    .mockImplementationOnce(
+      () =>
+        new Promise<number>((resolve) => {
+          finish = () => resolve(1);
+        }),
+    );
+
+  const observer = new QueryObserver(queryClient, {
+    queryKey: sidebarNavigationQueryKey(),
+    queryFn: read,
+    staleTime: Infinity,
+  });
+
+  const stop = observer.subscribe(() => {});
+
+  const move = () =>
+    effects.handleChanged({
+      type: "changed",
+      entity: "thread",
+      id: "thr_child",
+      changes: ["archived-changed"],
+    });
+
+  try {
+    for (let i = 0; i < 5; i++) move();
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(read).toHaveBeenCalledTimes(1);
+    finish?.();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(observer.getCurrentResult().data).toBe(2);
+    expect(read).toHaveBeenCalledTimes(2);
+    move();
+    effects.dispose();
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(read).toHaveBeenCalledTimes(2);
+  } finally {
+    stop();
     effects.dispose();
     queryClient.clear();
   }

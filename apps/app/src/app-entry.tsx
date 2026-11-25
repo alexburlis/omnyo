@@ -75,7 +75,7 @@ if (recoveredSubmissions.failed > 0) {
 
 installWebErrorReporting(appQueryClient);
 
-void startSendOutbox().catch((error: unknown) => {
+void startSendOutbox(appQueryClient).catch((error: unknown) => {
   appToast.error("Could not load messages waiting to send.", {
     description:
       error instanceof Error

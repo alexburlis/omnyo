@@ -1,3 +1,5 @@
+import type { QueryClient } from "@tanstack/react-query";
+import { beginOutboxThreadMessageTransaction } from "@/hooks/cache-owners/outbox-thread-state-cache-owner";
 import type { PromptDraftAttachment } from "@omnyo/client-core";
 import type { PromptInput } from "@omnyo/domain";
 import type {
@@ -52,6 +54,82 @@ interface NewChatWaiter {
 }
 
 const newChatWaiters = new Map<string, NewChatWaiter>();
+
+let outboxQueryClient: QueryClient | null = null;
+
+const threadMessagePredictions = new Map<
+  string,
+  {
+    persisted: boolean;
+    settle: () => void;
+    discard: () => void;
+  }
+>();
+
+export function trackOutboxThreadMessage(args: {
+  queryClient: QueryClient;
+  threadId: string;
+  submissionId: string;
+}): { discard: () => void } {
+  const prediction = {
+    ...beginOutboxThreadMessageTransaction({
+      ...args,
+      connected: wsManager.getConnectionState() === "connected",
+    }),
+    persisted: false,
+  };
+
+  threadMessagePredictions.set(args.submissionId, prediction);
+
+  return {
+    discard() {
+      if (threadMessagePredictions.get(args.submissionId) !== prediction)
+        return;
+      threadMessagePredictions.delete(args.submissionId);
+      prediction.discard();
+    },
+  };
+}
+
+function reconcileThreadMessagePredictions(
+  entries: readonly OutboxEntry[],
+): void {
+  const byId = new Map(entries.map((entry) => [entry.submissionId, entry]));
+
+  for (const [id, prediction] of threadMessagePredictions) {
+    const entry = byId.get(id);
+
+    if (entry?.state.kind === "paused") {
+      threadMessagePredictions.delete(id);
+      prediction.discard();
+    } else if (entry === undefined && prediction.persisted) {
+      threadMessagePredictions.delete(id);
+      prediction.discard();
+    }
+  }
+
+  const queryClient = outboxQueryClient;
+
+  if (queryClient === null) return;
+
+  for (const entry of entries) {
+    if (
+      entry.state.kind !== "waiting" ||
+      entry.action.kind !== "thread-message" ||
+      !("threadId" in entry.action.target) ||
+      threadMessagePredictions.has(entry.submissionId)
+    )
+      continue;
+    trackOutboxThreadMessage({
+      queryClient,
+      submissionId: entry.submissionId,
+      threadId: entry.action.target.threadId,
+    });
+    const prediction = threadMessagePredictions.get(entry.submissionId);
+
+    if (prediction) prediction.persisted = true;
+  }
+}
 
 async function withDrainLock<TResult>(
   work: () => Promise<TResult>,
@@ -111,6 +189,8 @@ async function refreshSnapshot(store: SendOutboxStore): Promise<void> {
       ? EMPTY_ENTRIES
       : entries.filter((entry) => entry.storeId === storeId);
 
+  reconcileThreadMessagePredictions(snapshot);
+
   for (const listener of snapshotListeners) listener();
 }
 
@@ -123,7 +203,11 @@ function ensureRuntime(): SendOutboxRuntime {
 
   const drainer = createSendOutboxDrainer({
     classify: classifyOutboxFailure,
-    onDelivered: () => undefined,
+    onDelivered: ({ entry }) => {
+      const prediction = threadMessagePredictions.get(entry.submissionId);
+      threadMessagePredictions.delete(entry.submissionId);
+      prediction?.settle();
+    },
     store,
     transport: sdkSendOutboxTransport,
     withDrainLock,
@@ -168,7 +252,9 @@ export async function isSendOutboxAvailable(): Promise<boolean> {
   return (await resolveStoreId()) !== null;
 }
 
-export async function startSendOutbox(): Promise<void> {
+export async function startSendOutbox(queryClient: QueryClient): Promise<void> {
+  outboxQueryClient = queryClient;
+
   if ((await resolveStoreId()) === null) {
     return;
   }
@@ -248,6 +334,10 @@ export async function stageThreadMessageInOutbox(args: {
     attachments: args.attachments,
   });
 
+  const prediction = threadMessagePredictions.get(staged.submissionId);
+
+  if (prediction) prediction.persisted = true;
+
   snapshot = [
     ...snapshot.filter((entry) => entry.submissionId !== staged.submissionId),
     staged,
@@ -322,7 +412,16 @@ export async function retryOutboxEntry(submissionId: string): Promise<void> {
 }
 
 export async function discardOutboxEntry(submissionId: string): Promise<void> {
-  await ensureRuntime().store.discard(submissionId);
+  const prediction = threadMessagePredictions.get(submissionId);
+  threadMessagePredictions.delete(submissionId);
+
+  try {
+    await ensureRuntime().store.discard(submissionId);
+    prediction?.discard();
+  } catch (error) {
+    if (prediction) threadMessagePredictions.set(submissionId, prediction);
+    throw error;
+  }
 }
 
 export function subscribeSendOutbox(listener: () => void): () => void {

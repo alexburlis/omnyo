@@ -42,7 +42,7 @@ import {
   beginUnarchiveThreadTransaction,
   rollbackThreadListMutationTransaction,
   settleThreadListMembershipMutation,
-  settleThreadPatchTransaction,
+  settleUnarchiveThreadTransaction,
   invalidateThreadMetadataBatch,
   rollbackThreadMetadataBatchTransaction,
   applyThreadReadStateResult,
@@ -245,7 +245,7 @@ export async function runThreadShelfMutation({
 
 interface InboxMoveThreadTransaction {
   rollback: () => void;
-  settle: () => void;
+  settle: () => void | Promise<void>;
 }
 
 const NO_THREAD_TRANSACTION: InboxMoveThreadTransaction = {
@@ -328,11 +328,16 @@ async function beginInboxUnarchiveThreadTransaction(
           transaction,
         });
     },
-    settle: () => {
-      for (const { threadId, transaction } of transactions) {
-        transaction.releasePendingPatches();
-        settleThreadListMembershipMutation({ queryClient, threadId });
-      }
+    settle: async () => {
+      await Promise.all(
+        transactions.map(({ threadId, transaction }) =>
+          settleUnarchiveThreadTransaction({
+            queryClient,
+            threadId,
+            transaction,
+          }),
+        ),
+      );
     },
   };
 }
@@ -447,13 +452,13 @@ async function runPredictedInboxMove({
     const result = await send();
     prediction.replace(withActResult(predict, result));
     prediction.settle();
-    threadTransaction.settle();
+    await threadTransaction.settle();
 
     return result;
   } catch (error) {
     prediction.discard();
     threadTransaction.rollback();
-    threadTransaction.settle();
+    await threadTransaction.settle();
     throw error;
   }
 }
@@ -833,10 +838,10 @@ export function bindSdkToPlugin(
           });
           throw error;
         } finally {
-          settleThreadPatchTransaction(transaction);
-          settleThreadListMembershipMutation({
+          await settleUnarchiveThreadTransaction({
             queryClient,
             threadId: args.threadId,
+            transaction,
           });
         }
       },

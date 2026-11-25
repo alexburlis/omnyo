@@ -221,6 +221,49 @@ function sentTexts(server: FakeServer): string[] {
 }
 
 describe("send outbox drain", () => {
+  it("reports an accepted message before a later submission finishes", async () => {
+    const store = createMemoryStore();
+    const server = createFakeServer();
+    const first = await store.stage(message("thr_a", "first"));
+    await store.stage(message("thr_b", "second"));
+    const submit = server.submit;
+    let release!: () => void;
+    let beganSecond!: () => void;
+
+    const secondStarted = new Promise<void>((resolve) => {
+      beganSecond = resolve;
+    });
+
+    server.submit = async (request) => {
+      if (request.submissionId !== first.submissionId) {
+        beganSecond();
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      }
+
+      return submit(request);
+    };
+
+    const onDelivered = vi.fn();
+
+    const draining = drainSendOutbox({
+      classify,
+      store,
+      transport: server,
+      onDelivered,
+    });
+
+    await secondStarted;
+    expect(onDelivered).toHaveBeenCalledOnce();
+    expect(onDelivered.mock.calls[0]?.[0].entry.submissionId).toBe(
+      first.submissionId,
+    );
+    release();
+    await draining;
+    expect(onDelivered).toHaveBeenCalledTimes(2);
+  });
+
   it("delivers each chat's messages in the order they were staged and settles them", async () => {
     const store = createMemoryStore();
     const transport = createFakeServer();

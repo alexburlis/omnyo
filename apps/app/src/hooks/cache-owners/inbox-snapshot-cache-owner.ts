@@ -1,3 +1,4 @@
+import { createSnapshotInvalidator } from "./snapshot-invalidation";
 import { hashKey, type QueryClient } from "@tanstack/react-query";
 import type { InboxSnapshot } from "@omnyo/domain";
 import type { InboxPredict } from "@/lib/inbox-predictions";
@@ -13,42 +14,9 @@ export const INBOX_SNAPSHOT_QUERY_POLICY = {
   retryDelay: (attempt: number) => Math.min(1_000 * 2 ** attempt, 4_000),
 } as const;
 
-interface RefreshState {
-  timer: ReturnType<typeof setTimeout> | null;
-  unsubscribe: (() => void) | null;
-}
-
-const refreshStates = new WeakMap<QueryClient, RefreshState>();
-
-export function markInboxSnapshotDirty(queryClient: QueryClient): void {
-  const filters = { queryKey: INBOX_SNAPSHOT_QUERY_KEY, exact: true };
-  void queryClient.invalidateQueries({ ...filters, refetchType: "none" });
-  let state = refreshStates.get(queryClient);
-
-  if (!state) {
-    state = { timer: null, unsubscribe: null };
-    refreshStates.set(queryClient, state);
-  }
-
-  if (state.timer !== null || state.unsubscribe !== null) return;
-  const pending = state;
-  pending.timer = setTimeout(() => {
-    pending.timer = null;
-
-    if (queryClient.isFetching(filters) > 0) {
-      pending.unsubscribe = queryClient.getQueryCache().subscribe(() => {
-        if (queryClient.isFetching(filters) > 0) return;
-        pending.unsubscribe?.();
-        pending.unsubscribe = null;
-        markInboxSnapshotDirty(queryClient);
-      });
-
-      return;
-    }
-
-    void queryClient.refetchQueries(filters, { cancelRefetch: false });
-  }, 0);
-}
+export const { invalidate: markInboxSnapshotDirty } = createSnapshotInvalidator(
+  INBOX_SNAPSHOT_QUERY_KEY,
+);
 
 export function inboxSnapshotState<Snapshot>(query: {
   data: Snapshot | undefined;

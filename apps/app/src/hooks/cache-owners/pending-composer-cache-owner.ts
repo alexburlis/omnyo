@@ -1,6 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 import type {
   ThreadQueuedMessage,
+  QueuedMessageWork,
   ThreadStatusChangeMetadata,
   ThreadWorkSummary,
 } from "@omnyo/domain";
@@ -37,6 +38,7 @@ interface ComposerInput {
   accepted: boolean;
   acceptedAfter: number | null;
   queuedMessage: LocalQueuedMessage | null;
+  localWork: QueuedMessageWork | null;
 }
 
 interface ComposerThreadState {
@@ -93,6 +95,7 @@ export function retainPendingComposerThreadState(
   kind: "active" | "queued",
   previous: ThreadStatusFields | undefined,
   queuedMessage: LocalQueuedMessage | null = null,
+  localWork: QueuedMessageWork | null = null,
 ): void {
   const state = composerThreadState(queryClient, threadId);
   state.authoritative ??= previous ? threadStatusSnapshot(previous) : null;
@@ -101,6 +104,7 @@ export function retainPendingComposerThreadState(
     accepted: false,
     acceptedAfter: null,
     queuedMessage,
+    localWork,
   });
   advanceComposerGeneration(queryClient, state);
 }
@@ -237,10 +241,15 @@ export function reconcileComposerThreadState<T extends ThreadStatusFields>(
     work: projectLocalThreadWork(
       thread,
       unaccepted.flatMap((input) =>
-        input.queuedMessage === null
-          ? []
-          : [localQueuedMessageWork(thread, input.queuedMessage)],
+        input.localWork !== null
+          ? [input.localWork]
+          : input.queuedMessage === null
+            ? []
+            : [localQueuedMessageWork(thread, input.queuedMessage)],
       ),
+      {
+        preserveFailures: unaccepted.some((input) => input.localWork !== null),
+      },
     ),
   };
 }

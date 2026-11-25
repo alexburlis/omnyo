@@ -50,7 +50,10 @@ import {
   type ThreadMetadataPatch,
 } from "./pending-thread-patches";
 
-import { holdPendingThreadArchives } from "./pending-thread-archives";
+import {
+  holdPendingThreadArchives,
+  holdPendingThreadUnarchives,
+} from "./pending-thread-membership";
 import {
   predictInboxSnapshot,
   readPredictedInboxSnapshot,
@@ -260,6 +263,7 @@ interface OptimisticThreadFieldTransactionArgs extends ThreadIdCacheArgs {
   patchThread?: (thread: ThreadWithRuntime) => ThreadWithRuntime;
   applyToLists: (queryClient: QueryClient, threadId: string) => void;
   predictInbox?: () => InboxPredict | null;
+  holdPending?: () => () => void;
 }
 
 async function runOptimisticThreadFieldTransaction({
@@ -267,6 +271,7 @@ async function runOptimisticThreadFieldTransaction({
   patch,
   patchThread,
   predictInbox,
+  holdPending,
   queryClient,
   threadId,
 }: OptimisticThreadFieldTransactionArgs): Promise<ThreadListMutationTransaction> {
@@ -316,7 +321,10 @@ async function runOptimisticThreadFieldTransaction({
     previousSidebarNavigation,
     previousThread,
     previousThreadLists,
-    releasePendingPatches: settlingWith(() => {}, inboxPrediction),
+    releasePendingPatches: settlingWith(
+      holdPending?.() ?? (() => {}),
+      inboxPrediction,
+    ),
   };
 }
 
@@ -732,6 +740,7 @@ export function rollbackThreadListMutationTransaction({
   }
 
   transaction.inboxPrediction?.discard();
+  transaction.releasePendingPatches();
   queryClient.setQueryData(
     threadQueryKey(threadId),
     transaction.previousThread,
@@ -853,7 +862,14 @@ export function beginUnarchiveThreadTransaction({
   queryClient,
   threadId,
 }: ThreadIdCacheArgs): Promise<ThreadListMutationTransaction> {
+  let restoredEntry: ThreadListEntry | undefined;
+
   return runOptimisticThreadFieldTransaction({
+    holdPending: () =>
+      holdPendingThreadUnarchives(
+        queryClient,
+        restoredEntry === undefined ? [] : [restoredEntry],
+      ),
     applyToLists: (queryClient, threadId) => {
       const remembered = takeArchivedListEntry(queryClient, threadId);
 
@@ -872,12 +888,12 @@ export function beginUnarchiveThreadTransaction({
       removeThreadFromLists(queryClient, threadId);
 
       if (!thread) return;
+      const restored = { ...thread, archivedAt: null };
+      restoredEntry = restored;
       applyToCachedSidebarNavigationThreads({
         queryClient,
         mapper: (list, projectId) =>
-          projectId === thread.projectId
-            ? [...list, { ...thread, archivedAt: null }]
-            : list,
+          projectId === thread.projectId ? [...list, restored] : list,
       });
     },
     patch: { archivedAt: null },
@@ -891,6 +907,25 @@ export function beginUnarchiveThreadTransaction({
     queryClient,
     threadId,
   });
+}
+
+export async function settleUnarchiveThreadTransaction({
+  queryClient,
+  threadId,
+  transaction,
+}: ThreadIdCacheArgs & {
+  transaction: ThreadListMutationTransaction | undefined;
+}): Promise<void> {
+  try {
+    await Promise.all([
+      queryClient.cancelQueries({ queryKey: threadQueryKey(threadId) }),
+      queryClient.cancelQueries({ queryKey: threadsQueryKey() }),
+      queryClient.cancelQueries({ queryKey: sidebarNavigationQueryKey() }),
+    ]);
+  } finally {
+    settleThreadPatchTransaction(transaction);
+    settleThreadListMembershipMutation({ queryClient, threadId });
+  }
 }
 
 async function beginArchiveMatchingThreadsTransaction({

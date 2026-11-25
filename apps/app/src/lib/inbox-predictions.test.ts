@@ -11,6 +11,7 @@ import {
   scheduleInboxSend,
   shelveInboxThread,
   startInboxTurn,
+  queueInboxSend,
   stopInboxTurn,
   withInboxEntry,
 } from "./inbox-predictions";
@@ -438,4 +439,32 @@ describe("answered Inbox questions", () => {
       family,
     );
   });
+});
+
+it.each(["question", "problem"] as const)(
+  "keeps an existing %s when staging a message",
+  (kind) => {
+    const before = snapshot({
+      inbox: [entry("thr_a", { card: card({ kind }) })],
+    });
+
+    expect(queueInboxSend(before, "thr_a", "Sending message")).toBe(before);
+  },
+);
+
+it("keeps an existing run when its follow-up waits to send", () => {
+  const before = snapshot({
+    running: [
+      entry("thr_a", {
+        view: "running",
+        state: "working",
+        card: null,
+        running: { label: "Working", progress: null },
+      }),
+    ],
+  });
+
+  expect(queueInboxSend(before, "thr_a", "Waiting for a connection")).toBe(
+    before,
+  );
 });

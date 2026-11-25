@@ -33,6 +33,7 @@ import {
   settleThreadListMembershipMutation,
   settleThreadReadStateTransaction,
   settleThreadPatchTransaction,
+  settleUnarchiveThreadTransaction,
   type ArchiveThreadsTransaction,
   type DeleteThreadTransaction,
   type ThreadListMutationTransaction,
@@ -333,13 +334,12 @@ export function useUnarchiveThread() {
         transaction: context,
       });
     },
-    onSettled: (_data, _error, variables, context) => {
-      settleThreadPatchTransaction(context);
-      settleThreadListMembershipMutation({
+    onSettled: (_data, _error, variables, context) =>
+      settleUnarchiveThreadTransaction({
         queryClient,
         threadId: variables.id,
-      });
-    },
+        transaction: context,
+      }),
   });
 }
 
@@ -417,10 +417,15 @@ export async function unarchiveThreadsInOrder({
       });
     throw error;
   } finally {
-    for (const { threadId, transaction } of steps) {
-      settleThreadPatchTransaction(transaction);
-      settleThreadListMembershipMutation({ queryClient, threadId });
-    }
+    await Promise.all(
+      steps.map(({ threadId, transaction }) =>
+        settleUnarchiveThreadTransaction({
+          queryClient,
+          threadId,
+          transaction,
+        }),
+      ),
+    );
   }
 }
 

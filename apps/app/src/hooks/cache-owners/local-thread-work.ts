@@ -30,6 +30,7 @@ function uniqueById<T extends { id: string }>(items: readonly T[]): T[] {
 export function projectLocalThreadWork(
   thread: LocalWorkThread,
   queued: readonly QueuedMessageWork[] = [],
+  options: { preserveFailures?: boolean } = {},
 ): ThreadWorkSummary {
   const previous = thread.work ?? null;
   const lifecycle = threadLifecycleWork(thread);
@@ -57,7 +58,7 @@ export function projectLocalThreadWork(
     ]),
     requiredInput: previous?.requiredInput ?? [],
     optionalInput: previous?.optionalInput ?? [],
-    failures: [],
+    failures: options.preserveFailures ? (previous?.failures ?? []) : [],
     waits: uniqueById([
       ...queued.flatMap((fact) => (fact.kind === "wait" ? [fact.wait] : [])),
       ...(previous?.waits ?? []).filter((wait) => !derivedIds.has(wait.id)),
@@ -74,8 +75,9 @@ export function projectLocalThreadWork(
 export function withLocalThreadWork<T extends LocalWorkThread>(
   thread: T,
   queued: readonly QueuedMessageWork[] = [],
+  options: { preserveFailures?: boolean } = {},
 ): T {
-  return { ...thread, work: projectLocalThreadWork(thread, queued) };
+  return { ...thread, work: projectLocalThreadWork(thread, queued, options) };
 }
 
 export type LocalQueuedMessage = Pick<

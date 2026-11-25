@@ -1199,6 +1199,56 @@ describe("bindSdkToPlugin", () => {
 });
 
 describe("bound Inbox moves", () => {
+  it("keeps an unarchived sidebar row when Inbox Undo finishes before a stale refresh", async () => {
+    const { act, bound, queryClient, undo } = bindWithInbox();
+    const root = makeThreadListEntry({ id: "thr_root", projectId: "proj_1" });
+    const key = sidebarNavigationQueryKey();
+
+    const navigation = (threads: (typeof root)[]) =>
+      makeSidebarBootstrapResponse({
+        projects: [
+          makeProjectWithThreadsResponse({ id: root.projectId, threads }),
+        ],
+      });
+
+    queryClient.setQueryData(key, navigation([root]));
+    act.mockResolvedValue({ moveId: "mov_1", entry: null });
+    await bound.experimental_inbox.act({
+      request: {
+        action: "archive",
+        threadId: root.id,
+        displayedReceiptIds: [],
+        stopRunning: false,
+      },
+    });
+    const response = deferred<unknown>();
+    undo.mockImplementation(() => response.promise);
+    const undoing = bound.experimental_inbox.undo({ moveId: "mov_1" });
+
+    const sidebarIds = () =>
+      queryClient
+        .getQueryData<SidebarBootstrapResponse>(key)
+        ?.projects[0]?.threads.map(({ id }) => id);
+
+    await vi.waitFor(() => expect(sidebarIds()).toEqual([root.id]));
+    const refresh = deferred<ReturnType<typeof navigation>>();
+
+    const reading = queryClient
+      .fetchQuery({
+        queryKey: key,
+        staleTime: 0,
+        queryFn: () => refresh.promise,
+      })
+      .catch(() => undefined);
+
+    response.resolve({ moveId: "mov_2", entry: inboxEntry(root.id) });
+    await undoing;
+    refresh.resolve(navigation([]));
+    await reading;
+    expect(sidebarIds()).toEqual([root.id]);
+    queryClient.clear();
+  });
+
   it("removes an archived chat from the shared Inbox at once and restores it when the server refuses", async () => {
     const { act, bound, inboxIds, queryClient } = bindWithInbox();
     const response = deferred<unknown>();

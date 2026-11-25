@@ -36,6 +36,7 @@ export interface SendOutboxDrainResult {
 
 interface SendOutboxDrainDeps {
   classify: (error: unknown) => OutboxDeliveryFailure;
+  onDelivered?: (delivered: DeliveredOutboxEntry) => void;
   store: SendOutboxStore;
   transport: SendOutboxTransport;
 }
@@ -214,6 +215,9 @@ export async function drainSendOutbox(
     try {
       const receipt = await deliverEntry(deps, { entry, storeId, threadId });
 
+      const delivery = { entry, receipt };
+      deps.onDelivered?.(delivery);
+
       await deps.store.settle({
         alias:
           entry.action.kind === "new-thread"
@@ -225,7 +229,7 @@ export async function drainSendOutbox(
         submissionId: entry.submissionId,
       });
       pendingCreations.delete(conversation);
-      delivered.push({ entry, receipt });
+      delivered.push(delivery);
     } catch (error) {
       const failure = deps.classify(error);
 
@@ -285,10 +289,6 @@ export function createSendOutboxDrainer(
 
     try {
       const result = await deps.withDrainLock(() => drainSendOutbox(deps));
-
-      for (const delivered of result?.delivered ?? []) {
-        deps.onDelivered(delivered);
-      }
 
       if (result?.outcome === "retry") {
         const delay = RETRY_DELAYS_MS[retryAttempt];
