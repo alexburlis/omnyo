@@ -1313,6 +1313,12 @@ function spawnChildConnection(callbacks: {
   onExit: (info: CodexAppServerExitInfo) => void;
 }): CodexAppServerConnection {
   const env = buildAppServerEnv(callbacks.envVars);
+  const threadStorage = callbacks.envVars?.OMNYO_THREAD_STORAGE;
+
+  if (callbacks.recordThreadId !== null && threadStorage !== undefined) {
+    env.OMNYO_THREAD_ID = callbacks.recordThreadId;
+    env.OMNYO_THREAD_STORAGE = threadStorage;
+  }
 
   const launch = resolveSessionAppServerLaunch(
     appServerLaunchEnv(callbacks.envVars),

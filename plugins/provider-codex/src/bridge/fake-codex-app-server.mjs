@@ -346,7 +346,15 @@ function logProcessStep(step) {
     return;
   }
 
-  appendFileSync(processLogPath, `${step}:${process.pid}:${process.ppid}\n`);
+  const ownership =
+    step === "spawn"
+      ? `ownership:${JSON.stringify([process.env.OMNYO_THREAD_ID, process.env.OMNYO_THREAD_STORAGE])}\n`
+      : "";
+
+  appendFileSync(
+    processLogPath,
+    `${step}:${process.pid}:${process.ppid}\n${ownership}`,
+  );
 }
 
 function releaseWriterLock() {

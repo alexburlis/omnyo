@@ -40,6 +40,7 @@ interface CodexTopologyRuntime {
   exited(): number;
   bridges(): number;
   childPids(): number[];
+  childOwnership(): string[];
   bridgeExits: { expected: boolean }[];
   launch(digest: string): AgentRuntimeBridgeLaunch;
 }
@@ -92,6 +93,7 @@ describe("codex process topology", () => {
     const runtime = withBridgeLaunch(
       createAgentRuntime({
         workspacePath: workspaceDir,
+        threadStorageRootPath: join(workspaceDir, "thread-storage"),
         env: {
           ...record.env,
           OMNYO_CODEX_BRIDGE_APP_SERVER_COMMAND: process.execPath,
@@ -133,6 +135,10 @@ describe("codex process topology", () => {
       events,
       runtime,
       childPids: () => spawnLines().map((line) => Number(line.split(":")[1])),
+      childOwnership: () =>
+        readLog()
+          .filter((line) => line.startsWith("ownership:"))
+          .map((line) => line.slice("ownership:".length)),
       spawned: () => spawnLines().length,
       exited: () => readLog().filter((line) => line.startsWith("exit:")).length,
       bridges: () =>
@@ -215,6 +221,11 @@ describe("codex process topology", () => {
     expect(topology.spawned()).toBe(3);
     expect(topology.bridges()).toBe(1);
     expect(topology.exited()).toBe(0);
+    expect(topology.childOwnership()).toEqual(
+      ["t1", "t2", "t3"].map((id) =>
+        JSON.stringify([id, join(workspaceDir, "thread-storage", id)]),
+      ),
+    );
 
     await runtime.runTurn({
       clientRequestId: "creq_cdxtpgy222",
