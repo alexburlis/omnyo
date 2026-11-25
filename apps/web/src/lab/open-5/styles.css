@@ -58,6 +58,8 @@ body:has(.lab-open-5) {
   --stage-fg: rgb(var(--tone-stage-fg));
   --accent: #ff4f17;
   --accent-text: oklch(0.52 0.17 37);
+  --selection-bg: var(--accent);
+  --selection-fg: #fff;
   --bg: var(--base-bg);
   --fg: var(--base-fg);
   --muted: color-mix(in oklab, var(--fg) 58%, var(--bg));
@@ -100,9 +102,9 @@ body:has(.lab-open-5) {
   color: inherit;
 }
 
-.lab-open-5 ::selection {
-  background: var(--accent);
-  color: #fff;
+::selection {
+  background: var(--selection-bg, revert);
+  color: var(--selection-fg, revert);
 }
 
 .lab-open-5 .particles {

@@ -319,7 +319,7 @@
 .fv-waits .fv-waits-tools > .is-run {
   animation:
     fv-waits-tools-run var(--w-loop) var(--fv-swap) infinite both,
-    fv-waits-shimmer 1.5s linear infinite;
+    fv-waits-shimmer calc(var(--w-loop) * 3) linear infinite;
 }
 
 .fv-waits .fv-waits-tools > .is-b {
@@ -455,12 +455,66 @@
 }
 
 @keyframes fv-waits-shimmer {
-  from {
+  0%,
+  8.3333333333% {
+    background-position: 66.6666666667% 0;
+  }
+
+  12.49999% {
+    background-position: 0.00016% 0;
+  }
+
+  12.5% {
     background-position: 100% 0;
   }
 
-  to {
-    background-position: 0 0;
+  18.3333333333%,
+  30% {
+    background-position: 6.6666666667% 0;
+  }
+
+  30.00001%,
+  41.6666666667% {
+    background-position: 33.3333333333% 0;
+  }
+
+  43.74999% {
+    background-position: 0.00016% 0;
+  }
+
+  43.75% {
+    background-position: 100% 0;
+  }
+
+  49.99999% {
+    background-position: 0.00016% 0;
+  }
+
+  50% {
+    background-position: 100% 0;
+  }
+
+  51.6666666667%,
+  63.3333333333% {
+    background-position: 73.3333333333% 0;
+  }
+
+  63.33334%,
+  75% {
+    background-position: 100% 0;
+  }
+
+  81.24999% {
+    background-position: 0.00016% 0;
+  }
+
+  81.25% {
+    background-position: 100% 0;
+  }
+
+  85%,
+  100% {
+    background-position: 40% 0;
   }
 }
 
