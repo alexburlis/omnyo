@@ -110,6 +110,7 @@ export const providerUsageResultSchema = z.discriminatedUnion("supported", [
     .object({
       supported: z.literal(true),
       usage: providerUsageSchema,
+      profileScoped: z.literal(true).optional(),
     })
     .passthrough(),
 ]);

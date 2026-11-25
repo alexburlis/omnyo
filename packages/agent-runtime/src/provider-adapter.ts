@@ -41,7 +41,7 @@ export type AdapterCommand =
     }
   | { type: "model/list"; cwd?: string; envVars?: Record<string, string> }
   | { type: "provider/health"; cwd?: string }
-  | { type: "provider/usage"; cwd?: string }
+  | { type: "provider/usage"; cwd?: string; envVars?: Record<string, string> }
   | {
       type: "provider/installation/status";
       cwd?: string;

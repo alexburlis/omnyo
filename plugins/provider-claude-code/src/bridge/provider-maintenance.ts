@@ -1,11 +1,13 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { query } from "@anthropic-ai/claude-agent-sdk";
 import {
   type ProviderHealthResult,
   type ProviderInstallationRunResult,
   type ProviderInstallationStatus,
   type ProviderUsageResult,
+  providerUsageWindowSchema,
   experimental_commandOutput as commandOutput,
   experimental_compareVersions as compareVersions,
   experimental_downloadedInstallerCommand as downloadedInstallerCommand,
@@ -30,6 +32,8 @@ const CLAUDE_POWERSHELL_INSTALL_SCRIPT_URL = "https://claude.ai/install.ps1";
 
 const claudeAuthStatusSchema = z.object({
   loggedIn: z.boolean(),
+  authMethod: z.string().nullish().catch(null),
+  apiProvider: z.string().nullish().catch(null),
   email: z.email().nullish().catch(null),
   subscriptionType: z.string().trim().min(1).nullish().catch(null),
   loginExpiresAt: z.iso.datetime().nullish().catch(null),
@@ -282,12 +286,14 @@ function buildClaudeProviderInstallationRun(
 
 async function claudeAuthStatus(
   command: string,
+  env?: NodeJS.ProcessEnv,
 ): Promise<ClaudeAuthStatus | null> {
   const output = await new Promise<string | null>((resolve) => {
     const child = spawnPortableProcess({
       command,
       args: ["auth", "status"],
       stdio: ["ignore", "pipe", "ignore"],
+      ...(env === undefined ? {} : { env }),
     });
 
     const timeout = setTimeout(stop, 10_000);
@@ -394,13 +400,90 @@ export async function getClaudeProviderHealth(): Promise<ProviderHealthResult> {
   return healthResult(claudeLoginExpired(auth) ? "expired" : "ready", known);
 }
 
-export async function getClaudeProviderUsage(): Promise<ProviderUsageResult> {
-  const command = await claudeExecutable();
+async function readSubscriptionUsage(
+  command: string,
+  env: NodeJS.ProcessEnv,
+  email: string,
+) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 7_000);
+
+  const session = query({
+    prompt: (async function* () {
+      if (!controller.signal.aborted)
+        await new Promise<void>((resolve) =>
+          controller.signal.addEventListener("abort", () => resolve(), {
+            once: true,
+          }),
+        );
+    })(),
+    options: {
+      abortController: controller,
+      pathToClaudeCodeExecutable: command,
+      env,
+      persistSession: false,
+      settingSources: [],
+      tools: [],
+      strictMcpConfig: true,
+      mcpServers: {},
+    },
+  });
+
+  try {
+    const [account, report] = await Promise.all([
+      session.accountInfo(),
+      session.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({
+        skipBehaviors: true,
+      }),
+    ]);
+
+    const limits = report.rate_limits;
+
+    if (
+      account.email?.toLowerCase() !== email.toLowerCase() ||
+      !report.rate_limits_available ||
+      limits === null
+    )
+      return null;
+
+    return [
+      {
+        label: "5H",
+        usedPercent: limits.five_hour?.utilization,
+        resetsAt: limits.five_hour?.resets_at ?? null,
+      },
+      {
+        label: "7D",
+        usedPercent: limits.seven_day?.utilization,
+        resetsAt: limits.seven_day?.resets_at ?? null,
+      },
+    ].flatMap((window) => {
+      const parsed = providerUsageWindowSchema.safeParse(window);
+
+      return parsed.success ? [parsed.data] : [];
+    });
+  } finally {
+    clearTimeout(timeout);
+    controller.abort();
+    session.close();
+  }
+}
+
+export async function getClaudeProviderUsage(
+  profileEnv?: Record<string, string>,
+): Promise<ProviderUsageResult> {
+  const profileCommand = profileEnv?.OMNYO_CLAUDE_CODE_EXECUTABLE;
+  const command = profileCommand ?? (await claudeExecutable());
+
+  const env =
+    profileCommand === undefined
+      ? undefined
+      : { ...process.env, ...profileEnv };
 
   if ((await resolveExecutablePath(command)) === null)
     return { supported: true, usage: { status: "not_installed" } };
 
-  const auth = await claudeAuthStatus(command);
+  const auth = await claudeAuthStatus(command, env);
 
   if (auth === null)
     return {
@@ -413,11 +496,37 @@ export async function getClaudeProviderUsage(): Promise<ProviderUsageResult> {
       },
     };
 
-  if (!auth.loggedIn)
+  if (
+    !auth.loggedIn ||
+    (env !== undefined &&
+      (auth.authMethod !== "claude.ai" || auth.apiProvider !== "firstParty"))
+  )
     return { supported: true, usage: { status: "unauthenticated" } };
 
   if (claudeLoginExpired(auth))
     return { supported: true, usage: { status: "expired" } };
+
+  if (env !== undefined) {
+    const windows =
+      auth.email == null
+        ? null
+        : await readSubscriptionUsage(command, env, auth.email).catch(
+            () => null,
+          );
+
+    return {
+      supported: true,
+      profileScoped: true,
+      usage:
+        windows === null
+          ? {
+              status: "error",
+              message: "Claude Code could not read the subscription limits.",
+              ...claudeAccountDetails(auth),
+            }
+          : { status: "ok", windows, ...claudeAccountDetails(auth) },
+    };
+  }
 
   return {
     supported: true,

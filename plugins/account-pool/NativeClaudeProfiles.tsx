@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSdk } from "@omnyo/plugin-sdk/app";
+import type { ProviderUsage } from "@omnyo/plugin-sdk/provider-bridge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -10,8 +11,21 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import { Icon } from "@/components/ui/icon";
+import { AccountListRow, SettingsBadge } from "./AccountListRow.js";
 
-type ProfilesClient = ReturnType<typeof useSdk>["providers"]["claudeProfiles"];
+type ProfilesClient = ReturnType<
+  typeof useSdk
+>["providers"]["claudeProfiles"] & {
+  usage?: (target: {
+    hostId: string;
+    profileId: string;
+  }) => Promise<{ usage: ProviderUsage }>;
+};
 
 type ProfileList = Awaited<ReturnType<ProfilesClient["list"]>>;
 
@@ -21,12 +35,184 @@ type Machine = Awaited<
   ReturnType<ReturnType<typeof useSdk>["hosts"]["list"]>
 >[number];
 
-const STATUS_LABELS: Record<Profile["status"], string> = {
-  ready: "Ready",
-  "sign-in-required": "Sign in required",
-  "wrong-account": "Different account signed in",
-  unavailable: "Unavailable",
-};
+const STATUS_LABELS: Record<Profile["status"], { label: string; dot: string }> =
+  {
+    ready: { label: "Ready", dot: "bg-success" },
+    "sign-in-required": { label: "Sign in required", dot: "bg-warning" },
+    "wrong-account": {
+      label: "Different account signed in",
+      dot: "bg-destructive",
+    },
+    unavailable: { label: "Unavailable", dot: "bg-muted-foreground" },
+  };
+
+function NativeClaudeAccountRow({
+  profile,
+  profiles,
+  hostId,
+  machineName,
+  isDefault,
+  pending,
+  threshold,
+  signIn,
+  run,
+}: {
+  profile: Profile;
+  profiles: ProfilesClient;
+  hostId: string;
+  machineName: string;
+  isDefault: boolean;
+  pending: boolean;
+  threshold: number;
+  signIn: () => Promise<void>;
+  run: (action: () => Promise<void>) => Promise<void>;
+}) {
+  const [usage, setUsage] = useState<ProviderUsage | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const ready = profile.status === "ready";
+  const usageAvailable = typeof profiles.usage === "function";
+  const profileId = profile.id;
+
+  const readUsage = useCallback(
+    async () => (await profiles.usage?.({ hostId, profileId }))?.usage ?? null,
+    [hostId, profileId, profiles],
+  );
+
+  useEffect(() => {
+    setUsage(null);
+
+    if (!ready || !usageAvailable) return;
+    let current = true;
+    void readUsage().then(
+      (next) => {
+        if (current) setUsage(next);
+      },
+      () => {
+        if (current) setUsage(null);
+      },
+    );
+
+    return () => {
+      current = false;
+    };
+  }, [readUsage, ready, usageAvailable]);
+
+  const account =
+    ready && (usage?.status === "ok" || usage?.status === "error")
+      ? usage
+      : null;
+
+  const email = account?.accountEmail ?? null;
+
+  const slots =
+    ready && usage?.status === "ok"
+      ? usage.windows.map((window) => ({
+          key: window.label,
+          label: window.label,
+          utilization: window.usedPercent / 100,
+          status: null,
+        }))
+      : [];
+
+  const atLimit = slots.some((slot) => slot.utilization >= 1);
+
+  return (
+    <AccountListRow
+      name={email ?? profile.label}
+      secondaryName={
+        email !== null &&
+        profile.label !== email &&
+        profile.label !== "Existing Claude sign-in"
+          ? profile.label
+          : null
+      }
+      badges={
+        <SettingsBadge>{account?.planLabel ?? "Subscription"}</SettingsBadge>
+      }
+      status={
+        atLimit
+          ? { label: "At subscription limit", dot: "bg-destructive" }
+          : STATUS_LABELS[profile.status]
+      }
+      statusDetail={
+        <>
+          <span>{machineName}</span>
+          {isDefault ? <span>Default for new chats</span> : null}
+        </>
+      }
+      slots={slots}
+      threshold={threshold}
+      refreshing={refreshing}
+      missingUsage={
+        ready ? (
+          <a
+            href="https://claude.ai/settings/usage"
+            target="_blank"
+            rel="noreferrer"
+            className="relative text-xs text-subtle-foreground hover:text-foreground hover:underline"
+          >
+            View usage in Claude
+          </a>
+        ) : null
+      }
+      actions={
+        <>
+          {ready ? (
+            <DropdownMenuItem
+              disabled={pending}
+              onSelect={() =>
+                void run(async () => {
+                  await profiles.defaultsSet({
+                    hostId,
+                    selection: isDefault
+                      ? { kind: "unprofiled" }
+                      : { kind: "profile", profileId },
+                  });
+                })
+              }
+            >
+              <Icon name="CircleCheck" />
+              {isDefault ? "Use ordinary sign-in by default" : "Make default"}
+            </DropdownMenuItem>
+          ) : null}
+          <DropdownMenuItem
+            disabled={pending || profile.status === "unavailable"}
+            onSelect={() => void run(signIn)}
+          >
+            <Icon name="UserRound" />
+            Sign in again…
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            disabled={pending}
+            onSelect={() =>
+              void run(async () => {
+                await profiles.status({ hostId, profileId });
+              })
+            }
+          >
+            <Icon name="RotateCcw" />
+            Check sign-in status
+          </DropdownMenuItem>
+          {ready && usageAvailable ? (
+            <DropdownMenuItem
+              disabled={refreshing || pending}
+              onSelect={() => {
+                setRefreshing(true);
+                void readUsage()
+                  .then(setUsage, () => setUsage(null))
+                  .finally(() => setRefreshing(false));
+              }}
+            >
+              <Icon name="RotateCcw" />
+              Refresh usage
+            </DropdownMenuItem>
+          ) : null}
+        </>
+      }
+    />
+  );
+}
 
 export type ClaudeSetup = "sign-in" | "adopt";
 
@@ -34,10 +220,12 @@ export function NativeClaudeProfiles({
   setup,
   onCloseSetup,
   showEmpty,
+  threshold,
 }: {
   setup: ClaudeSetup | null;
   onCloseSetup: () => void;
   showEmpty: boolean;
+  threshold: number;
 }) {
   const sdk = useSdk();
   const profiles = useMemo(() => sdk.providers.claudeProfiles, [sdk]);
@@ -160,71 +348,25 @@ export function NativeClaudeProfiles({
           No accounts yet.
         </p>
       ) : null}
-      {data?.profiles.map((profile) => (
-        <div
-          key={profile.id}
-          className="flex flex-wrap items-center justify-between gap-3 border-b border-border py-3"
-        >
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium text-foreground">
-              {profile.label}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {machineName} · {STATUS_LABELS[profile.status]}
-              {data.defaultSelection.kind === "profile" &&
+      <div className="divide-y divide-border">
+        {data?.profiles.map((profile) => (
+          <NativeClaudeAccountRow
+            key={profile.id}
+            profile={profile}
+            profiles={profiles}
+            hostId={hostId}
+            machineName={machineName}
+            isDefault={
+              data.defaultSelection.kind === "profile" &&
               data.defaultSelection.profileId === profile.id
-                ? " · Default for new chats"
-                : ""}
-            </p>
-          </div>
-          <div className="flex gap-2">
-            {profile.status === "ready" ? (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={
-                  pending ||
-                  (data.defaultSelection.kind === "profile" &&
-                    data.defaultSelection.profileId === profile.id)
-                }
-                onClick={() =>
-                  void run(async () => {
-                    await profiles.defaultsSet({
-                      hostId,
-                      selection: { kind: "profile", profileId: profile.id },
-                    });
-                  })
-                }
-              >
-                Make default
-              </Button>
-            ) : (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={
-                  pending || !supported || profile.status === "unavailable"
-                }
-                onClick={() => void run(() => signIn(profile.id))}
-              >
-                Sign in again
-              </Button>
-            )}
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={pending || !supported}
-              onClick={() =>
-                void run(async () => {
-                  await profiles.status({ hostId, profileId: profile.id });
-                })
-              }
-            >
-              Check status
-            </Button>
-          </div>
-        </div>
-      ))}
+            }
+            pending={pending}
+            threshold={threshold}
+            signIn={() => signIn(profile.id)}
+            run={run}
+          />
+        ))}
+      </div>
       {loginProfileId === null ? null : (
         <div
           className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground"
@@ -252,25 +394,6 @@ export function NativeClaudeProfiles({
             }
           >
             Check sign-in
-          </Button>
-        </div>
-      )}
-      {data?.defaultSelection.kind !== "profile" ? null : (
-        <div className="border-b border-border py-2">
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={pending}
-            onClick={() =>
-              void run(async () => {
-                await profiles.defaultsSet({
-                  hostId,
-                  selection: { kind: "unprofiled" },
-                });
-              })
-            }
-          >
-            Use ordinary Claude sign-in by default
           </Button>
         </div>
       )}

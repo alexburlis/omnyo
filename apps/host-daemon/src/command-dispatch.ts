@@ -1299,14 +1299,21 @@ const onlineRpcHandlers: OnlineRpcHandlerMap = {
     withResolvedBridgeLaunch(command, options, (args) =>
       options.providerHealth(args),
     ),
-  "provider.usage": async (command, options) =>
-    options.providerUsage({
-      providerId: command.providerId,
-      bridgeLaunch: await resolveRuntimeBridgeLaunch(
-        command.bridgeLaunch,
+  "provider.usage": async (command, options) => {
+    const [bridgeLaunch, contributedEnv] = await Promise.all([
+      resolveRuntimeBridgeLaunch(command.bridgeLaunch, options),
+      withClaudeProfileEnvironment({
         options,
-      ),
-    }),
+        context: { ...command, contributedEnv: [] },
+      }),
+    ]);
+
+    return options.providerUsage({
+      providerId: command.providerId,
+      bridgeLaunch,
+      ...(contributedEnv.length === 0 ? {} : { contributedEnv }),
+    });
+  },
   "host.discover_repos": readIsolatedHostCommand,
   "provider.installation.status": async (command, options) => {
     const bridgeLaunch = await resolveRuntimeBridgeLaunch(

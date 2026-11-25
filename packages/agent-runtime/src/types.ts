@@ -352,7 +352,7 @@ export interface AgentRuntime {
 
   providerHealth(args: ProviderMaintenanceArgs): Promise<ProviderHealthResult>;
 
-  providerUsage(args: ProviderMaintenanceArgs): Promise<ProviderUsageResult>;
+  providerUsage(args: ListModelsArgs): Promise<ProviderUsageResult>;
 
   providerInstallationStatus(
     args: ProviderInstallationStatusArgs,

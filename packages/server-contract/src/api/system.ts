@@ -21,7 +21,10 @@ import {
   providerInfoSchema,
   usageOnboardingStepSchema,
 } from "@omnyo/domain";
-import { providerHealthSchema as providerHealthSchema } from "@omnyo/provider-bridge-protocol/provider-maintenance";
+import {
+  providerHealthSchema as providerHealthSchema,
+  providerUsageSchema,
+} from "@omnyo/provider-bridge-protocol/provider-maintenance";
 import { hostPlatformSchema } from "@omnyo/host-daemon-contract/local";
 import {
   claudeProfileIdSchema,
@@ -55,6 +58,7 @@ export const systemClaudeProfilesRequestSchema = z.discriminatedUnion(
       })
       .strict(),
     z.object({ action: z.literal("status"), ...claudeProfileTarget }).strict(),
+    z.object({ action: z.literal("usage"), ...claudeProfileTarget }).strict(),
     z
       .object({ action: z.literal("loginStart"), ...claudeProfileTarget })
       .strict(),
@@ -83,6 +87,9 @@ export type SystemClaudeProfilesRequest = z.infer<
 export const systemClaudeProfilesResultSchema = z
   .union([
     claudeProfileManagementResultSchema,
+    z
+      .object({ action: z.literal("usage"), usage: providerUsageSchema })
+      .strict(),
     z
       .object({
         action: z.literal("list"),

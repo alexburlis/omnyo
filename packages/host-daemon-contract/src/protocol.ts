@@ -1,4 +1,6 @@
-export const HOST_DAEMON_PROTOCOL_VERSION = 265 as const;
+export const HOST_DAEMON_PROTOCOL_VERSION = 266 as const;
+
+export const CLAUDE_PROFILE_USAGE_PROTOCOL_VERSION = 266;
 
 export const HOST_ARTIFACT_MAX_BYTES = 256 * 1024 * 1024;
 

@@ -82,6 +82,7 @@ import {
 export {
   HOST_ARTIFACT_MAX_BYTES,
   HOST_DAEMON_PROTOCOL_VERSION,
+  CLAUDE_PROFILE_USAGE_PROTOCOL_VERSION,
 } from "./protocol.js";
 
 export {
@@ -1601,6 +1602,8 @@ const providerUsageCommandSchema = z
     type: z.literal("provider.usage"),
     providerId: z.string().min(1),
     bridgeLaunch: hostDaemonBridgeLaunchSchema,
+    claudeProfileBinding:
+      providerListModelsCommandSchema.shape.claudeProfileBinding,
   })
   .strict();
 

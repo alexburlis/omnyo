@@ -20,6 +20,7 @@ const client = vi.hoisted(() => ({
       list: vi.fn(),
       add: vi.fn(),
       status: vi.fn(),
+      usage: vi.fn(),
       loginStart: vi.fn(),
       loginGet: vi.fn(),
       defaultsSet: vi.fn(),
@@ -27,7 +28,11 @@ const client = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("@omnyo/plugin-sdk/app", () => ({ useSdk: () => client }));
+vi.mock("@omnyo/plugin-sdk/app", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@omnyo/plugin-sdk/app")>()),
+  experimental_Icon: () => null,
+  useSdk: () => client,
+}));
 
 const profile = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -48,6 +53,10 @@ beforeEach(() => {
     profiles: [profile],
     defaultSelection: { kind: "unprofiled" },
   });
+  client.providers.claudeProfiles.usage.mockResolvedValue({
+    action: "usage",
+    usage: { status: "error", accountEmail: null, planLabel: null },
+  });
 });
 
 afterEach(cleanup);
@@ -59,6 +68,7 @@ function renderProfiles(setup: ClaudeSetup | null = null) {
       setup={setup}
       onCloseSetup={onCloseSetup}
       showEmpty
+      threshold={0.98}
     />,
   );
 
@@ -82,8 +92,36 @@ describe("Native Claude accounts", () => {
     renderProfiles();
 
     expect(await screen.findByText("Personal Claude")).toBeTruthy();
-    expect(screen.getByText("Mac · Ready")).toBeTruthy();
+    expect(screen.getByText("Mac")).toBeTruthy();
+    expect(screen.getByText("Ready")).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: "View usage in Claude" }),
+    ).toBeTruthy();
     expect(screen.queryByRole("combobox")).toBeNull();
+  });
+
+  it("shows the verified email, plan and only the usage windows Claude reports", async () => {
+    client.providers.claudeProfiles.usage.mockResolvedValue({
+      action: "usage",
+      usage: {
+        status: "ok",
+        accountEmail: "claude@example.com",
+        planLabel: "Max",
+        windows: [{ label: "7D", usedPercent: 30, resetsAt: null }],
+      },
+    });
+    renderProfiles();
+
+    expect(await screen.findByText("claude@example.com")).toBeTruthy();
+    expect(screen.getByText("Max")).toBeTruthy();
+    expect(screen.getByText("30%")).toBeTruthy();
+    expect(screen.queryByText("5H")).toBeNull();
+    expect(
+      client.providers.claudeProfiles.usage,
+    ).toHaveBeenCalledExactlyOnceWith({
+      hostId: "host-mac",
+      profileId: profile.id,
+    });
   });
   it("disables setup on an unsupported server", async () => {
     client.providers.claudeProfiles.list.mockResolvedValue({
@@ -141,7 +179,12 @@ describe("Native Claude accounts", () => {
     renderProfiles();
     await screen.findByText("Personal Claude");
     expect(client.providers.claudeProfiles.defaultsSet).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Make default" }));
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Personal Claude actions" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Make default" }),
+    );
     await waitFor(() =>
       expect(
         client.providers.claudeProfiles.defaultsSet,

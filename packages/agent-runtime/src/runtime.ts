@@ -200,7 +200,7 @@ const providerThreadStopResultSchema = z
   })
   .passthrough();
 
-function resolveModelListEnvVars(
+function resolveProviderCommandEnvVars(
   entries: readonly AgentRuntimeContributedEnvEntry[],
   serverUrl: string | undefined,
 ): Record<string, string> | null {
@@ -216,7 +216,7 @@ function resolveModelListEnvVars(
 
     if (serverUrl === undefined) {
       throw new Error(
-        `Model list environment ${entry.name} needs OMNYO_SERVER_URL on this machine`,
+        `Provider environment ${entry.name} needs OMNYO_SERVER_URL on this machine`,
       );
     }
 
@@ -2850,7 +2850,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
         providerId,
       });
 
-      const envVars = resolveModelListEnvVars(
+      const envVars = resolveProviderCommandEnvVars(
         contributedEnv,
         options.shellEnv?.OMNYO_SERVER_URL,
       );
@@ -2898,7 +2898,12 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       });
     },
 
-    async providerUsage({ providerId, bridgeLaunch, cwd }) {
+    async providerUsage({
+      providerId,
+      bridgeLaunch,
+      cwd,
+      contributedEnv = [],
+    }) {
       await runtime.ensureProvider({ providerId, bridgeLaunch });
 
       const proc = providerProcesses.requireProviderProcess({
@@ -2906,9 +2911,15 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
         providerId,
       });
 
+      const envVars = resolveProviderCommandEnvVars(
+        contributedEnv,
+        options.shellEnv?.OMNYO_SERVER_URL,
+      );
+
       const plan = proc.adapter.buildCommandPlan({
         type: "provider/usage",
         ...(cwd !== undefined ? { cwd } : {}),
+        ...(envVars === null ? {} : { envVars }),
       });
 
       if (plan.kind === "noop") {

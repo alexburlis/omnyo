@@ -68,6 +68,9 @@ export interface ClaudeProfilesArea {
   status(
     args: ClaudeProfilesArgs<"status">,
   ): Promise<ClaudeProfilesResult<"status">>;
+  usage(
+    args: ClaudeProfilesArgs<"usage">,
+  ): Promise<ClaudeProfilesResult<"usage">>;
   loginStart(
     args: ClaudeProfilesArgs<"loginStart">,
   ): Promise<ClaudeProfileLoginResult>;
@@ -115,6 +118,7 @@ export function createProvidersArea(args: CreateSdkAreaArgs): ProvidersArea {
       list: (input) => resultFor("list", { action: "list", ...input }),
       add: (input) => resultFor("add", { action: "add", ...input }),
       status: (input) => resultFor("status", { action: "status", ...input }),
+      usage: (input) => resultFor("usage", { action: "usage", ...input }),
       loginStart: async (input) => {
         const result = await manage({ action: "loginStart", ...input });
 

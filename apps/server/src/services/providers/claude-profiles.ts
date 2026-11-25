@@ -10,9 +10,10 @@ import type {
   ClaudeProfileBinding,
   ClaudeProfileSelection,
 } from "@omnyo/domain";
-import type {
-  ClaudeProfileManagementRequest,
-  ClaudeProfileManagementResult,
+import {
+  CLAUDE_PROFILE_USAGE_PROTOCOL_VERSION,
+  type ClaudeProfileManagementRequest,
+  type ClaudeProfileManagementResult,
 } from "@omnyo/host-daemon-contract";
 import type {
   SystemClaudeProfilesRequest,
@@ -22,6 +23,7 @@ import { ApiError } from "../../errors.js";
 import type { WorkSessionDeps } from "../../types.js";
 import { callHostOnlineRpc } from "../hosts/online-rpc.js";
 import { resolvePrimaryHostId } from "../hosts/primary-host.js";
+import { resolveBridgeLaunchForProviderId } from "../system/provider-bridge-launch.js";
 
 export const NATIVE_CLAUDE_PROFILE_PROTOCOL = 264;
 
@@ -172,6 +174,39 @@ export async function manageClaudeProfiles(
   }
 
   requireProfileHost(deps, request.hostId);
+
+  if (request.action === "usage") {
+    const { hostId, profileId } = request;
+
+    const sessionId = deps.hub.getDaemonSessionIdForHost(hostId);
+
+    const session =
+      sessionId === null ? null : getSessionById(deps.db, { sessionId });
+
+    const bridgeLaunch = resolveBridgeLaunchForProviderId(deps, "claude-code");
+
+    if (
+      session === null ||
+      session.protocolVersion < CLAUDE_PROFILE_USAGE_PROTOCOL_VERSION ||
+      bridgeLaunch === null
+    )
+      unavailable();
+
+    const result = await callHostOnlineRpc(deps, {
+      hostId,
+      timeoutMs: 30_000,
+      command: {
+        type: "provider.usage",
+        providerId: "claude-code",
+        bridgeLaunch,
+        claudeProfileBinding: { profileId },
+      },
+    });
+
+    if (!result.supported || result.profileScoped !== true) unavailable();
+
+    return { action: "usage", usage: result.usage };
+  }
 
   if (request.action === "defaultsSet") {
     requireProject(deps, request.projectId);

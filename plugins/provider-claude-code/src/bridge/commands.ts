@@ -125,7 +125,9 @@ const claudeCodeCommandSchema = z.discriminatedUnion("method", [
   }),
   z.object({
     method: z.literal("provider/usage"),
-    params: providerMaintenanceParamsSchema,
+    params: providerMaintenanceParamsSchema.extend({
+      envVars: z.record(z.string(), z.string()).optional(),
+    }),
   }),
   z.object({
     method: z.literal("provider/installation/status"),

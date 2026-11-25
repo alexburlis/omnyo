@@ -56,11 +56,9 @@ import { Input } from "@/components/ui/input";
 import {
   DISCLOSURE_CHEVRON_TRANSITION,
   getSortableTransition,
-  LIST_HOVER_TRANSITION,
   usePrefersReducedMotion,
 } from "@/components/ui/motion";
 import { cn } from "@/lib/utils";
-import { ResourceRowDetailChevron } from "@/components/ui/resource-list";
 import { Switch } from "@/components/ui/switch";
 import type {
   AccountSummary,
@@ -76,6 +74,11 @@ import type {
 } from "./src/contracts.js";
 import type { accountPoolRpcContract } from "./src/rpc.js";
 import type { CodexDeviceLoginStart } from "./src/codex-device-login.js";
+import {
+  AccountListRow,
+  SettingsBadge,
+  type QuotaSlot,
+} from "./AccountListRow.js";
 import {
   NativeClaudeProfiles,
   type ClaudeSetup,
@@ -321,14 +324,6 @@ function secondaryEmail(account: AccountSummary): string | null {
     : account.email;
 }
 
-function SettingsBadge({ children }: { children: ReactNode }) {
-  return (
-    <span className="shrink-0 rounded-sm border border-border bg-muted/40 px-1.5 py-0.5 text-2xs leading-none text-subtle-foreground">
-      {children}
-    </span>
-  );
-}
-
 function SettingsSection({
   title,
   description,
@@ -355,13 +350,6 @@ function SettingsSection({
     </section>
   );
 }
-
-type QuotaSlot = {
-  key: string;
-  label: string;
-  utilization: number | null;
-  status: string | null;
-};
 
 function quotaSlots(account: AccountSummary): QuotaSlot[] {
   if (account.provider === "codex") {
@@ -398,49 +386,6 @@ function quotaSlots(account: AccountSummary): QuotaSlot[] {
       status: account.familyWeekly.fable?.status ?? null,
     },
   ];
-}
-
-function quotaToneClass(slot: QuotaSlot, threshold: number): string {
-  if (
-    slot.status?.toLowerCase() === "rejected" ||
-    (slot.utilization !== null && slot.utilization >= 1)
-  )
-    return "text-destructive-text";
-
-  if (slot.utilization !== null && slot.utilization >= threshold - 0.1)
-    return "text-warning-text";
-
-  return slot.utilization === null
-    ? "text-subtle-foreground"
-    : "text-foreground";
-}
-
-function QuotaValue({
-  slot,
-  threshold,
-  refreshing,
-}: {
-  slot: QuotaSlot;
-  threshold: number;
-  refreshing: boolean;
-}) {
-  return (
-    <div
-      className={cn(
-        "w-16 text-left tabular-nums transition-opacity @min-[32rem]/account-row:text-right",
-        refreshing && "opacity-50",
-      )}
-    >
-      <div className="text-2xs uppercase tracking-wide text-subtle-foreground">
-        {slot.label}
-      </div>
-      <div
-        className={cn("text-xs font-semibold", quotaToneClass(slot, threshold))}
-      >
-        {percent(slot.utilization)}
-      </div>
-    </div>
-  );
 }
 
 const restrictAccountDragToVerticalAxis: Modifier = ({ transform }) => ({
@@ -487,140 +432,93 @@ function AccountRow({
   });
 
   return (
-    <div
-      ref={setNodeRef}
+    <AccountListRow
+      name={account.label}
+      secondaryName={email}
+      badges={
+        <>
+          <SettingsBadge>{tier(account)}</SettingsBadge>
+          {account.extraUsage?.status === "allowed" ? (
+            <SettingsBadge>Extra usage available</SettingsBadge>
+          ) : null}
+        </>
+      }
+      status={status}
+      statusDetail={
+        <>
+          {account.lastUsedAt === null ? null : (
+            <span>used {relative(account.lastUsedAt)}</span>
+          )}
+          {refreshing ? <span>refreshing usage…</span> : null}
+        </>
+      }
+      slots={slots}
+      threshold={threshold}
+      refreshing={refreshing}
+      disabled={!account.enabled}
+      onOpen={onOpen}
+      rowRef={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), transition }}
-      className={cn(
-        "@container/account-row flex items-center gap-3 text-sm transition-[box-shadow,opacity] duration-(--motion-duration-fast)",
-        isDragging && "relative z-10 rounded-md bg-card opacity-90 shadow-lift",
-      )}
-    >
-      <Button
-        ref={setActivatorNodeRef}
-        type="button"
-        variant="ghost"
-        size="icon"
-        className="size-8 shrink-0 touch-none text-muted-foreground enabled:cursor-grab enabled:active:cursor-grabbing"
-        disabled={pending || reorderDisabled}
-        aria-label={`Reorder ${account.label}`}
-        {...attributes}
-        {...listeners}
-      >
-        <Icon name="DragDropVertical" aria-hidden="true" />
-      </Button>
-      <div
-        className={cn(
-          "group relative -mx-2 flex min-w-0 flex-1 select-none items-center gap-2 rounded-md px-2 py-2.5 hover:bg-state-hover focus-within:bg-state-hover",
-          LIST_HOVER_TRANSITION,
-          !account.enabled && "opacity-55",
-        )}
-      >
-        <button
+      dragging={isDragging}
+      leading={
+        <Button
+          ref={setActivatorNodeRef}
           type="button"
-          className="grid min-w-0 flex-1 grid-cols-1 items-center gap-y-1.5 rounded-md text-left outline-none after:absolute after:inset-0 after:rounded-md after:content-[''] focus-visible:ring-2 focus-visible:ring-ring @min-[32rem]/account-row:grid-cols-[minmax(0,1fr)_auto] @min-[32rem]/account-row:gap-y-0"
-          aria-label={`Open ${account.label}`}
-          onClick={onOpen}
+          variant="ghost"
+          size="icon"
+          className="size-8 shrink-0 touch-none text-muted-foreground enabled:cursor-grab enabled:active:cursor-grabbing"
+          disabled={pending || reorderDisabled}
+          aria-label={`Reorder ${account.label}`}
+          {...attributes}
+          {...listeners}
         >
-          <div className="min-w-0 flex-1 space-y-1">
-            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-              <span className="truncate text-sm font-medium text-foreground">
-                {account.label}
-              </span>
-              {email === null ? null : (
-                <span className="min-w-0 truncate text-xs text-subtle-foreground">
-                  {email}
-                </span>
-              )}
-              <SettingsBadge>{tier(account)}</SettingsBadge>
-              {account.extraUsage?.status === "allowed" ? (
-                <SettingsBadge>Extra usage available</SettingsBadge>
-              ) : null}
-            </div>
-            <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-subtle-foreground">
-              <span className="inline-flex shrink-0 items-center gap-1.5">
-                <span className={cn("size-1.5 rounded-full", status.dot)} />
-                {status.label}
-              </span>
-              {account.lastUsedAt === null ? null : (
-                <span>used {relative(account.lastUsedAt)}</span>
-              )}
-              {refreshing ? <span>refreshing usage…</span> : null}
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 @min-[32rem]/account-row:flex-nowrap @min-[32rem]/account-row:gap-1">
-            {slots.map((slot) => (
-              <QuotaValue
-                key={slot.key}
-                slot={slot}
-                threshold={threshold}
-                refreshing={refreshing}
-              />
-            ))}
-          </div>
-        </button>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="relative h-7 w-7 shrink-0 data-[state=open]:bg-state-active"
-              aria-label={`${account.label} actions`}
-            >
-              <Icon name="MoreHorizontal" className="size-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-52">
-            <DropdownMenuItem
-              disabled={pending || isLegacyClaudeAccount(account)}
-              onSelect={() => onAction("toggle")}
-            >
-              <Icon name={account.enabled ? "Circle" : "CircleCheck"} />
-              {account.enabled ? "Disable" : "Enable"}
-            </DropdownMenuItem>
+          <Icon name="DragDropVertical" aria-hidden="true" />
+        </Button>
+      }
+      actions={
+        <>
+          <DropdownMenuItem
+            disabled={pending || isLegacyClaudeAccount(account)}
+            onSelect={() => onAction("toggle")}
+          >
+            <Icon name={account.enabled ? "Circle" : "CircleCheck"} />
+            {account.enabled ? "Disable" : "Enable"}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={pending}
+            onSelect={() => onAction("priority")}
+          >
+            <Icon name="ListView" />
+            Set priority…
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={pending || isLegacyClaudeAccount(account)}
+            onSelect={() => onAction("refresh")}
+          >
+            <Icon name="RotateCcw" />
+            Refresh usage
+          </DropdownMenuItem>
+          {account.provider === "codex" && account.kind === "oauth" ? (
             <DropdownMenuItem
               disabled={pending}
-              onSelect={() => onAction("priority")}
+              onSelect={() => onAction("relogin")}
             >
-              <Icon name="ListView" />
-              Set priority…
+              <Icon name="UserRound" />
+              Sign in again…
             </DropdownMenuItem>
-            <DropdownMenuItem
-              disabled={pending || isLegacyClaudeAccount(account)}
-              onSelect={() => onAction("refresh")}
-            >
-              <Icon name="RotateCcw" />
-              Refresh usage
-            </DropdownMenuItem>
-            {account.provider === "codex" && account.kind === "oauth" ? (
-              <DropdownMenuItem
-                disabled={pending}
-                onSelect={() => onAction("relogin")}
-              >
-                <Icon name="UserRound" />
-                Sign in again…
-              </DropdownMenuItem>
-            ) : null}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              variant="destructive"
-              disabled={pending}
-              onSelect={() => onAction("remove")}
-            >
-              <Icon name="Trash2" />
-              Remove
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <button
-          type="button"
-          aria-label={`Open ${account.label} details`}
-          className="relative"
-          onClick={onOpen}
-        >
-          <ResourceRowDetailChevron />
-        </button>
-      </div>
-    </div>
+          ) : null}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            variant="destructive"
+            disabled={pending}
+            onSelect={() => onAction("remove")}
+          >
+            <Icon name="Trash2" />
+            Remove
+          </DropdownMenuItem>
+        </>
+      }
+    />
   );
 }
 
@@ -1418,6 +1316,7 @@ function AccountPoolSettings() {
                   setup={claudeSetup}
                   onCloseSetup={() => setClaudeSetup(null)}
                   showEmpty={status !== null && providerAccounts.length === 0}
+                  threshold={threshold}
                 />
               ) : null}
               <div
