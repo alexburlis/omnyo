@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
 import path from "node:path";
+import { withFileLock } from "@omnyo/config/file-lock";
 import { resolveExecutable } from "@omnyo/process-utils";
 import type {
   ClaudeProfile,
@@ -21,6 +22,9 @@ import {
 const executableVariable = "OMNYO_CLAUDE_CODE_EXECUTABLE";
 
 const verifiedVersion = /^2\.1\.331 \(Claude Code\)\s*$/u;
+
+const duplicateAccountMessage =
+  "This Claude account is already added. Sign in with a different account.";
 
 const alternateEnvironment =
   /^(?:ANTHROPIC_(?:API_KEY|AUTH_TOKEN|BASE_URL|PROFILE|FEDERATION.*|CREDENTIALS.*|API_GATEWAY.*|CUSTOM_HEADERS|BEDROCK_BASE_URL|VERTEX_BASE_URL|FOUNDRY_BASE_URL)|CLAUDE_CODE_(?:OAUTH_TOKEN.*|USE_.*|API_KEY_HELPER.*)|(?:ALL|HTTP|HTTPS)_PROXY)$/iu;
@@ -264,6 +268,62 @@ async function saveProfile(dir: string, profile: StoredProfile): Promise<void> {
   await fs.rename(temporary, path.join(dir, "profile.json"));
 }
 
+async function listStoredProfiles(root: string): Promise<StoredProfile[]> {
+  const entries = await fs
+    .readdir(root, { withFileTypes: true })
+    .catch((error: unknown) => {
+      if (missing(error)) return [];
+      throw error;
+    });
+
+  if (entries.length > 0) await privateDirectory(root);
+
+  const profiles = await Promise.all(
+    entries
+      .filter(
+        (entry) =>
+          entry.isDirectory() &&
+          claudeProfileSchema.shape.id.safeParse(entry.name).success,
+      )
+      .map(({ name }) =>
+        loadProfile(root, name).catch((error: unknown) => {
+          if (missing(error)) return null;
+          throw error;
+        }),
+      ),
+  );
+
+  return profiles.filter((profile) => profile !== null);
+}
+
+function claimProfileIdentity(
+  root: string,
+  profile: StoredProfile,
+  identity: string,
+): Promise<"ready" | "wrong-account" | "duplicate-account"> {
+  return withFileLock({
+    path: path.join(root, ".profile-identities.lock"),
+    timeoutMs: 2_000,
+    work: async () => {
+      const profiles = await listStoredProfiles(root);
+      const current = profiles.find(({ id }) => id === profile.id) ?? profile;
+
+      if (current.fingerprint !== null)
+        return current.fingerprint === identity ? "ready" : "wrong-account";
+
+      if (profiles.some(({ fingerprint }) => fingerprint === identity))
+        return "duplicate-account";
+
+      await saveProfile(profilePath(root, current.id), {
+        ...current,
+        fingerprint: identity,
+      });
+
+      return "ready";
+    },
+  });
+}
+
 function existingSelectionMatches(
   profile: StoredProfile,
   env: NodeJS.ProcessEnv,
@@ -325,6 +385,7 @@ function profileInfo(
 }
 
 async function inspectProfile(
+  root: string,
   profile: StoredProfile,
   config: LaunchConfig,
   cwd?: string,
@@ -358,11 +419,11 @@ async function inspectProfile(
   if (profile.fingerprint !== null && identity !== profile.fingerprint)
     return profileInfo(profile, "wrong-account");
 
-  if (profile.fingerprint === null)
-    await saveProfile(config.profilePath, {
-      ...profile,
-      fingerprint: identity,
-    });
+  if (profile.fingerprint === null) {
+    const status = await claimProfileIdentity(root, profile, identity);
+
+    if (status !== "ready") return profileInfo(profile, status);
+  }
 
   return profileInfo(profile, "ready", native.loginExpiresAt ?? null);
 }
@@ -491,7 +552,7 @@ async function checkedProfile(args: {
 
   if (pending !== undefined) return pending;
 
-  const operation = inspectProfile(stored, config, config.profilePath)
+  const operation = inspectProfile(root, stored, config, config.profilePath)
     .then((profile) => {
       retained.checks.set(index, { key, profile, checkedAt: Date.now() });
 
@@ -530,34 +591,17 @@ export async function manageClaudeProfiles(
   const root = profileRoot(options.dataDir);
 
   if (request.action === "list") {
-    const entries = await fs
-      .readdir(root, { withFileTypes: true })
-      .catch((error: unknown) => {
-        if (missing(error)) return [];
-        throw error;
-      });
-
-    if (entries.length > 0) await privateDirectory(root);
-    const idSchema = claudeProfileSchema.shape.id;
-
     const profiles = await Promise.all(
-      entries
-        .filter(
-          (entry) =>
-            entry.isDirectory() && idSchema.safeParse(entry.name).success,
-        )
-        .map(async ({ name }) => {
-          const profile = await loadProfile(root, name);
+      (await listStoredProfiles(root)).map(async (profile) => {
+        try {
+          assertDirectEnv(env);
+          const config = await launchConfig(root, profile, env, executable);
 
-          try {
-            assertDirectEnv(env);
-            const config = await launchConfig(root, profile, env, executable);
-
-            return await checkedProfile({ root, stored: profile, config });
-          } catch {
-            return profileInfo(profile, "unavailable");
-          }
-        }),
+          return await checkedProfile({ root, stored: profile, config });
+        } catch {
+          return profileInfo(profile, "unavailable");
+        }
+      }),
     );
 
     return { action: "list", supported: true, profiles };
@@ -569,7 +613,7 @@ export async function manageClaudeProfiles(
   if (request.action === "add") {
     const id = randomUUID();
     const dir = profilePath(root, id);
-    await privateDirectory(dir, true);
+    await fs.mkdir(dir, { mode: 0o700 });
     const platformDirectory = path.join(dir, "platform");
     await privateDirectory(platformDirectory, true);
 
@@ -605,13 +649,23 @@ export async function manageClaudeProfiles(
           configuration: env.CLAUDE_CONFIG_DIR ?? null,
           effectiveDirectory: native.configDirectory,
         },
-        fingerprint: identity,
       };
+      const status = await claimProfileIdentity(root, profile, identity);
+
+      if (status === "duplicate-account") {
+        await fs.rmdir(platformDirectory);
+        await fs.rmdir(dir);
+        unavailable(duplicateAccountMessage);
+      }
+
+      if (status !== "ready")
+        unavailable("The Claude account changed during setup. Try again.");
+      profile = { ...profile, fingerprint: identity };
     } else {
       await privateDirectory(path.join(dir, "claude"), true);
+      await saveProfile(dir, profile);
     }
 
-    await saveProfile(dir, profile);
     const config = await launchConfig(root, profile, env, executable);
 
     return {
@@ -756,6 +810,9 @@ export async function withClaudeProfileEnvironment(args: {
     unavailable(
       "Claude signed in to a different account. Sign in again with the account this chat uses.",
     );
+
+  if (status.status === "duplicate-account")
+    unavailable(duplicateAccountMessage);
 
   if (status.status !== "ready")
     unavailable("Sign in again to the Claude account this chat uses.");

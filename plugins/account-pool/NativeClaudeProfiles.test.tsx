@@ -250,6 +250,28 @@ describe("Native Claude accounts", () => {
     );
   });
 
+  it("explains a duplicate account without enabling it or fetching usage", async () => {
+    client.providers.claudeProfiles.list.mockResolvedValue({
+      action: "list",
+      supported: true,
+      profiles: [{ ...profile, status: "duplicate-account" }],
+      defaultSelection: { kind: "unprofiled" },
+    });
+    renderProfiles();
+
+    expect(await screen.findByText("Account already added")).toBeTruthy();
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Personal Claude actions" }),
+    );
+    expect(
+      await screen.findByRole("menuitem", {
+        name: "Sign in with a different account…",
+      }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "Make default" })).toBeNull();
+    expect(client.providers.claudeProfiles.usage).not.toHaveBeenCalled();
+  });
+
   it("adopts the sign-in on the selected machine", async () => {
     client.providers.claudeProfiles.add.mockResolvedValue({
       action: "add",

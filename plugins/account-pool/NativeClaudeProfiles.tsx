@@ -39,6 +39,7 @@ const STATUS_LABELS: Record<Profile["status"], { label: string; dot: string }> =
   {
     ready: { label: "Ready", dot: "bg-success" },
     "sign-in-required": { label: "Sign in required", dot: "bg-warning" },
+    "duplicate-account": { label: "Account already added", dot: "bg-warning" },
     "wrong-account": {
       label: "Different account signed in",
       dot: "bg-destructive",
@@ -183,7 +184,9 @@ function NativeClaudeAccountRow({
             onSelect={() => void run(signIn)}
           >
             <Icon name="UserRound" />
-            Sign in again…
+            {profile.status === "duplicate-account"
+              ? "Sign in with a different account…"
+              : "Sign in again…"}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem

@@ -9,6 +9,7 @@ export const claudeProfileSchema = z
     status: z.enum([
       "ready",
       "sign-in-required",
+      "duplicate-account",
       "wrong-account",
       "unavailable",
     ]),
