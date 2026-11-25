@@ -180,30 +180,9 @@ function NativeClaudeAccountRow({
               }
             >
               <Icon name="CircleCheck" />
-              {isDefault ? "Use ordinary sign-in by default" : "Make default"}
+              {isDefault ? "Clear default" : "Make default"}
             </DropdownMenuItem>
           ) : null}
-          <DropdownMenuItem
-            disabled={pending || profile.status === "unavailable"}
-            onSelect={() => void run(signIn)}
-          >
-            <Icon name="UserRound" />
-            {profile.status === "duplicate-account"
-              ? "Sign in with a different account…"
-              : "Sign in again…"}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            disabled={pending}
-            onSelect={() =>
-              void run(async () => {
-                await profiles.status({ hostId, profileId });
-              })
-            }
-          >
-            <Icon name="RotateCcw" />
-            Check sign-in status
-          </DropdownMenuItem>
           {ready && usageAvailable ? (
             <DropdownMenuItem
               disabled={refreshing || pending}
@@ -218,6 +197,26 @@ function NativeClaudeAccountRow({
               Refresh usage
             </DropdownMenuItem>
           ) : null}
+          <DropdownMenuItem
+            disabled={pending || profile.status === "unavailable"}
+            onSelect={() => void run(signIn)}
+          >
+            <Icon name="UserRound" />
+            {profile.status === "duplicate-account"
+              ? "Sign in with a different account…"
+              : "Sign in again…"}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={pending}
+            onSelect={() =>
+              void run(async () => {
+                await profiles.status({ hostId, profileId });
+              })
+            }
+          >
+            <Icon name="RotateCcw" />
+            Check sign-in status
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
             variant="destructive"

@@ -332,6 +332,15 @@ describe("Native Claude accounts", () => {
     fireEvent.pointerDown(
       await screen.findByRole("button", { name: "Personal Claude actions" }),
     );
+    expect(
+      (await screen.findAllByRole("menuitem")).map((item) => item.textContent),
+    ).toEqual([
+      "Make default",
+      "Refresh usage",
+      "Sign in again…",
+      "Check sign-in status",
+      "Remove",
+    ]);
     fireEvent.click(await screen.findByRole("menuitem", { name: "Remove" }));
     await screen.findByRole("dialog", { name: "Remove Personal Claude?" });
     expect(client.providers.claudeProfiles.remove).not.toHaveBeenCalled();
