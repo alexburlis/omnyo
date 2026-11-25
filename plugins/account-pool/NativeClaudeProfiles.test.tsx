@@ -175,6 +175,61 @@ describe("Native Claude accounts", () => {
     expect(close).toHaveBeenCalledOnce();
   });
 
+  it("shows the new account details after browser sign-in finishes", async () => {
+    const unsignedProfile = { ...profile, status: "sign-in-required" };
+    client.providers.claudeProfiles.list.mockResolvedValue({
+      action: "list",
+      supported: true,
+      profiles: [unsignedProfile],
+      defaultSelection: { kind: "unprofiled" },
+    });
+    client.providers.claudeProfiles.add.mockResolvedValue({
+      action: "add",
+      profile: unsignedProfile,
+    });
+    client.providers.claudeProfiles.loginStart.mockResolvedValue({
+      action: "loginStart",
+      profile: unsignedProfile,
+      loginState: "running",
+    });
+    client.providers.claudeProfiles.loginGet
+      .mockResolvedValueOnce({
+        action: "loginGet",
+        profile: unsignedProfile,
+        loginState: "running",
+      })
+      .mockResolvedValue({
+        action: "loginGet",
+        profile,
+        loginState: "finished",
+      });
+    client.providers.claudeProfiles.usage.mockResolvedValue({
+      action: "usage",
+      usage: {
+        status: "ok",
+        accountEmail: "new@example.com",
+        planLabel: "Max",
+        windows: [{ label: "7D", usedPercent: 30, resetsAt: null }],
+      },
+    });
+
+    renderProfiles("sign-in");
+    const submit = screen.getByRole("button", { name: "Sign in" });
+    await waitFor(() => expect(submit.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(submit);
+
+    await screen.findByText("Finish sign-in in the browser on Mac.");
+    expect(client.providers.claudeProfiles.usage).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText("new@example.com", {}, { timeout: 4_000 }),
+    ).toBeTruthy();
+    expect(screen.getByText("Max")).toBeTruthy();
+    expect(screen.getByText("30%")).toBeTruthy();
+    expect(
+      screen.queryByText("Finish sign-in in the browser on Mac."),
+    ).toBeNull();
+  });
+
   it("changes the default only on the explicit action", async () => {
     renderProfiles();
     await screen.findByText("Personal Claude");

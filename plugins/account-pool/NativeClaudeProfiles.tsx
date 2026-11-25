@@ -301,6 +301,59 @@ export function NativeClaudeProfiles({
     };
   }, [hostId, profiles]);
 
+  useEffect(() => {
+    if (loginProfileId === null || !hostId || profiles === undefined || pending)
+      return;
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const check = async () => {
+      try {
+        const result = await profiles.loginGet({
+          hostId,
+          profileId: loginProfileId,
+        });
+
+        if (cancelled) return;
+
+        if (result.loginState === "running") {
+          timer = setTimeout(check, 1_000);
+
+          return;
+        }
+
+        setData((current) =>
+          current === null
+            ? null
+            : {
+                ...current,
+                profiles: current.profiles.map((profile) =>
+                  profile.id === result.profile.id ? result.profile : profile,
+                ),
+              },
+        );
+        setLoginProfileId(null);
+
+        if (result.loginState === "failed")
+          setError("Claude sign-in did not finish. Try signing in again.");
+      } catch {
+        if (cancelled) return;
+        setLoginProfileId(null);
+        setError(
+          "Couldn’t check Claude sign-in. Reopen Account Pooler to check again.",
+        );
+      }
+    };
+
+    timer = setTimeout(check, 1_000);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [hostId, loginProfileId, pending, profiles]);
+
   const run = async (action: () => Promise<void>) => {
     setPending(true);
     setError(null);
@@ -374,34 +427,9 @@ export function NativeClaudeProfiles({
         ))}
       </div>
       {loginProfileId === null ? null : (
-        <div
-          className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground"
-          role="status"
-        >
-          <span>Finish sign-in in the browser on {machineName}.</span>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={pending}
-            onClick={() =>
-              void run(async () => {
-                const result = await profiles.loginGet({
-                  hostId,
-                  profileId: loginProfileId,
-                });
-
-                if (result.loginState !== "running") setLoginProfileId(null);
-
-                if (result.loginState === "failed")
-                  throw new Error(
-                    "Claude sign-in did not finish. Try signing in again.",
-                  );
-              })
-            }
-          >
-            Check sign-in
-          </Button>
-        </div>
+        <p className="text-xs text-muted-foreground" role="status">
+          Finish sign-in in the browser on {machineName}.
+        </p>
       )}
       <Dialog
         open={setup !== null}
