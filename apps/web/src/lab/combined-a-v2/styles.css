@@ -623,3 +623,15 @@
     opacity: calc(var(--stage-mix) * 0.75 * var(--arrive, 0));
   }
 }
+
+.lab-combined-a-v2 :is(.nav-brand, .nav-act, .theme-toggle) {
+  --nav-bg: initial;
+  --nav-fg: initial;
+}
+
+.lab-combined-a-v2 :is(.story-title, .tile-visual, .terminal-demo, .get-glyph) {
+  --bg: initial;
+  --fg: initial;
+  --muted: initial;
+  --soft: initial;
+}
