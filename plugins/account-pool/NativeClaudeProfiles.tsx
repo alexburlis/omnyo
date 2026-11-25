@@ -31,6 +31,8 @@ type ProfileList = Awaited<ReturnType<ProfilesClient["list"]>>;
 
 type Profile = ProfileList["profiles"][number];
 
+type AccountToRemove = { id: string; name: string };
+
 type Machine = Awaited<
   ReturnType<ReturnType<typeof useSdk>["hosts"]["list"]>
 >[number];
@@ -40,6 +42,7 @@ const STATUS_LABELS: Record<Profile["status"], { label: string; dot: string }> =
     ready: { label: "Ready", dot: "bg-success" },
     "sign-in-required": { label: "Sign in required", dot: "bg-warning" },
     "duplicate-account": { label: "Account already added", dot: "bg-warning" },
+    removed: { label: "Removed", dot: "bg-muted-foreground" },
     "wrong-account": {
       label: "Different account signed in",
       dot: "bg-destructive",
@@ -57,6 +60,7 @@ function NativeClaudeAccountRow({
   threshold,
   reserveReorderSpace,
   signIn,
+  onRemove,
   run,
 }: {
   profile: Profile;
@@ -68,6 +72,7 @@ function NativeClaudeAccountRow({
   threshold: number;
   reserveReorderSpace: boolean;
   signIn: () => Promise<void>;
+  onRemove: (account: AccountToRemove) => void;
   run: (action: () => Promise<void>) => Promise<void>;
 }) {
   const [usage, setUsage] = useState<ProviderUsage | null>(null);
@@ -106,6 +111,7 @@ function NativeClaudeAccountRow({
       : null;
 
   const email = account?.accountEmail ?? null;
+  const name = email ?? profile.label;
 
   const slots =
     ready && usage?.status === "ok"
@@ -122,7 +128,7 @@ function NativeClaudeAccountRow({
   return (
     <AccountListRow
       leading={reserveReorderSpace ? undefined : null}
-      name={email ?? profile.label}
+      name={name}
       secondaryName={
         email !== null &&
         profile.label !== email &&
@@ -214,6 +220,15 @@ function NativeClaudeAccountRow({
               Refresh usage
             </DropdownMenuItem>
           ) : null}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            variant="destructive"
+            disabled={pending}
+            onSelect={() => onRemove({ id: profileId, name })}
+          >
+            <Icon name="Trash2" />
+            Remove
+          </DropdownMenuItem>
         </>
       }
     />
@@ -244,6 +259,10 @@ export function NativeClaudeProfiles({
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [loginProfileId, setLoginProfileId] = useState<string | null>(null);
+
+  const [accountToRemove, setAccountToRemove] =
+    useState<AccountToRemove | null>(null);
+
   const [label, setLabel] = useState("");
 
   useEffect(() => {
@@ -283,6 +302,7 @@ export function NativeClaudeProfiles({
   useEffect(() => {
     setData(null);
     setLoginProfileId(null);
+    setAccountToRemove(null);
     setError(null);
 
     if (!hostId || profiles === undefined) return;
@@ -399,7 +419,7 @@ export function NativeClaudeProfiles({
 
   return (
     <>
-      {setup === null && error !== null ? (
+      {setup === null && accountToRemove === null && error !== null ? (
         <p role="alert" className="text-sm text-destructive-text">
           {error}
         </p>
@@ -425,6 +445,10 @@ export function NativeClaudeProfiles({
             threshold={threshold}
             reserveReorderSpace={hasPooledAccounts || data.profiles.length > 1}
             signIn={() => signIn(profile.id)}
+            onRemove={(target) => {
+              setError(null);
+              setAccountToRemove(target);
+            }}
             run={run}
           />
         ))}
@@ -434,6 +458,61 @@ export function NativeClaudeProfiles({
           Finish sign-in in the browser on {machineName}.
         </p>
       )}
+      <Dialog
+        open={accountToRemove !== null}
+        onOpenChange={(open) => {
+          if (!open && !pending) {
+            setAccountToRemove(null);
+            setError(null);
+          }
+        }}
+      >
+        {accountToRemove === null ? null : (
+          <DialogContent hideCloseButton>
+            <DialogHeader>
+              <DialogTitle>Remove {accountToRemove.name}?</DialogTitle>
+              <DialogDescription>
+                Existing chats keep their Claude sign-in.
+              </DialogDescription>
+            </DialogHeader>
+            {error === null ? null : (
+              <p role="alert" className="text-sm text-destructive-text">
+                {error}
+              </p>
+            )}
+            <DialogFooter>
+              <Button
+                variant="outline"
+                disabled={pending}
+                onClick={() => {
+                  setAccountToRemove(null);
+                  setError(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={pending}
+                onClick={() =>
+                  void run(async () => {
+                    await profiles.remove({
+                      hostId,
+                      profileId: accountToRemove.id,
+                    });
+                    setLoginProfileId((current) =>
+                      current === accountToRemove.id ? null : current,
+                    );
+                    setAccountToRemove(null);
+                  })
+                }
+              >
+                Remove
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        )}
+      </Dialog>
       <Dialog
         open={setup !== null}
         onOpenChange={(open) => {

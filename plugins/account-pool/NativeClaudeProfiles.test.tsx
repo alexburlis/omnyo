@@ -19,6 +19,7 @@ const client = vi.hoisted(() => ({
     claudeProfiles: {
       list: vi.fn(),
       add: vi.fn(),
+      remove: vi.fn(),
       status: vi.fn(),
       usage: vi.fn(),
       loginStart: vi.fn(),
@@ -292,5 +293,52 @@ describe("Native Claude accounts", () => {
       },
     );
     expect(client.providers.claudeProfiles.loginStart).not.toHaveBeenCalled();
+  });
+
+  it("removes only the confirmed account and refreshes the list", async () => {
+    const other = {
+      ...profile,
+      id: "22222222-2222-4222-8222-222222222222",
+      label: "Keep this account",
+    };
+
+    const list = {
+      action: "list",
+      supported: true,
+      defaultSelection: { kind: "unprofiled" },
+    };
+
+    client.providers.claudeProfiles.list.mockResolvedValue({
+      ...list,
+      profiles: [profile, other],
+    });
+    client.providers.claudeProfiles.remove.mockImplementation(async () => {
+      client.providers.claudeProfiles.list.mockResolvedValue({
+        ...list,
+        profiles: [other],
+      });
+
+      return { action: "remove", profileId: profile.id };
+    });
+    renderProfiles();
+
+    fireEvent.pointerDown(
+      await screen.findByRole("button", { name: "Personal Claude actions" }),
+    );
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Remove" }));
+    await screen.findByRole("dialog", { name: "Remove Personal Claude?" });
+    expect(client.providers.claudeProfiles.remove).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+
+    await waitFor(() =>
+      expect(screen.queryByText("Personal Claude")).toBeNull(),
+    );
+    expect(screen.getByText("Keep this account")).toBeTruthy();
+    expect(
+      client.providers.claudeProfiles.remove,
+    ).toHaveBeenCalledExactlyOnceWith({
+      hostId: "host-mac",
+      profileId: profile.id,
+    });
   });
 });

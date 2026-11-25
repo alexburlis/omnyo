@@ -1,8 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { describe, expect, it, vi } from "vitest";
 import {
+  getNativeClaudeProfileDefault,
   getNativeClaudeProfilesOwnerPilot,
+  noopNotifier,
+  openSession,
   setNativeClaudeProfileDefault,
+  setNativeClaudeProfilesOwnerPilot,
+  upsertHost,
 } from "@omnyo/db";
+import {
+  HOST_DAEMON_PROTOCOL_VERSION,
+  HOST_ID_FILE_NAME,
+} from "@omnyo/host-daemon-contract";
 import {
   manageClaudeProfiles,
   requireThreadClaudeProfile,
@@ -10,6 +21,7 @@ import {
 } from "../../src/services/providers/claude-profiles.js";
 import { withTestHarness } from "../helpers/test-app.js";
 import { readJson } from "../helpers/json.js";
+import { createMockHubSocket } from "../helpers/mock-hub-socket.js";
 
 describe("native Claude profile owner pilot", () => {
   it("hides unsupported profiles and refuses enabling without a supported coordinator host", async () => {
@@ -104,6 +116,137 @@ describe("native Claude profile owner pilot", () => {
             selection: { kind: "profile", profileId: binding.profileId },
           }),
         ).rejects.toThrow("Claude Code");
+      },
+    );
+  });
+
+  it("skips a removed default, rejects explicit selection, and clears its settings after removal", async () => {
+    await withTestHarness(
+      { nativeClaudeProfilesOwnerPilotAvailable: true },
+      async (harness) => {
+        const { db, deps } = harness;
+        const host = upsertHost(db, noopNotifier, { name: "owner-mac" });
+        await writeFile(join(deps.config.dataDir, HOST_ID_FILE_NAME), host.id);
+
+        const session = openSession(db, {
+          hostId: host.id,
+          hostName: host.name,
+          instanceId: "owner-daemon",
+          dataDir: deps.config.dataDir,
+          protocolVersion: HOST_DAEMON_PROTOCOL_VERSION,
+          heartbeatIntervalMs: 30_000,
+          leaseTimeoutMs: 90_000,
+        });
+
+        deps.hub.registerDaemon(session.id, host.id, createMockHubSocket());
+        vi.spyOn(deps.hub, "getDaemonPlatformForHost").mockReturnValue(
+          "darwin",
+        );
+        setNativeClaudeProfilesOwnerPilot(db, true);
+
+        const removed = {
+          kind: "profile",
+          profileId: "00000000-0000-4000-8000-000000000001",
+        } as const;
+
+        const remaining = {
+          kind: "profile",
+          profileId: "00000000-0000-4000-8000-000000000002",
+        } as const;
+
+        setNativeClaudeProfileDefault(db, {
+          hostId: host.id,
+          projectId: "project",
+          selection: removed,
+        });
+        setNativeClaudeProfileDefault(db, {
+          hostId: host.id,
+          projectId: null,
+          selection: remaining,
+        });
+
+        vi.spyOn(deps.hub, "requestHostOnlineRpc").mockImplementation(
+          async ({ message }) => {
+            if (message.command.type !== "claude-profile/manage")
+              throw new Error("Unexpected host request");
+            const request = message.command.request;
+
+            if (request.action !== "remove" && request.action !== "status")
+              throw new Error("Unexpected profile request");
+
+            return {
+              type: "host-rpc.response",
+              requestId: message.requestId,
+              commandType: "claude-profile/manage",
+              ok: true,
+              result:
+                request.action === "remove"
+                  ? { action: "remove", profileId: request.profileId }
+                  : {
+                      action: "status",
+                      profile: {
+                        id: request.profileId,
+                        label: "Claude",
+                        status:
+                          request.profileId === removed.profileId
+                            ? "removed"
+                            : "ready",
+                        loginExpiresAt: null,
+                      },
+                    },
+            };
+          },
+        );
+
+        const target = {
+          hostId: host.id,
+          projectId: "project",
+          providerId: "claude-code",
+        };
+
+        await expect(
+          resolveNewThreadClaudeProfile(deps, {
+            ...target,
+            selection: undefined,
+          }),
+        ).resolves.toEqual({ hostId: host.id, profileId: remaining.profileId });
+        await expect(
+          resolveNewThreadClaudeProfile(deps, {
+            ...target,
+            selection: removed,
+          }),
+        ).rejects.toThrow("removed");
+
+        const response = await harness.app.request(
+          "/api/v1/system/providers/claude-profiles",
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              action: "remove",
+              hostId: host.id,
+              profileId: removed.profileId,
+            }),
+          },
+        );
+
+        expect(response.status).toBe(200);
+        expect(await readJson(response)).toEqual({
+          action: "remove",
+          profileId: removed.profileId,
+        });
+        expect(
+          getNativeClaudeProfileDefault(db, {
+            hostId: host.id,
+            projectId: "project",
+          }),
+        ).toBeNull();
+        expect(
+          getNativeClaudeProfileDefault(db, {
+            hostId: host.id,
+            projectId: null,
+          }),
+        ).toEqual(remaining);
       },
     );
   });

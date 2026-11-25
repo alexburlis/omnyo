@@ -58,6 +58,7 @@ export const systemClaudeProfilesRequestSchema = z.discriminatedUnion(
       })
       .strict(),
     z.object({ action: z.literal("status"), ...claudeProfileTarget }).strict(),
+    z.object({ action: z.literal("remove"), ...claudeProfileTarget }).strict(),
     z.object({ action: z.literal("usage"), ...claudeProfileTarget }).strict(),
     z
       .object({ action: z.literal("loginStart"), ...claudeProfileTarget })

@@ -101,6 +101,7 @@ function registerClaudeProfileCommands(
 
   for (const [command, method] of [
     ["status", "status"],
+    ["remove", "remove"],
     ["login", "loginStart"],
     ["login-status", "loginGet"],
     ["login-cancel", "loginCancel"],

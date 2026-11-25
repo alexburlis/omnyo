@@ -811,6 +811,7 @@ const commandHandlers: CommandHandlerMap = {
           contributedEnv: await withClaudeProfileEnvironment({
             context: command,
             options,
+            allowRemoved: true,
           }),
         },
         options,
@@ -824,6 +825,7 @@ const commandHandlers: CommandHandlerMap = {
           contributedEnv: await withClaudeProfileEnvironment({
             context: command,
             options,
+            allowRemoved: true,
           }),
         },
         options,
@@ -838,6 +840,7 @@ const commandHandlers: CommandHandlerMap = {
           contributedEnv: await withClaudeProfileEnvironment({
             context: command.resumeContext,
             options,
+            allowRemoved: true,
           }),
         },
       };
@@ -881,6 +884,7 @@ const commandHandlers: CommandHandlerMap = {
           contributedEnv: await withClaudeProfileEnvironment({
             context: command.resumeContext,
             options,
+            allowRemoved: true,
           }),
         },
       },

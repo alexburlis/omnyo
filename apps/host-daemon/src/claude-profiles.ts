@@ -44,6 +44,7 @@ const profileSchema = claudeProfileSchema
       }),
     ]),
     fingerprint: z.string().nullable(),
+    removed: z.literal(true).optional(),
   });
 
 const nativeStatusSchema = z.object({
@@ -296,31 +297,65 @@ async function listStoredProfiles(root: string): Promise<StoredProfile[]> {
   return profiles.filter((profile) => profile !== null);
 }
 
+function withProfileIdentityLock<T>(
+  root: string,
+  work: () => Promise<T>,
+): Promise<T> {
+  return withFileLock({
+    path: path.join(root, ".profile-identities.lock"),
+    timeoutMs: 2_000,
+    work,
+  });
+}
+
 function claimProfileIdentity(
   root: string,
   profile: StoredProfile,
   identity: string,
-): Promise<"ready" | "wrong-account" | "duplicate-account"> {
-  return withFileLock({
-    path: path.join(root, ".profile-identities.lock"),
-    timeoutMs: 2_000,
-    work: async () => {
-      const profiles = await listStoredProfiles(root);
-      const current = profiles.find(({ id }) => id === profile.id) ?? profile;
+): Promise<"ready" | "wrong-account" | "duplicate-account" | "removed"> {
+  return withProfileIdentityLock(root, async () => {
+    const profiles = await listStoredProfiles(root);
+    const current = profiles.find(({ id }) => id === profile.id) ?? profile;
 
-      if (current.fingerprint !== null)
-        return current.fingerprint === identity ? "ready" : "wrong-account";
+    if (current.removed) return "removed";
 
-      if (profiles.some(({ fingerprint }) => fingerprint === identity))
-        return "duplicate-account";
+    if (current.fingerprint !== null)
+      return current.fingerprint === identity ? "ready" : "wrong-account";
 
-      await saveProfile(profilePath(root, current.id), {
-        ...current,
-        fingerprint: identity,
-      });
+    if (
+      profiles.some((other) => !other.removed && other.fingerprint === identity)
+    )
+      return "duplicate-account";
 
-      return "ready";
-    },
+    await saveProfile(profilePath(root, current.id), {
+      ...current,
+      fingerprint: identity,
+    });
+
+    return "ready";
+  });
+}
+
+async function removeProfile(root: string, profileId: string): Promise<void> {
+  await privateDirectory(root);
+  await withProfileIdentityLock(root, async () => {
+    const profile = await loadProfile(root, profileId);
+
+    if (profile.removed) return;
+
+    await saveProfile(profilePath(root, profileId), {
+      ...profile,
+      removed: true,
+    });
+    const retained = state(root);
+    const active = retained.jobs.get(profileId);
+
+    if (active?.state === "running") {
+      active.state = "idle";
+      active.child.kill("SIGTERM");
+    }
+
+    retained.checks.delete(profileId);
   });
 }
 
@@ -579,6 +614,14 @@ export async function manageClaudeProfiles(
   request: ClaudeProfileManagementRequest,
   options: CommandDispatchOptions,
 ): Promise<ClaudeProfileManagementResult> {
+  const root = profileRoot(options.dataDir);
+
+  if (request.action === "remove") {
+    await removeProfile(root, request.profileId);
+
+    return { action: "remove", profileId: request.profileId };
+  }
+
   const env = inheritedEnvironment(options);
   const executable = await nativeExecutable(env);
 
@@ -588,23 +631,27 @@ export async function manageClaudeProfiles(
     unavailable("Native Claude accounts are unavailable on this device.");
   }
 
-  const root = profileRoot(options.dataDir);
-
   if (request.action === "list") {
     const profiles = await Promise.all(
-      (await listStoredProfiles(root)).map(async (profile) => {
-        try {
-          assertDirectEnv(env);
-          const config = await launchConfig(root, profile, env, executable);
+      (await listStoredProfiles(root))
+        .filter((profile) => !profile.removed)
+        .map(async (profile) => {
+          try {
+            assertDirectEnv(env);
+            const config = await launchConfig(root, profile, env, executable);
 
-          return await checkedProfile({ root, stored: profile, config });
-        } catch {
-          return profileInfo(profile, "unavailable");
-        }
-      }),
+            return await checkedProfile({ root, stored: profile, config });
+          } catch {
+            return profileInfo(profile, "unavailable");
+          }
+        }),
     );
 
-    return { action: "list", supported: true, profiles };
+    return {
+      action: "list",
+      supported: true,
+      profiles: profiles.filter((profile) => profile.status !== "removed"),
+    };
   }
 
   assertDirectEnv(env);
@@ -675,6 +722,14 @@ export async function manageClaudeProfiles(
   }
 
   const stored = await loadProfile(root, request.profileId);
+
+  if (stored.removed) {
+    if (request.action === "status")
+      return { action: "status", profile: profileInfo(stored, "removed") };
+
+    unavailable("This Claude account was removed.");
+  }
+
   const config = await launchConfig(root, stored, env, executable);
   const retained = state(root);
   const active = retained.jobs.get(stored.id);
@@ -690,41 +745,50 @@ export async function manageClaudeProfiles(
     active.child.kill("SIGTERM");
   }
 
-  if (request.action === "loginStart" && active?.state !== "running") {
-    if (
-      active !== undefined &&
-      active.child.exitCode === null &&
-      active.child.signalCode === null
-    )
-      unavailable("Claude sign-in is still closing. Try again in a moment.");
+  if (request.action === "loginStart")
+    await withProfileIdentityLock(root, async () => {
+      const current = await loadProfile(root, stored.id);
 
-    if (
-      stored.fingerprint !== null &&
-      options.runtimeManager.getRuntimeUpdateActivityCount("provider") > 0
-    )
-      unavailable(
-        "Wait for the device's chats to finish before signing in again.",
-      );
+      if (current.removed) unavailable("This Claude account was removed.");
 
-    const child = spawn(config.executable, ["auth", "login", "--claudeai"], {
-      cwd: config.profilePath,
-      env: config.env,
-      stdio: "ignore",
-      timeout: 180_000,
-    });
+      const active = retained.jobs.get(current.id);
 
-    const job: LoginJob = { state: "running", child };
-    retained.jobs.set(stored.id, job);
-    retained.checks.clear();
-    child.once("error", () => {
-      if (job.state === "running") job.state = "failed";
-    });
-    child.once("exit", (code) => {
-      if (job.state === "running")
-        job.state = code === 0 ? "finished" : "failed";
+      if (active?.state === "running") return;
+
+      if (
+        active !== undefined &&
+        active.child.exitCode === null &&
+        active.child.signalCode === null
+      )
+        unavailable("Claude sign-in is still closing. Try again in a moment.");
+
+      if (
+        current.fingerprint !== null &&
+        options.runtimeManager.getRuntimeUpdateActivityCount("provider") > 0
+      )
+        unavailable(
+          "Wait for the device's chats to finish before signing in again.",
+        );
+
+      const child = spawn(config.executable, ["auth", "login", "--claudeai"], {
+        cwd: config.profilePath,
+        env: config.env,
+        stdio: "ignore",
+        timeout: 180_000,
+      });
+
+      const job: LoginJob = { state: "running", child };
+      retained.jobs.set(stored.id, job);
       retained.checks.clear();
+      child.once("error", () => {
+        if (job.state === "running") job.state = "failed";
+      });
+      child.once("exit", (code) => {
+        if (job.state === "running")
+          job.state = code === 0 ? "finished" : "failed";
+        retained.checks.clear();
+      });
     });
-  }
 
   const loginState = retained.jobs.get(stored.id)?.state ?? "idle";
 
@@ -745,6 +809,7 @@ export async function manageClaudeProfiles(
 
 export async function withClaudeProfileEnvironment(args: {
   options: CommandDispatchOptions;
+  allowRemoved?: boolean;
   context: {
     claudeProfileBinding?: { profileId: string };
     providerId: string;
@@ -789,6 +854,9 @@ export async function withClaudeProfileEnvironment(args: {
     root,
     context.claudeProfileBinding.profileId,
   );
+
+  if (stored.removed && (!args.allowRemoved || stored.fingerprint === null))
+    unavailable("This Claude account was removed.");
 
   if (state(root).jobs.get(stored.id)?.state === "running")
     unavailable(

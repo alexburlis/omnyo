@@ -1,4 +1,5 @@
 import {
+  clearNativeClaudeProfileDefaults,
   getNativeClaudeProfileDefault,
   getNativeClaudeProfilesOwnerPilot,
   getProject,
@@ -12,6 +13,7 @@ import type {
 } from "@omnyo/domain";
 import {
   CLAUDE_PROFILE_USAGE_PROTOCOL_VERSION,
+  type ClaudeProfile,
   type ClaudeProfileManagementRequest,
   type ClaudeProfileManagementResult,
 } from "@omnyo/host-daemon-contract";
@@ -73,19 +75,17 @@ function requireProject(
     throw new ApiError(404, "project_not_found", "Project not found");
 }
 
-function defaultSelection(
+function defaultSelections(
   deps: WorkSessionDeps,
   hostId: string,
   projectId: string | undefined,
-): ClaudeProfileSelection {
-  return (
-    (projectId === undefined
+): Array<ClaudeProfileSelection | null> {
+  return [
+    projectId === undefined
       ? null
-      : getNativeClaudeProfileDefault(deps.db, { hostId, projectId })) ??
-    getNativeClaudeProfileDefault(deps.db, { hostId, projectId: null }) ?? {
-      kind: "unprofiled",
-    }
-  );
+      : getNativeClaudeProfileDefault(deps.db, { hostId, projectId }),
+    getNativeClaudeProfileDefault(deps.db, { hostId, projectId: null }),
+  ];
 }
 
 async function manageHost(
@@ -100,11 +100,11 @@ async function manageHost(
   });
 }
 
-async function requireReadyProfile(
+async function readProfileStatus(
   deps: WorkSessionDeps,
   hostId: string,
   profileId: string,
-): Promise<void> {
+): Promise<ClaudeProfile["status"]> {
   const result = await manageHost(deps, hostId, {
     action: "status",
     profileId,
@@ -117,11 +117,22 @@ async function requireReadyProfile(
       "The machine returned an unexpected profile response.",
     );
 
-  if (result.profile.status !== "ready")
+  return result.profile.status;
+}
+
+function requireReadyProfile(status: ClaudeProfile["status"]): void {
+  if (status === "removed")
+    throw new ApiError(
+      409,
+      "claude_profile_removed",
+      "This Claude account was removed.",
+    );
+
+  if (status !== "ready")
     throw new ApiError(
       409,
       "claude_profile_sign_in_required",
-      result.profile.status === "wrong-account"
+      status === "wrong-account"
         ? "Sign in to the account assigned to this Claude profile."
         : "Sign in to this Claude profile before starting the chat.",
     );
@@ -165,11 +176,18 @@ export async function manageClaudeProfiles(
         "The machine returned an unexpected profile response.",
       );
 
+    const selection = result.supported
+      ? defaultSelections(deps, request.hostId, request.projectId).find(
+          (option) =>
+            option?.kind === "unprofiled" ||
+            (option?.kind === "profile" &&
+              result.profiles.some(({ id }) => id === option.profileId)),
+        )
+      : null;
+
     return {
       ...result,
-      defaultSelection: result.supported
-        ? defaultSelection(deps, request.hostId, request.projectId)
-        : { kind: "unprofiled" },
+      defaultSelection: selection ?? { kind: "unprofiled" },
     };
   }
 
@@ -212,10 +230,12 @@ export async function manageClaudeProfiles(
     requireProject(deps, request.projectId);
 
     if (request.selection.kind === "profile")
-      await requireReadyProfile(
-        deps,
-        request.hostId,
-        request.selection.profileId,
+      requireReadyProfile(
+        await readProfileStatus(
+          deps,
+          request.hostId,
+          request.selection.profileId,
+        ),
       );
     setNativeClaudeProfileDefault(deps.db, {
       hostId: request.hostId,
@@ -235,6 +255,21 @@ export async function manageClaudeProfiles(
       "invalid_host_response",
       "The machine returned an unexpected profile response.",
     );
+
+  if (hostRequest.action === "remove" && result.action === "remove") {
+    if (hostRequest.profileId !== result.profileId)
+      throw new ApiError(
+        502,
+        "invalid_host_response",
+        "The machine returned an unexpected profile response.",
+      );
+
+    clearNativeClaudeProfileDefaults(deps.db, {
+      hostId,
+      profileId: result.profileId,
+    });
+    deps.hub.notifySystem(["config-changed"]);
+  }
 
   if (
     hostRequest.action === "add" &&
@@ -279,19 +314,37 @@ export async function resolveNewThreadClaudeProfile(
   )
     return null;
 
-  const selection =
-    args.selection ??
-    (args.hostId === null
-      ? { kind: "unprofiled" }
-      : defaultSelection(deps, args.hostId, args.projectId));
+  if (args.hostId === null) {
+    if (args.selection?.kind === "profile") unavailable();
 
-  if (selection.kind === "unprofiled") return null;
+    return null;
+  }
 
-  if (args.hostId === null) unavailable();
-  requireProfileHost(deps, args.hostId);
-  await requireReadyProfile(deps, args.hostId, selection.profileId);
+  const selections =
+    args.selection === undefined
+      ? defaultSelections(deps, args.hostId, args.projectId)
+      : [args.selection];
 
-  return { profileId: selection.profileId, hostId: args.hostId };
+  for (const selection of selections) {
+    if (selection === null) continue;
+
+    if (selection.kind === "unprofiled") return null;
+    requireProfileHost(deps, args.hostId);
+
+    const status = await readProfileStatus(
+      deps,
+      args.hostId,
+      selection.profileId,
+    );
+
+    if (status === "removed" && args.selection === undefined) continue;
+
+    requireReadyProfile(status);
+
+    return { profileId: selection.profileId, hostId: args.hostId };
+  }
+
+  return null;
 }
 
 export function requireThreadClaudeProfile(

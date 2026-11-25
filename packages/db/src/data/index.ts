@@ -162,6 +162,7 @@ export type {
 } from "./threads.js";
 
 export {
+  clearNativeClaudeProfileDefaults,
   forgetPluginProviders,
   getAiServiceSelections,
   getAppKeybindingOverrides,

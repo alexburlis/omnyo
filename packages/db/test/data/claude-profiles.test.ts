@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  clearNativeClaudeProfileDefaults,
   createProject,
   createThread,
   getThread,
@@ -91,5 +92,56 @@ describe("native Claude bindings", () => {
     expect(
       getNativeClaudeProfileDefault(db, { hostId: "other", projectId: null }),
     ).toBeNull();
+  });
+
+  it("clears only defaults that reference the removed profile on its host", () => {
+    const db = createMigratedConnection();
+    databases.push(db);
+    const profileId = "00000000-0000-4000-8000-000000000001";
+    const selection = { kind: "profile", profileId } as const;
+    setNativeClaudeProfileDefault(db, {
+      hostId: "mac",
+      projectId: null,
+      selection,
+    });
+    setNativeClaudeProfileDefault(db, {
+      hostId: "mac",
+      projectId: "project",
+      selection,
+    });
+    setNativeClaudeProfileDefault(db, {
+      hostId: "other",
+      projectId: "project",
+      selection,
+    });
+    setNativeClaudeProfileDefault(db, {
+      hostId: "mac",
+      projectId: "unprofiled",
+      selection: { kind: "unprofiled" },
+    });
+
+    clearNativeClaudeProfileDefaults(db, { hostId: "mac", profileId });
+
+    expect(
+      getNativeClaudeProfileDefault(db, { hostId: "mac", projectId: null }),
+    ).toBeNull();
+    expect(
+      getNativeClaudeProfileDefault(db, {
+        hostId: "mac",
+        projectId: "project",
+      }),
+    ).toBeNull();
+    expect(
+      getNativeClaudeProfileDefault(db, {
+        hostId: "other",
+        projectId: "project",
+      }),
+    ).toEqual(selection);
+    expect(
+      getNativeClaudeProfileDefault(db, {
+        hostId: "mac",
+        projectId: "unprofiled",
+      }),
+    ).toEqual({ kind: "unprofiled" });
   });
 });

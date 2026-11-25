@@ -6,7 +6,10 @@ import {
   makeDispatchOptions,
   makeTempDir,
 } from "../test/command/dispatch-helpers.js";
-import { manageClaudeProfiles } from "./claude-profiles.js";
+import {
+  manageClaudeProfiles,
+  withClaudeProfileEnvironment,
+} from "./claude-profiles.js";
 import { RuntimeManager } from "./runtime-manager.js";
 
 afterEach(cleanupTempDirs);
@@ -140,6 +143,46 @@ describe.skipIf(process.platform !== "darwin")(
         supported: true,
         profiles: [original],
       });
+    });
+
+    it("removes the account from new selections and keeps existing chat bindings usable", async () => {
+      const { add, existingConfig, options, signIn } = await fixture();
+      await signIn(existingConfig, "person@example.com", "example-org");
+      const original = await add("Original", true);
+      const target = { profileId: original.id };
+
+      const remove = () =>
+        manageClaudeProfiles({ action: "remove", ...target }, options);
+
+      await expect(remove()).resolves.toEqual({ action: "remove", ...target });
+      await expect(remove()).resolves.toEqual({ action: "remove", ...target });
+      await expect(
+        manageClaudeProfiles({ action: "list" }, options),
+      ).resolves.toMatchObject({ profiles: [] });
+      await expect(
+        manageClaudeProfiles({ action: "status", ...target }, options),
+      ).resolves.toMatchObject({ profile: { status: "removed" } });
+
+      const binding = {
+        options,
+        context: {
+          providerId: "claude-code",
+          claudeProfileBinding: target,
+          contributedEnv: [],
+        },
+      };
+
+      await expect(withClaudeProfileEnvironment(binding)).rejects.toThrow(
+        "removed",
+      );
+      await expect(
+        withClaudeProfileEnvironment({ ...binding, allowRemoved: true }),
+      ).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: "ANTHROPIC_CONFIG_DIR" }),
+        ]),
+      );
+      expect(await add("Add again", true)).toMatchObject({ status: "ready" });
     });
   },
 );

@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import {
   aiServiceSelectionSchema,
   AI_TASKS,
@@ -102,6 +102,22 @@ export function setNativeClaudeProfileDefault(
     args.selection,
     Date.now(),
   );
+}
+
+export function clearNativeClaudeProfileDefaults(
+  db: DbConnection,
+  args: { hostId: string; profileId: string },
+): void {
+  const prefix = `nativeClaudeProfileDefault:[${JSON.stringify(args.hostId)},`;
+  const { key, value } = appSettingsValues;
+  db.delete(appSettingsValues)
+    .where(
+      and(
+        sql`substr(${key}, 1, length(${prefix})) = ${prefix}`,
+        sql`case when json_valid(${value}) then json_extract(${value}, '$.kind') = 'profile' and json_extract(${value}, '$.profileId') = ${args.profileId} else 0 end`,
+      ),
+    )
+    .run();
 }
 
 function parseStoredValue(text: string): unknown {

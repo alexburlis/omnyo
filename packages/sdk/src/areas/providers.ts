@@ -65,6 +65,9 @@ function hasAction<Action extends SystemClaudeProfilesRequest["action"]>(
 export interface ClaudeProfilesArea {
   list(args: ClaudeProfilesArgs<"list">): Promise<ClaudeProfilesResult<"list">>;
   add(args: ClaudeProfilesArgs<"add">): Promise<ClaudeProfilesResult<"add">>;
+  remove(
+    args: ClaudeProfilesArgs<"remove">,
+  ): Promise<ClaudeProfilesResult<"remove">>;
   status(
     args: ClaudeProfilesArgs<"status">,
   ): Promise<ClaudeProfilesResult<"status">>;
@@ -117,6 +120,7 @@ export function createProvidersArea(args: CreateSdkAreaArgs): ProvidersArea {
     claudeProfiles: {
       list: (input) => resultFor("list", { action: "list", ...input }),
       add: (input) => resultFor("add", { action: "add", ...input }),
+      remove: (input) => resultFor("remove", { action: "remove", ...input }),
       status: (input) => resultFor("status", { action: "status", ...input }),
       usage: (input) => resultFor("usage", { action: "usage", ...input }),
       loginStart: async (input) => {

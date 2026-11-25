@@ -10,6 +10,7 @@ export const claudeProfileSchema = z
       "ready",
       "sign-in-required",
       "duplicate-account",
+      "removed",
       "wrong-account",
       "unavailable",
     ]),
@@ -37,6 +38,9 @@ export const claudeProfileManagementRequestSchema = z.discriminatedUnion(
       .strict(),
     z
       .object({ action: z.literal("status"), profileId: claudeProfileIdSchema })
+      .strict(),
+    z
+      .object({ action: z.literal("remove"), profileId: claudeProfileIdSchema })
       .strict(),
     z
       .object({
@@ -82,6 +86,9 @@ export const claudeProfileManagementResultSchema = z.discriminatedUnion(
       .strict(),
     z
       .object({ action: z.literal("status"), profile: claudeProfileSchema })
+      .strict(),
+    z
+      .object({ action: z.literal("remove"), profileId: claudeProfileIdSchema })
       .strict(),
     loginResult,
   ],
