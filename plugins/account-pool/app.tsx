@@ -126,7 +126,7 @@ const PROVIDERS: Array<{
     id: "claude",
     title: "Claude",
     description:
-      "Manage Claude sign-ins by machine and Anthropic API keys for the pool.",
+      "Use a Claude subscription or route through an Anthropic API key.",
   },
   {
     id: "codex",
@@ -656,11 +656,11 @@ function AddAccountMenu({
             <span className="block">
               {provider === "claude" ? "Sign in to Claude" : "Sign in to Codex"}
             </span>
-            <span className="block text-xs text-muted-foreground">
-              {provider === "claude"
-                ? "Opens Claude Code sign-in on the selected machine"
-                : "Opens ChatGPT with a device code"}
-            </span>
+            {provider === "codex" ? (
+              <span className="block text-xs text-muted-foreground">
+                Opens ChatGPT with a device code
+              </span>
+            ) : null}
           </span>
         </DropdownMenuItem>
         {provider === "claude" ? (

@@ -14,6 +14,7 @@ import {
 
 const client = vi.hoisted(() => ({
   hosts: { list: vi.fn() },
+  system: { config: vi.fn() },
   providers: {
     claudeProfiles: {
       list: vi.fn(),
@@ -37,6 +38,7 @@ const profile = {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  client.system.config.mockResolvedValue({ primaryHostId: "host-mac" });
   client.hosts.list.mockResolvedValue([
     { id: "host-mac", name: "Mac", status: "connected" },
   ]);
@@ -64,6 +66,25 @@ function renderProfiles(setup: ClaudeSetup | null = null) {
 }
 
 describe("Native Claude accounts", () => {
+  it("lists saved accounts from the server machine without a machine picker", async () => {
+    client.hosts.list.mockResolvedValue([
+      { id: "host-worker", name: "Worker", status: "connected" },
+      { id: "host-mac", name: "Mac", status: "connected" },
+    ]);
+    client.providers.claudeProfiles.list.mockImplementation(
+      async ({ hostId }) => ({
+        action: "list",
+        supported: hostId === "host-mac",
+        profiles: hostId === "host-mac" ? [profile] : [],
+        defaultSelection: { kind: "unprofiled" },
+      }),
+    );
+    renderProfiles();
+
+    expect(await screen.findByText("Personal Claude")).toBeTruthy();
+    expect(screen.getByText("Mac · Ready")).toBeTruthy();
+    expect(screen.queryByRole("combobox")).toBeNull();
+  });
   it("disables setup on an unsupported server", async () => {
     client.providers.claudeProfiles.list.mockResolvedValue({
       action: "list",
@@ -99,7 +120,7 @@ describe("Native Claude accounts", () => {
       ).toBe(false),
     );
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
-    await screen.findByText("Finish sign-in in the browser on this machine.");
+    await screen.findByText("Finish sign-in in the browser on Mac.");
     expect(client.providers.claudeProfiles.add).toHaveBeenCalledExactlyOnceWith(
       { hostId: "host-mac", label: "Claude account 2" },
     );

@@ -432,9 +432,7 @@ describe("Account Pool settings", () => {
       name: "Sign in to Claude",
     });
 
-    expect(
-      within(signIn).getByLabelText("Claude account machine"),
-    ).toBeTruthy();
+    expect(within(signIn).queryByRole("combobox")).toBeNull();
     fireEvent.click(within(signIn).getByRole("button", { name: "Cancel" }));
 
     await openAddMenu(slot, "Claude");
@@ -448,7 +446,7 @@ describe("Account Pool settings", () => {
       name: "Use existing Claude sign-in",
     });
 
-    expect(within(adopt).getByLabelText("Claude account machine")).toBeTruthy();
+    expect(within(adopt).queryByRole("combobox")).toBeNull();
   });
 
   it.each([

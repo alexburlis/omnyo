@@ -51,8 +51,8 @@ purchase, arbitrary authenticated fetch, credential export or account failover
 is available through this interface.
 
 To set up a Claude subscription, select **Claude → Add account** and choose
-**Sign in to Claude** or **Use existing Claude sign-in**. Claude Code uses the
-sign-in on the selected machine. The Claude menu also has **Add API key** for
+**Sign in to Claude** or **Use existing Claude sign-in**. The dialog names the
+server machine where Claude Code signs in. The Claude menu has **Add API key** for
 pooled Anthropic API use. Old Claude subscription pool entries remain visible
 so you can remove them. Use
 `omnyo pool bypass <thread-id>` to resume a thread through its machine's Claude

@@ -10,13 +10,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
 type ProfilesClient = ReturnType<typeof useSdk>["providers"]["claudeProfiles"];
 
@@ -24,7 +17,9 @@ type ProfileList = Awaited<ReturnType<ProfilesClient["list"]>>;
 
 type Profile = ProfileList["profiles"][number];
 
-type Machines = Awaited<ReturnType<ReturnType<typeof useSdk>["hosts"]["list"]>>;
+type Machine = Awaited<
+  ReturnType<ReturnType<typeof useSdk>["hosts"]["list"]>
+>[number];
 
 const STATUS_LABELS: Record<Profile["status"], string> = {
   ready: "Ready",
@@ -46,8 +41,9 @@ export function NativeClaudeProfiles({
 }) {
   const sdk = useSdk();
   const profiles = useMemo(() => sdk.providers.claudeProfiles, [sdk]);
-  const [machines, setMachines] = useState<Machines | null>(null);
-  const [hostId, setHostId] = useState("");
+  const [machine, setMachine] = useState<Machine | null>();
+  const hostId = machine?.status === "connected" ? machine.id : "";
+  const machineName = machine?.name ?? "the server machine";
   const [data, setData] = useState<ProfileList | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -58,14 +54,18 @@ export function NativeClaudeProfiles({
     if (profiles === undefined) return;
     let current = true;
     void Promise.resolve()
-      .then(() => sdk.hosts.list({ type: "persistent" }))
+      .then(() =>
+        Promise.all([
+          sdk.system.config(),
+          sdk.hosts.list({ type: "persistent" }),
+        ]),
+      )
       .then(
-        (next) => {
-          if (!current) return;
-          setMachines(next);
-          setHostId(
-            next.find((machine) => machine.status === "connected")?.id ?? "",
-          );
+        ([config, machines]) => {
+          if (current)
+            setMachine(
+              machines.find((host) => host.id === config.primaryHostId) ?? null,
+            );
         },
         () => {
           if (current)
@@ -142,28 +142,6 @@ export function NativeClaudeProfiles({
   const hasProfiles = (data?.profiles.length ?? 0) > 0;
   const unavailable = data?.supported === false || profiles === undefined;
 
-  const selectMachine = (
-    <Select value={hostId} onValueChange={setHostId} disabled={pending}>
-      <SelectTrigger
-        className="w-44 max-w-full"
-        aria-label="Claude account machine"
-      >
-        <SelectValue placeholder="Choose a machine" />
-      </SelectTrigger>
-      <SelectContent>
-        {machines?.map((machine) => (
-          <SelectItem
-            key={machine.id}
-            value={machine.id}
-            disabled={machine.status !== "connected"}
-          >
-            {machine.name}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-
   function closeSetup() {
     setLabel("");
     setError(null);
@@ -172,12 +150,6 @@ export function NativeClaudeProfiles({
 
   return (
     <>
-      {hasProfiles || (machines?.length ?? 0) > 1 ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border py-2.5">
-          <p className="text-xs text-muted-foreground">Claude Code sign-ins</p>
-          {selectMachine}
-        </div>
-      ) : null}
       {setup === null && error !== null ? (
         <p role="alert" className="text-sm text-destructive-text">
           {error}
@@ -198,7 +170,7 @@ export function NativeClaudeProfiles({
               {profile.label}
             </p>
             <p className="text-xs text-muted-foreground">
-              {STATUS_LABELS[profile.status]}
+              {machineName} · {STATUS_LABELS[profile.status]}
               {data.defaultSelection.kind === "profile" &&
               data.defaultSelection.profileId === profile.id
                 ? " · Default for new chats"
@@ -258,7 +230,7 @@ export function NativeClaudeProfiles({
           className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground"
           role="status"
         >
-          <span>Finish sign-in in the browser on this machine.</span>
+          <span>Finish sign-in in the browser on {machineName}.</span>
           <Button
             size="sm"
             variant="outline"
@@ -318,11 +290,10 @@ export function NativeClaudeProfiles({
               </DialogTitle>
               <DialogDescription>
                 {setup === "adopt"
-                  ? "Add the Claude Code account already signed in on this machine."
-                  : "Claude Code opens sign-in in the browser on this machine."}
+                  ? `Use the Claude Code account already signed in on ${machineName}.`
+                  : `Sign-in opens in the browser on ${machineName}.`}
               </DialogDescription>
             </DialogHeader>
-            {selectMachine}
             {setup === "sign-in" ? (
               <Input
                 value={label}
@@ -337,9 +308,9 @@ export function NativeClaudeProfiles({
               <p className="text-sm text-muted-foreground">
                 Claude account setup is unavailable on this machine.
               </p>
-            ) : hostId === "" && machines !== null && error === null ? (
+            ) : hostId === "" && machine !== undefined && error === null ? (
               <p className="text-sm text-muted-foreground">
-                No connected machines.
+                Connect {machineName} to set up a Claude account.
               </p>
             ) : null}
             {error === null ? null : (

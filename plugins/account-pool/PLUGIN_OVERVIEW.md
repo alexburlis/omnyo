@@ -2,7 +2,7 @@ Keep Claude Code and Codex threads running across limits. Account Pooler routes 
 
 ## What you get
 
-- Open **Add account** in either provider section. For Claude, manage Claude Code sign-ins by machine or add an Anthropic API key to the pool. For Codex, sign in to ChatGPT with a device code or add an OpenAI API key.
+- Open **Add account** in either provider section. For Claude, sign in to Claude Code on the server machine or add an Anthropic API key. For Codex, sign in to ChatGPT with a device code or add an OpenAI API key.
 - Accounts run one after another in priority order, with ties following the order added. New conversations stay on the current fallback even when an earlier account recovers. Existing conversations keep their own account until it becomes unavailable.
 - Reorder accounts in settings with drag handles or Space and arrow keys, or `omnyo pool account reorder <claude|codex> <id>...`.
 - Live account and model-family limits in settings and `omnyo pool status`.
