@@ -247,6 +247,10 @@ const registrationsByPluginId = new Map<string, PluginRegistrationSet>();
 
 const generationByPluginId = new Map<string, number>();
 
+export function getPluginResourceGeneration(pluginId: string): string {
+  return String(generationByPluginId.get(pluginId) ?? 0);
+}
+
 const listeners = new Set<() => void>();
 
 let snapshot: PluginSlotSnapshot = EMPTY_PLUGIN_SLOT_SNAPSHOT;
@@ -493,7 +497,7 @@ function rebuildIfStale(): void {
   if (snapshot !== previous) notifyPending = true;
 }
 
-function flushChange(): void {
+export function flushPluginSlotChanges(): void {
   if (batchFlushTimer !== null) {
     clearTimeout(batchFlushTimer);
     batchFlushTimer = null;
@@ -540,7 +544,7 @@ function emitChange(): void {
   snapshotStale = true;
 
   if (openBatchDepth === 0) {
-    flushChange();
+    flushPluginSlotChanges();
 
     return;
   }
@@ -548,7 +552,7 @@ function emitChange(): void {
   if (batchFlushTimer !== null) return;
   batchFlushTimer = setTimeout(() => {
     batchFlushTimer = null;
-    flushChange();
+    flushPluginSlotChanges();
   }, batchMaxHoldMs);
 }
 
@@ -567,7 +571,7 @@ export function beginPluginSlotBatch(options: {
     closed = true;
     openBatchDepth = Math.max(0, openBatchDepth - 1);
 
-    if (openBatchDepth === 0) flushChange();
+    if (openBatchDepth === 0) flushPluginSlotChanges();
   };
 }
 

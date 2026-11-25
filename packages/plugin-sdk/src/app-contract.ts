@@ -1,4 +1,15 @@
 import type {
+  PluginResourceOptions,
+  PluginResourceState,
+} from "./plugin-resource-contract.js";
+
+export type {
+  PluginResourceKey,
+  PluginResourceOptions,
+  PluginResourceState,
+} from "./plugin-resource-contract.js";
+
+import type {
   ComponentPropsWithRef,
   ComponentPropsWithoutRef,
   ComponentType,
@@ -4351,6 +4362,9 @@ export interface ExperimentalResponsiveDrawerShellProps {
 }
 
 export interface PluginSdkApp {
+  usePluginResource<T>(
+    options: PluginResourceOptions<T>,
+  ): PluginResourceState<T>;
   experimental_useInitialLoadPending(pending: boolean): void;
   experimental_Icon: ComponentType<ExperimentalIconProps>;
   /**

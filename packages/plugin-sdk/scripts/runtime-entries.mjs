@@ -9,9 +9,10 @@ const NODE_ESM_REQUIRE_BANNER = [
   "const __dirname = __pathDirname(__filename);",
 ].join("\n");
 
-const PACKAGE_EXTERNALS = ["zod", "zod/*", "cross-spawn"];
+const PACKAGE_EXTERNALS = ["zod", "zod/*", "cross-spawn", "react", "react/*"];
 
 const EXTRA_EXTERNALS = {
+  "./internal/plugin-resource": ["@tanstack/react-query"],
   "./testing": ["better-sqlite3", "cron-parser", "hono", "hono/*"],
   "./testing/app": [
     "@testing-library/react",

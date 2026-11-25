@@ -1,3 +1,6 @@
+import { QueryClient } from "@tanstack/react-query";
+import { usePluginResourceQuery } from "../internal/plugin-resource.js";
+import type { PluginResourceOptions } from "../app-contract.js";
 import { threadIndicators } from "@omnyo/domain";
 import * as React from "react";
 import {
@@ -298,6 +301,7 @@ interface TestComposerStore {
 }
 
 interface SlotEnv {
+  resourceScope: object;
   threadBootstrapData: Readonly<
     Record<string, import("../app-contract.js").ExperimentalThreadBootstrapData>
   >;
@@ -1418,7 +1422,20 @@ function captureClipboardWrites(
   return writes;
 }
 
+const resourceClients = new WeakMap<object, QueryClient>();
+
 const testPluginSdkApp = {
+  usePluginResource<T>(options: PluginResourceOptions<T>) {
+    const env = useSlotEnv("usePluginResource");
+    let client = resourceClients.get(env.resourceScope);
+
+    if (!client) {
+      client = new QueryClient();
+      resourceClients.set(env.resourceScope, client);
+    }
+
+    return usePluginResourceQuery(options, [env.pluginId], client);
+  },
   experimental_useProjectSidebarItems: function useProjectSidebarItems() {
     return useSlotEnv("experimental_useProjectSidebarItems")
       .projectSidebarItems;
@@ -1891,6 +1908,40 @@ export function installTestPluginRuntime(): void {
   };
 }
 
+/** Install just the real resource hook for standalone component/browser fixtures. */
+export function installTestPluginResourceRuntime(): { dispose(): void } {
+  const host = globalThis as PluginRuntimeHost;
+  const previous = host.__omnyoPluginRuntime;
+  const queryClient = new QueryClient();
+
+  const runtime = {
+    ...previous,
+    react: previous?.react ?? React,
+    pluginSdkApp: {
+      ...testPluginSdkApp,
+      usePluginResource<T>(options: PluginResourceOptions<T>) {
+        return usePluginResourceQuery(
+          options,
+          ["standalone-test"],
+          queryClient,
+        );
+      },
+    },
+  };
+
+  host.__omnyoPluginRuntime = runtime;
+
+  return {
+    dispose() {
+      queryClient.clear();
+
+      if (host.__omnyoPluginRuntime === runtime) {
+        host.__omnyoPluginRuntime = previous;
+      }
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // loadPluginApp — run setup, capture typed slot registrations.
 // ---------------------------------------------------------------------------
@@ -2210,6 +2261,8 @@ export type PluginRpcTestHandlers<Contract extends PluginRpcContract> = {
 export interface RenderSlotOptions<
   Contract extends PluginRpcContract = PluginRpcContract,
 > {
+  /** Pass the same object to slots that share a host session and resource cache. */
+  resourceScope?: object;
   /**
    * Backing handlers for `useRpc().call`: method name → implementation.
    * Inputs and results are JSON-round-tripped like the wire; a method
@@ -3118,6 +3171,7 @@ export function renderSlot<
   };
 
   const env: SlotEnv = {
+    resourceScope: options.resourceScope ?? {},
     threadBootstrapData: options.threadBootstrapData ?? {},
     rpcClient,
     rpcCalls,

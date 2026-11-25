@@ -1,3 +1,4 @@
+import { resetPluginPageSession } from "./plugin-session";
 import type { QueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import {
@@ -80,6 +81,7 @@ async function requestBoot(
 }
 
 function clearLastKnownCaches(): void {
+  resetPluginPageSession();
   clearCachedSidebarBootstrap();
   clearCachedProviderLists();
   clearCachedModelCatalogs();
@@ -98,7 +100,10 @@ export async function startAppBootCache(
     page: readInlinePageBoot(Reflect.get(window, PAGE_BOOT_GLOBAL)),
     store: indexedDbBootSnapshotStore,
     requestBoot,
-    clearLastKnownCaches,
+    clearLastKnownCaches: () => {
+      clearLastKnownCaches();
+      queryClient.removeQueries({ queryKey: ["plugin-resource"] });
+    },
     install: (reads) => {
       installBootReads(reads);
       wsManager.onConnected(() => reads.openRefreshWindow());

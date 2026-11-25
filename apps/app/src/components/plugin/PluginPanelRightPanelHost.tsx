@@ -1,3 +1,4 @@
+import { PluginChromePortalContent } from "@/lib/plugin-portal-retention";
 import { usePublishVisiblePanel } from "@/lib/visible-app-context";
 import {
   getPanelTabHistoryKey,
@@ -31,6 +32,7 @@ import {
 } from "@omnyo/shared-ui/tooltip";
 import { useAppCommandHandler } from "@/components/commands/AppCommandProvider";
 import { PluginIcon, PluginItemIcon } from "@/components/plugin/PluginIcon";
+import { PluginPageLoad } from "./PluginPageLoad";
 import { PluginSlotMount } from "@/components/plugin/PluginSlotMount";
 import { RIGHT_PANEL_TOGGLE_ICON_NAME } from "@/components/secondary-panel/panelToggleControlState";
 import {
@@ -184,17 +186,20 @@ function PluginFixedTabContent({
   const FixedTabComponent = registration.component;
 
   return (
-    <PluginSlotMount
+    <PluginPageLoad
       key={`${pluginId}/${panelId}/${registration.id}/${panelGeneration}`}
-      pluginId={pluginId}
-      slotKind="navPanelFixedTab"
-      slotId={registration.id}
-      instanceId={panelId}
     >
-      <AppFixedTabTargetProvider state={targetState}>
-        <FixedTabComponent subPath={subPath} />
-      </AppFixedTabTargetProvider>
-    </PluginSlotMount>
+      <PluginSlotMount
+        pluginId={pluginId}
+        slotKind="navPanelFixedTab"
+        slotId={registration.id}
+        instanceId={panelId}
+      >
+        <AppFixedTabTargetProvider state={targetState}>
+          <FixedTabComponent subPath={subPath} />
+        </AppFixedTabTargetProvider>
+      </PluginSlotMount>
+    </PluginPageLoad>
   );
 }
 
@@ -1248,25 +1253,27 @@ export function PluginPanelRightPanelHost({
       !isOpen &&
       !isHostedBySplitWorkspace
         ? createPortal(
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className={RIGHT_PANEL_TOGGLE_CLASS}
-                  aria-label={toggleLabel}
-                  aria-pressed={isOpen}
-                  onPointerEnter={preloadThreadSecondaryPanel}
-                  onFocus={preloadThreadSecondaryPanel}
-                  onPointerDown={preloadThreadSecondaryPanel}
-                  onClick={togglePanel}
-                >
-                  <Icon name={toggleIconName} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{toggleLabel}</TooltipContent>
-            </Tooltip>,
+            <PluginChromePortalContent>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className={RIGHT_PANEL_TOGGLE_CLASS}
+                    aria-label={toggleLabel}
+                    aria-pressed={isOpen}
+                    onPointerEnter={preloadThreadSecondaryPanel}
+                    onFocus={preloadThreadSecondaryPanel}
+                    onPointerDown={preloadThreadSecondaryPanel}
+                    onClick={togglePanel}
+                  >
+                    <Icon name={toggleIconName} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{toggleLabel}</TooltipContent>
+              </Tooltip>
+            </PluginChromePortalContent>,
             togglePortalTarget,
           )
         : null}

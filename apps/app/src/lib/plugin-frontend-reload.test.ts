@@ -5,7 +5,7 @@ import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { act } from "@testing-library/react";
+import { act, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, type Mock, vi } from "vitest";
 import {
   installForeignDomMutationGuard,
@@ -354,7 +354,7 @@ describe("reconcilePluginFrontends", () => {
     resetPluginSlotStoreForTest();
   });
 
-  it("publishes CSS before a cold deep-link panel registration can render", async () => {
+  it("mounts a cold deep-link panel behind the loading surface until its CSS is ready", async () => {
     const state = createPluginFrontendReconcileState();
     const preparedDuringRender = vi.fn();
     const deps = makeDeps([candidate("hello", "cold")]);
@@ -409,17 +409,28 @@ describe("reconcilePluginFrontends", () => {
       await reconcilePluginFrontends(state, deps);
     });
 
-    expect(preparedDuringRender).not.toHaveBeenCalled();
+    expect(preparedDuringRender).toHaveBeenCalledWith(
+      "/api/v1/plugins/hello/assets/app.css?h=cold",
+    );
+
+    const surface = container.querySelector(
+      '[data-testid="plugin-panel-body"] > [aria-busy]',
+    );
+
+    const body = surface?.firstElementChild;
+    expect(body?.textContent).toContain("cold panel body:notes/today.md");
+    expect(body && getComputedStyle(body).visibility).toBe("hidden");
+    expect(surface?.getAttribute("aria-busy")).toBe("true");
     act(() => {
       document.head
         .querySelector('link[data-omnyo-plugin-css="hello"]')
         ?.dispatchEvent(new Event("load"));
     });
 
-    expect(preparedDuringRender).toHaveBeenCalledWith(
-      "/api/v1/plugins/hello/assets/app.css?h=cold",
+    await waitFor(() =>
+      expect(surface?.getAttribute("aria-busy")).toBe("false"),
     );
-    expect(container.textContent).toContain("cold panel body:notes/today.md");
+    expect(body && getComputedStyle(body).visibility).toBe("visible");
     expect(
       document.head.querySelector('link[data-omnyo-plugin-css="hello"]'),
     ).not.toBeNull();
@@ -1441,7 +1452,7 @@ describe("applyPluginCss", () => {
 
     releaseSecond();
     await vi.advanceTimersByTimeAsync(1_500);
-    expect(links("hello")).toHaveLength(0);
+    expect(links("hello").map((sheet) => sheet.media)).toEqual(["not all"]);
   });
 
   it("reattaches the sheet when its load completes during the grace and a consumer retains", async () => {
@@ -1467,7 +1478,7 @@ describe("applyPluginCss", () => {
 
     releaseSecond();
     await vi.advanceTimersByTimeAsync(1_500);
-    expect(links("hello")).toHaveLength(0);
+    expect(links("hello").map((sheet) => sheet.media)).toEqual(["not all"]);
   });
 
   it("adopts a changed URL that finishes loading during the grace and reuses it on retain", async () => {
@@ -1497,7 +1508,7 @@ describe("applyPluginCss", () => {
 
     releaseSecond();
     await vi.advanceTimersByTimeAsync(1_500);
-    expect(links("hello")).toHaveLength(0);
+    expect(links("hello").map((sheet) => sheet.media)).toEqual(["not all"]);
   });
 
   it("applies a URL that is republished after a flip-flop discarded its in-flight sheet", async () => {

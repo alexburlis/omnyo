@@ -1,11 +1,25 @@
+import {
+  createPluginPortalRetention,
+  PluginPortalRetentionBoundary,
+} from "./lib/plugin-portal-retention";
+import { usePluginPageSession } from "./lib/plugin-session";
 import { UsageCountNotice } from "./components/settings/UsagePrivacyControls";
 import { PluginUpdateJobsHost } from "./components/plugin/PluginUpdateJobsHost";
 import { LazyThreadDetailView } from "./views/thread-detail/LazyThreadDetailView";
 import { LazyRootComposeView } from "./views/LazyRootComposeView";
 import { useRouteState } from "./hooks/useRouteState";
-import { Suspense, useEffect } from "react";
+import {
+  Activity,
+  Suspense,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useState,
+  type ReactNode,
+} from "react";
 import { parseMessageLink } from "@omnyo/client-core";
 import {
+  UNSAFE_LocationContext as RouterLocationContext,
   matchPath,
   Navigate,
   Route,
@@ -66,6 +80,7 @@ import {
   getAutomationsRoutePath,
   getPluginConfigurationRoutePath,
   getPluginPanelRoutePath,
+  getPluginPanelRoutePluginId,
   SKILLS_PANEL,
   getSettingsRoutePath,
   getSettingsProjectRoutePath,
@@ -334,7 +349,42 @@ export function HashNavigationScroll() {
   return null;
 }
 
+function WorkspaceRoutes({ children }: { children: ReactNode }) {
+  const router = useContext(RouterLocationContext);
+  const { location } = router;
+  const workspace = isWorkspaceRoutePath(location.pathname);
+  const [lastPanel, setLastPanel] = useState<typeof router | null>(null);
+  const [retention] = useState(createPluginPortalRetention);
+  const retainable = workspace || retention.canRetain();
+  useLayoutEffect(() => {
+    if (!workspace && !retainable) setLastPanel(null);
+
+    if (workspace)
+      setLastPanel(
+        getPluginPanelRoutePluginId(location.pathname) ? router : null,
+      );
+  }, [router, location.pathname, workspace, retainable]);
+
+  const panelLocation = workspace ? router : retainable ? lastPanel : null;
+
+  return (
+    <>
+      {panelLocation && (
+        <Activity mode={workspace ? "visible" : "hidden"}>
+          <RouterLocationContext.Provider value={panelLocation}>
+            <PluginPortalRetentionBoundary retention={retention}>
+              <Routes>{children}</Routes>
+            </PluginPortalRetentionBoundary>
+          </RouterLocationContext.Provider>
+        </Activity>
+      )}
+      {!workspace && <Routes>{children}</Routes>}
+    </>
+  );
+}
+
 export function AppRoutes() {
+  const pluginSession = usePluginPageSession();
   const { isThreadView } = useRouteState();
   const isRootComposeView = useLocation().pathname === APP_ROOT_ROUTE_PATH;
   useEffect(() => {
@@ -348,7 +398,7 @@ export function AppRoutes() {
   return (
     <AppLayout>
       <Suspense fallback={null}>
-        <Routes>
+        <WorkspaceRoutes key={pluginSession}>
           <Route
             path="/settings/usage"
             element={
@@ -481,7 +531,7 @@ export function AppRoutes() {
               </Suspense>
             }
           />
-        </Routes>
+        </WorkspaceRoutes>
         <RouteContentPaintSignal />
       </Suspense>
     </AppLayout>

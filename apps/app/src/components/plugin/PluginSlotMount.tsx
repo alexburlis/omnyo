@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { useThreadInitialLoad } from "@/components/thread/ThreadInitialLoad";
 import { Pill } from "@omnyo/shared-ui/pill";
 import { useRouteAnchorDelegate } from "@/components/ui/app-route-anchor";
 import { usePluginCss, usePluginCssReady } from "@/lib/plugin-css";
@@ -239,6 +240,14 @@ export function PluginSlotMount({
   const onRouteAnchorClick = useRouteAnchorDelegate();
   usePluginCss(pluginId);
   const cssReady = usePluginCssReady(pluginId);
+  const initialLoad = useThreadInitialLoad();
+
+  const loadBehindShell =
+    (slotKind === "navPanel" ||
+      slotKind === "settingsSection" ||
+      slotKind === "navPanelFixedTab") &&
+    initialLoad !== null &&
+    !initialLoad.isRevealed();
 
   return (
     <PluginContext.Provider value={pluginId}>
@@ -264,7 +273,7 @@ export function PluginSlotMount({
           className="contents"
           onClick={onRouteAnchorClick}
         >
-          {cssReady ? children : pendingFallback}
+          {cssReady || loadBehindShell ? children : pendingFallback}
         </div>
       </PluginSlotBoundary>
     </PluginContext.Provider>

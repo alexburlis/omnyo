@@ -2,7 +2,10 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@omnyo/shared-ui/button";
 import { EmptyStateBlock } from "@omnyo/shared-ui/empty-state";
 import { Icon } from "@omnyo/shared-ui/icon";
-import { PageShell } from "@/components/ui/page-shell.js";
+import {
+  PluginPageLoad,
+  PluginPanelLoading,
+} from "@/components/plugin/PluginPageLoad";
 import { PluginSlotMount } from "@/components/plugin/PluginSlotMount";
 import { usePluginFrontendsSettled } from "@/lib/plugin-frontend-boot-state";
 import { usePluginSlots } from "@/lib/plugin-slots";
@@ -18,9 +21,6 @@ interface PluginPanelViewProps {
   panelPath: string;
   subPath: string;
 }
-
-const PLUGIN_PANEL_SHELL_CLASS =
-  "pt-[calc(var(--omnyo-app-chrome-row-height)+1rem)] md:pt-[calc(var(--omnyo-app-chrome-row-height)+1.25rem)]";
 
 export function PluginPanelUnavailable({
   onOpenPlugins,
@@ -70,33 +70,34 @@ export function PluginPanelView({
         candidate.path === address.path,
     ) ?? null;
 
-  if (panel === null) {
-    return (
-      <PageShell contentClassName={PLUGIN_PANEL_SHELL_CLASS}>
-        {pluginsSettled ? (
-          <PluginPanelUnavailable
-            onOpenPlugins={() =>
-              navigate(`${getPluginsRoutePath()}?view=installed`)
-            }
-          />
-        ) : null}
-      </PageShell>
-    );
-  }
-
   return (
     <div
       className="-m-4 flex min-h-0 flex-1 flex-col overflow-hidden md:-m-5"
       data-testid="plugin-panel-body"
     >
-      <PluginSlotMount
-        key={`${panel.pluginId}/${panel.id}/${panel.generation}`}
-        pluginId={panel.pluginId}
-        slotKind="navPanel"
-        slotId={panel.id}
-      >
-        <panel.component subPath={graphSubPath ?? subPath} />
-      </PluginSlotMount>
+      {panel === null ? (
+        pluginsSettled ? (
+          <PluginPanelUnavailable
+            onOpenPlugins={() =>
+              navigate(`${getPluginsRoutePath()}?view=installed`)
+            }
+          />
+        ) : (
+          <PluginPanelLoading />
+        )
+      ) : (
+        <PluginPageLoad
+          key={`${panel.pluginId}/${panel.id}/${panel.generation}`}
+        >
+          <PluginSlotMount
+            pluginId={panel.pluginId}
+            slotKind="navPanel"
+            slotId={panel.id}
+          >
+            <panel.component subPath={graphSubPath ?? subPath} />
+          </PluginSlotMount>
+        </PluginPageLoad>
+      )}
     </div>
   );
 }

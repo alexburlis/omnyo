@@ -34,6 +34,7 @@ describe("packed plugin SDK exports", () => {
     ]);
     expect(Object.keys(packageJson.exports)).toEqual([
       ".",
+      "./provider-usage",
       "./provider-bridge",
       "./provider-bridge/testing",
       "./provider-bridge/acp",
@@ -51,6 +52,7 @@ describe("packed plugin SDK exports", () => {
       "./testing",
       "./testing/app",
       "./testing/host",
+      "./internal/plugin-resource",
     ]);
 
     for (const entry of Object.values(packageJson.exports)) {

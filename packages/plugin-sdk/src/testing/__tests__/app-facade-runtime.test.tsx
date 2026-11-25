@@ -8,8 +8,14 @@ import {
   experimental_useQuestionFormHost,
   experimental_useAppContext,
   experimental_useVisibleAppContext,
+  usePluginResource,
 } from "../../app.js";
-import { installTestPluginRuntime, loadPluginApp, renderSlot } from "../app.js";
+import {
+  installTestPluginResourceRuntime,
+  installTestPluginRuntime,
+  loadPluginApp,
+  renderSlot,
+} from "../app.js";
 
 interface RuntimeHost {
   __omnyoPluginRuntime?: unknown;
@@ -38,6 +44,34 @@ function ContextProbe() {
 }
 
 describe("@omnyo/plugin-sdk/app without a runtime at import time", () => {
+  it("supports standalone resource fixtures with the real shared cache", async () => {
+    const runtime = installTestPluginResourceRuntime();
+    let reads = 0;
+
+    function ResourceProbe() {
+      const resource = usePluginResource({
+        key: ["fixture"],
+        load: async () => {
+          reads += 1;
+
+          return "loaded resource";
+        },
+      });
+
+      return <p>{resource.data ?? "pending"}</p>;
+    }
+
+    const first = render(<ResourceProbe />);
+    await screen.findByText("loaded resource");
+    first.unmount();
+    const second = render(<ResourceProbe />);
+    expect(screen.getByText("loaded resource")).toBeTruthy();
+    expect(reads).toBe(1);
+    second.unmount();
+    runtime.dispose();
+    expect(host.__omnyoPluginRuntime).toBe(runtimeAtImport);
+  });
+
   it("loaded before any runtime was installed", () => {
     expect(runtimeAtImport).toBeUndefined();
   });

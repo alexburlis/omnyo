@@ -1,3 +1,6 @@
+import * as reactDom from "react-dom";
+import * as radixDialog from "@radix-ui/react-dialog";
+import { createPluginPortal } from "./plugin-portal-retention";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as react from "react";
 import * as jsxRuntime from "react/jsx-runtime";
@@ -125,6 +128,8 @@ describe("installPluginRuntime", () => {
       "jsxRuntime",
       "pierreDiffs",
       "pierreDiffsReact",
+      "pluginPortalRetentionContext",
+      "pluginPortalVisibility",
       "pluginSdkApp",
       "questionFormHost",
       "radixAlertDialog",
@@ -153,6 +158,28 @@ describe("installPluginRuntime", () => {
     );
     expect((runtime.jsxRuntime as { jsx: unknown }).jsx).toBe(jsxRuntime.jsx);
     expect(runtime.pluginSdkApp).toBe(pluginSdkAppImplementation);
+    const portalRuntime = runtime.reactDom as typeof reactDom;
+    expect(Object.keys(portalRuntime).sort()).toEqual(
+      Object.keys(reactDom).sort(),
+    );
+    expect(portalRuntime.createPortal).toBe(createPluginPortal);
+
+    const defaultPortalRuntime = Reflect.get(
+      portalRuntime,
+      "default",
+    ) as typeof reactDom;
+
+    expect(defaultPortalRuntime.createPortal).toBe(createPluginPortal);
+    expect(defaultPortalRuntime.flushSync).toBe(reactDom.flushSync);
+    expect(portalRuntime.flushSync).toBe(reactDom.flushSync);
+
+    const dialogRuntime = runtime.radixDialog as typeof radixDialog;
+
+    expect(Object.keys(dialogRuntime).sort()).toEqual(
+      Object.keys(radixDialog).sort(),
+    );
+    expect(dialogRuntime.Root).toBe(radixDialog.Root);
+    expect(dialogRuntime.Content).not.toBe(radixDialog.Content);
 
     installPluginRuntime();
     expect((globalThis as RuntimeHost).__omnyoPluginRuntime).toBe(runtime);

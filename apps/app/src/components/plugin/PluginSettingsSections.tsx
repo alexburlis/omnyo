@@ -2,6 +2,7 @@ import {
   usePluginSlots,
   type PluginSettingsSectionSlot,
 } from "@/lib/plugin-slots";
+import { PluginPageLoad } from "./PluginPageLoad";
 import { PluginSlotMount } from "./PluginSlotMount";
 
 export function PluginSettingsSections({ pluginId }: { pluginId: string }) {
@@ -39,33 +40,39 @@ function PluginSettingsSectionList({
 }: {
   sections: readonly PluginSettingsSectionSlot[];
 }) {
-  return (
-    <div className="space-y-6" data-testid="plugin-settings-sections">
-      {sections.map((section) => {
-        const key = `${section.pluginId}/${section.id}/${section.generation}`;
+  const generationKey = JSON.stringify(
+    sections.map(({ pluginId, id, generation }) => [pluginId, id, generation]),
+  );
 
-        return (
-          <div key={key} className="space-y-3">
-            {section.title === undefined ? null : (
-              <h3 className="text-xs font-medium text-foreground">
-                {section.title}
-              </h3>
-            )}
-            {section.description === undefined ? null : (
-              <p className="text-xs leading-snug text-subtle-foreground">
-                {section.description}
-              </p>
-            )}
-            <PluginSlotMount
-              pluginId={section.pluginId}
-              slotKind="settingsSection"
-              slotId={section.id}
-            >
-              <section.component />
-            </PluginSlotMount>
-          </div>
-        );
-      })}
-    </div>
+  return (
+    <PluginPageLoad key={generationKey}>
+      <div className="space-y-6" data-testid="plugin-settings-sections">
+        {sections.map((section) => {
+          const key = `${section.pluginId}/${section.id}/${section.generation}`;
+
+          return (
+            <div key={key} className="space-y-3">
+              {section.title === undefined ? null : (
+                <h3 className="text-xs font-medium text-foreground">
+                  {section.title}
+                </h3>
+              )}
+              {section.description === undefined ? null : (
+                <p className="text-xs leading-snug text-subtle-foreground">
+                  {section.description}
+                </p>
+              )}
+              <PluginSlotMount
+                pluginId={section.pluginId}
+                slotKind="settingsSection"
+                slotId={section.id}
+              >
+                <section.component />
+              </PluginSlotMount>
+            </div>
+          );
+        })}
+      </div>
+    </PluginPageLoad>
   );
 }

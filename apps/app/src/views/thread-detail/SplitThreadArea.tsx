@@ -83,7 +83,9 @@ import {
 } from "./PaneContext";
 import { LazyThreadDetailView as ThreadDetailView } from "./LazyThreadDetailView";
 import { LazyRootComposeView as RootComposeView } from "@/views/LazyRootComposeView";
+import { RetainedPluginPanels } from "@/components/plugin/RetainedPluginPanels";
 import { PluginPanelView } from "@/views/PluginPanelView";
+import { PluginPanelLoading } from "@/components/plugin/PluginPageLoad";
 import {
   AppPageHeader,
   HEADER_ICON_BUTTON_CLASS,
@@ -140,7 +142,7 @@ const LazyPluginPanelRightPanelHost = defineSplit<
     import("@/components/plugin/PluginPanelRightPanelHost").then(
       (module) => module.PluginPanelRightPanelHost,
     ),
-  loading: () => null,
+  loading: PluginPanelLoading,
 });
 
 function PluginPagePanelHost({
@@ -838,17 +840,29 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
   if (layout === null || currentContent === null) return null;
 
   if (!splitWorkspaceActive) {
-    return (
+    const renderContent = (content: PaneContent) => (
       <StandalonePaneContent
-        content={currentContent}
+        content={content}
         paneId={layout.focusedPaneId}
         onRequestClose={
-          currentContent.kind === "new-thread"
+          content.kind === "new-thread"
             ? null
             : () => closePane(layout.focusedPaneId)
         }
         onNavigateInPane={navigateInPane}
       />
+    );
+
+    return (
+      <RetainedPluginPanels
+        key={layout.focusedPaneId}
+        content={currentContent}
+        renderPanel={renderContent}
+      >
+        {currentContent.kind === "plugin-panel"
+          ? null
+          : renderContent(currentContent)}
+      </RetainedPluginPanels>
     );
   }
 
@@ -1271,29 +1285,35 @@ const WorkspacePaneContent = memo(function WorkspacePaneContent({
     ],
   );
 
-  if (content.kind !== "thread") {
-    return (
-      <PaneContext.Provider value={value}>
-        <NonThreadPaneContent
-          content={content}
-          onRequestClose={onRequestClose}
-          beginPaneDrag={beginPaneDrag}
-          isBoundedPane={isBoundedPane}
-          isTopRow={isTopRow}
-          ownsWindowTopLeft={ownsWindowTopLeft}
-        />
-      </PaneContext.Provider>
-    );
-  }
+  const renderNonThread = (item: Exclude<PaneContent, { kind: "thread" }>) => (
+    <NonThreadPaneContent
+      content={item}
+      onRequestClose={onRequestClose}
+      beginPaneDrag={beginPaneDrag}
+      isBoundedPane={isBoundedPane}
+      isTopRow={isTopRow}
+      ownsWindowTopLeft={ownsWindowTopLeft}
+    />
+  );
 
   return (
     <PaneContext.Provider value={value}>
-      <ThreadDetailView
-        surface="pane"
-        projectId={content.projectId}
-        threadId={content.threadId}
-        timelineEnabled={timelineEnabled}
-      />
+      <RetainedPluginPanels
+        key={paneId}
+        content={content}
+        renderPanel={renderNonThread}
+      >
+        {content.kind === "thread" ? (
+          <ThreadDetailView
+            surface="pane"
+            projectId={content.projectId}
+            threadId={content.threadId}
+            timelineEnabled={timelineEnabled}
+          />
+        ) : content.kind === "plugin-panel" ? null : (
+          renderNonThread(content)
+        )}
+      </RetainedPluginPanels>
     </PaneContext.Provider>
   );
 });
@@ -1405,29 +1425,25 @@ function StandalonePaneContent({
       paneId={paneId}
       subPath={content.subPath}
     >
-      {panelChrome ? (
-        <div className="flex h-full min-h-0 flex-col">
-          <PluginPanelPageHeader
-            center={
-              automationBreadcrumbs ? (
-                <AppBreadcrumbs
-                  breadcrumbs={automationBreadcrumbs}
-                  usesDesktopChrome={shouldUseMacosDesktopChrome(desktopInfo)}
-                />
-              ) : (
-                <PluginPanelHeaderCenter chrome={panelChrome} />
-              )
-            }
-            panel={panel}
-            paneId={paneId}
-            subPath={content.subPath}
-            paneActions={paneActions}
-          />
-          <div className="flex min-h-0 flex-1 flex-col p-4 md:p-5">{body}</div>
-        </div>
-      ) : (
-        body
-      )}
+      <div className="flex h-full min-h-0 flex-col">
+        <PluginPanelPageHeader
+          center={
+            automationBreadcrumbs ? (
+              <AppBreadcrumbs
+                breadcrumbs={automationBreadcrumbs}
+                usesDesktopChrome={shouldUseMacosDesktopChrome(desktopInfo)}
+              />
+            ) : panelChrome ? (
+              <PluginPanelHeaderCenter chrome={panelChrome} />
+            ) : null
+          }
+          panel={panel}
+          paneId={paneId}
+          subPath={content.subPath}
+          paneActions={paneActions}
+        />
+        <div className="flex min-h-0 flex-1 flex-col p-4 md:p-5">{body}</div>
+      </div>
     </PluginPagePanelHost>
   );
 }
@@ -1543,7 +1559,7 @@ function NonThreadPaneContent({
         !isBoundedPane && content.kind === "new-thread" && "-m-4 md:-m-5",
       )}
     >
-      {!isBoundedPane && panel ? (
+      {!isBoundedPane && content.kind === "plugin-panel" ? (
         <PluginPanelPageHeader
           center={
             automationBreadcrumbs ? (

@@ -108,6 +108,7 @@ for (const name of Object.keys(outputs))
   if (groupOf(name) !== args[1]) delete outputs[name];
 
 const EXTERNAL = [
+  /^@tanstack\/react-query($|\/)/,
   /^node:/,
   /^@testing-library\/react($|\/)/,
   /^better-sqlite3/,
@@ -117,15 +118,19 @@ const EXTERNAL = [
   /^zod($|\/)/,
 ];
 
-const workspacePackages = new Map(readdirSync(pkgsDir).flatMap((directory) => {
-  const root = path.join(pkgsDir, directory);
-  const manifestPath = path.join(root, "package.json");
+const workspacePackages = new Map(
+  readdirSync(pkgsDir).flatMap((directory) => {
+    const root = path.join(pkgsDir, directory);
+    const manifestPath = path.join(root, "package.json");
 
-  if (!existsSync(manifestPath)) return [];
-  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    if (!existsSync(manifestPath)) return [];
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 
-  return typeof manifest.name === "string" ? [[manifest.name, { root, exports: manifest.exports }]] : [];
-}));
+    return typeof manifest.name === "string"
+      ? [[manifest.name, { root, exports: manifest.exports }]]
+      : [];
+  }),
+);
 
 function resolveWorkspaceSource(id) {
   const start = id.startsWith("@") ? id.indexOf("/") + 1 : 0;
@@ -171,7 +176,8 @@ const emitDeclarations = sharedDeclarationEmit(
 async function bundle(input) {
   const build = await rollup({
     input: declarationId(input),
-    external: (id) => id === packageName || EXTERNAL.some((pattern) => pattern.test(id)),
+    external: (id) =>
+      id === packageName || EXTERNAL.some((pattern) => pattern.test(id)),
     plugins: [emitDeclarations, dts({ respectExternal: false })],
     onwarn(warning) {
       if (warning.code === "CIRCULAR_DEPENDENCY") return;

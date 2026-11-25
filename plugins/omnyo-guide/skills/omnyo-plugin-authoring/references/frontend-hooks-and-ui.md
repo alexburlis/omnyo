@@ -25,6 +25,14 @@ Hooks:
   thread actions; see "An action in every thread menu". The client is stable,
   so it is safe in dependency lists. Test with `renderSlot({ sdk: { threads: { update: async () => ({ … }) }
 } } })` and read `inspection.sdkCalls`.
+- Use `usePluginResource({ key, load, staleTime })` for page reads. Include all
+  account, project, filter and permission inputs in the key. Slots with the same
+  key share one pending read and keep the last result during refresh. Call
+  `invalidate()` after a successful write or a relevant realtime update. Keep
+  mutations in event handlers.
+- Navigation panels, plugin settings sections and fixed tabs use the host's
+  initial loading surface. SDK reads participate automatically. Report initial
+  data fetched outside the SDK with `experimental_useInitialLoadPending`.
 - `useRpc<typeof rpcContract>()` → `{ call(method, input?) }` — exact method,
   input, and result inference from a type-only backend contract import.
   Reach for it when the work needs your server: secrets, host files, or your

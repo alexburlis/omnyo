@@ -1863,3 +1863,7 @@
     }
   }
 }
+
+[data-omnyo-retention-scope][data-omnyo-retention-hidden] {
+  display: none !important;
+}

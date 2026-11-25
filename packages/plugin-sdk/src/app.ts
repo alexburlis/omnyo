@@ -201,6 +201,8 @@ export const experimental_useInitialLoadPending = runtimeFunction(
 
 export const useRpc = runtimeFunction("useRpc");
 
+export const usePluginResource = runtimeFunction("usePluginResource");
+
 export const experimental_useThreadBootstrapData = runtimeFunction(
   "experimental_useThreadBootstrapData",
 );

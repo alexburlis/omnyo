@@ -1,8 +1,4 @@
-import {
-  useInsertionEffect,
-  useLayoutEffect,
-  useSyncExternalStore,
-} from "react";
+import { useLayoutEffect, useSyncExternalStore } from "react";
 import { useThreadInitialLoad } from "@/components/thread/ThreadInitialLoad";
 import {
   dropHostDuplicatePluginRules,
@@ -136,7 +132,8 @@ function activateStylesheet(
 ): void {
   if (linkUrl(record.pendingStylesheet) === url) return;
 
-  if (linkUrl(record.stylesheet) === url) {
+  if (record.stylesheet && linkUrl(record.stylesheet) === url) {
+    record.stylesheet.media = "all";
     record.loadedUrl = url;
     removeLink(record.preload);
     record.preload = null;
@@ -214,6 +211,13 @@ function deactivateAfterFinalRelease(
     record.cleanupTimer = null;
 
     if (record.cleanupEpoch !== cleanupEpoch || record.consumers > 0) return;
+
+    if (record.stylesheet && linkUrl(record.stylesheet) === record.url) {
+      record.stylesheet.media = "not all";
+
+      return;
+    }
+
     deactivateStylesheet(record);
 
     if (record.url === null) {
@@ -287,7 +291,7 @@ export function retainPluginCss(pluginId: string): () => void {
 
 export function usePluginCss(pluginId: string | null): void {
   const initialLoad = useThreadInitialLoad();
-  useInsertionEffect(
+  useLayoutEffect(
     () => (pluginId === null ? undefined : retainPluginCss(pluginId)),
     [pluginId],
   );

@@ -770,7 +770,8 @@ nested-agent Markdown with a plugin component receiving { code, language,
 status, index, message, Original }, mounted once per fence for the whole
 stream; Omnyo's code block is the fallback for a disabled plugin, a language two
 plugins claim, and a fence whose component throws). Hooks:
-useRpc, useRealtime, useRealtimeConnectionState (the shared realtime socket's
+useRpc, usePluginResource (keyed page reads shared across slots, with the
+previous result available during refresh), useRealtime, useRealtimeConnectionState (the shared realtime socket's
 connecting/connected/reconnecting lifecycle; reconcile on later connected
 transitions, not the initial connection), useSettings (secrets excluded),
 experimental_useAppContext,

@@ -1,7 +1,16 @@
+import {
+  PluginPortalRetentionContext,
+  pluginPortalVisibility,
+} from "@omnyo/shared-ui/lib/portal-scope";
+import {
+  createPluginPortal,
+  scopePluginPortalComponents,
+} from "./plugin-portal-retention";
+import { preload } from "react-dom";
 import * as questionFormHost from "@omnyo/shared-ui/question-form-host";
 import * as voiceInputTextarea from "@omnyo/shared-ui/voice-input-textarea";
 import * as react from "react";
-import * as reactDom from "react-dom";
+import reactDomDefault, * as reactDom from "react-dom";
 import * as reactDomClient from "react-dom/client";
 import * as jsxRuntime from "react/jsx-runtime";
 import * as jsxDevRuntime from "react/jsx-dev-runtime";
@@ -64,6 +73,7 @@ import {
 import { pluginSdkAppImplementation } from "./plugin-sdk-app-impl";
 import {
   beginPluginSlotBatch,
+  flushPluginSlotChanges,
   removePluginSlotRegistrations,
   setPluginSlotRegistrations,
   type PluginRegistrationSet,
@@ -204,6 +214,8 @@ export async function loadOneBundle(
 interface OmnyoPluginRuntime {
   react: unknown;
   reactDom: unknown;
+  pluginPortalRetentionContext?: typeof PluginPortalRetentionContext;
+  pluginPortalVisibility?: typeof pluginPortalVisibility;
   reactDomClient: unknown;
   jsxRuntime: unknown;
   jsxDevRuntime: unknown;
@@ -240,23 +252,32 @@ export function installPluginRuntime(): void {
   if (host.__omnyoPluginRuntime !== undefined) return;
   host.__omnyoPluginRuntime = {
     react,
-    reactDom,
+    reactDom: {
+      ...reactDom,
+      default: { ...reactDomDefault, createPortal: createPluginPortal },
+      createPortal: createPluginPortal,
+    },
+    pluginPortalRetentionContext: PluginPortalRetentionContext,
+    pluginPortalVisibility,
     reactDomClient,
     jsxRuntime,
     jsxDevRuntime,
     pluginSdkApp: pluginSdkAppImplementation,
-    radixAlertDialog,
-    radixContextMenu,
-    radixDialog,
-    radixDropdownMenu,
-    radixHoverCard,
-    radixMenubar,
-    radixNavigationMenu,
-    radixPopover,
-    radixSelect,
-    radixTooltip,
+    radixAlertDialog: scopePluginPortalComponents(radixAlertDialog),
+    radixContextMenu: scopePluginPortalComponents(radixContextMenu),
+    radixDialog: scopePluginPortalComponents(radixDialog),
+    radixDropdownMenu: scopePluginPortalComponents(radixDropdownMenu),
+    radixHoverCard: scopePluginPortalComponents(radixHoverCard),
+    radixMenubar: scopePluginPortalComponents(radixMenubar),
+    radixNavigationMenu: scopePluginPortalComponents(radixNavigationMenu),
+    radixPopover: scopePluginPortalComponents(radixPopover),
+    radixSelect: scopePluginPortalComponents(radixSelect),
+    radixTooltip: scopePluginPortalComponents(radixTooltip),
     sonner: { ...sonner, toast: createRecordingToast(sonner.toast) },
-    vaul,
+    vaul: {
+      ...scopePluginPortalComponents(vaul),
+      Drawer: scopePluginPortalComponents(vaul.Drawer),
+    },
     pierreDiffs,
     pierreDiffsReact: createGatedPierreDiffsReact(),
     clsx,
@@ -439,6 +460,8 @@ export interface PluginFrontendReconcileDeps {
   ) => void;
   removeRegistrations: (pluginId: string) => void;
   beginSlotBatch: () => () => void;
+  flushVisibleSlots?: () => void;
+  preloadStylesheet?: (url: string) => void;
   warn: (message: string) => void;
   routePluginId: () => string | null;
   threadBootstrapPluginIds?: () => readonly string[];
@@ -824,6 +847,14 @@ async function reconcileCandidates(
           ? candidate.bundle.jsUrl
           : appendPluginImportRetry(candidate.bundle.jsUrl, retryCount);
 
+      if (
+        candidate.bundle.compatible &&
+        candidate.bundle.cssUrl &&
+        pluginId === deps.routePluginId()
+      ) {
+        deps.preloadStylesheet?.(candidate.bundle.cssUrl);
+      }
+
       const record = await loadOneBundle(
         {
           ...candidate,
@@ -1004,6 +1035,8 @@ async function reconcileCandidates(
       );
       state.records.set(pluginId, record);
       state.appliedHashes.set(pluginId, candidate.bundle.hash);
+
+      if (pluginId === deps.routePluginId()) deps.flushVisibleSlots?.();
       publishDiagnostic(state, deps, {
         pluginId,
         status: "active",
@@ -1153,6 +1186,9 @@ const browserReconcileDeps: PluginFrontendReconcileDeps = {
   fetchCandidates: fetchFrontendCandidates,
   importModule: (url) => import(/* @vite-ignore */ url),
   applyCss: applyPluginCss,
+  preloadStylesheet: (url) =>
+    preload(url, { as: "style", fetchPriority: "high" }),
+  flushVisibleSlots: flushPluginSlotChanges,
   retainCss: retainPluginCss,
   routePluginId: () => getPluginPanelRoutePluginId(window.location.pathname),
   threadBootstrapPluginIds: () =>

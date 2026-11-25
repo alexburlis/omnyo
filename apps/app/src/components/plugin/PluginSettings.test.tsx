@@ -12,6 +12,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { InstalledPlugin } from "@omnyo/server-contract";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import { systemMachineProvidersQueryKey } from "@/hooks/queries/query-keys";
+import { usePluginResource } from "@/lib/plugin-resource";
+import { PluginSettingsSections } from "./PluginSettingsSections";
 import {
   resetPluginSlotStoreForTest,
   setPluginSlotRegistrations,
@@ -948,6 +950,49 @@ describe("PluginSettingsPage", () => {
     expect(
       container.querySelectorAll("[data-resource-detail-section]"),
     ).toHaveLength(0);
+  });
+
+  it("shows all plugin settings sections together once the initial data is available", async () => {
+    const read = deferred<string>();
+
+    function RemoteSettings() {
+      const result = usePluginResource({
+        key: ["configuration"],
+        load: () => read.promise,
+      });
+
+      return <button>{result.data}</button>;
+    }
+
+    setPluginSlotRegistrations(
+      "example",
+      makePluginRegistrationSet({
+        settingsSections: [
+          { id: "local", component: () => <button>Local setting</button> },
+          { id: "remote", component: RemoteSettings },
+        ],
+      }),
+    );
+    const { wrapper: QueryClientWrapper } = createQueryClientTestHarness();
+    render(
+      <MemoryRouter>
+        <QueryClientWrapper>
+          <PluginSettingsSections pluginId="example" />
+        </QueryClientWrapper>
+      </MemoryRouter>,
+    );
+    expect(
+      screen.getByRole("status", { name: "Loading plugin panel" }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Local setting" })).toBeNull();
+    await act(async () => read.resolve("Remote setting"));
+    expect(
+      await screen.findByRole("button", { name: "Remote setting" }),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Local setting" })).toBeTruthy();
+    expect(
+      screen.queryByRole("status", { name: "Loading plugin panel" }),
+    ).toBeNull();
   });
 
   it("keeps a section-only plugin in Configuration with a flat surface", async () => {

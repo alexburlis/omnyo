@@ -2069,6 +2069,8 @@ consumer release, snapshot review and recovery authority.
 
 `@omnyo/plugin-sdk/host` exports `experimental_inspectProcessPrivateTemps`,
 `experimental_recoverProcessPrivateTemps` and `experimental_inspectDirectoryProcesses`.
+Directory process inspection accepts a longer macOS timeout within a 30-second
+bound for callers that must verify a large native process table before removal.
 The process-private operations use the current account registry only. Their
 options accept time, item and logical-byte budgets and reject caller-selected
 registry roots. Recovery requires a fresh allocation marker, exact physical

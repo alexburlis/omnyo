@@ -19,6 +19,7 @@ function createInitialLoad(initiallyReady = false) {
   let conversation = 0;
   let supporting = 0;
   let supportingExpired = false;
+  let started = false;
   let revealed = initiallyReady;
 
   const notify = () => {
@@ -37,8 +38,11 @@ function createInitialLoad(initiallyReady = false) {
     },
     snapshot: blocking,
     isRevealed: () => revealed,
+    hasStarted: () => started,
     begin(holdsConversation = false) {
       if (revealed) return () => {};
+
+      started = true;
 
       if (holdsConversation) conversation += 1;
       else supporting += 1;
@@ -122,13 +126,13 @@ export function useThreadInitialLoadPending(
   );
 }
 
-export function ThreadInitialLoad({
+export function InitialLoadSurface({
   threadId,
   children,
   fallback,
   initiallyReady = false,
 }: {
-  threadId: string;
+  threadId?: string;
   children: ReactNode;
   fallback: ReactNode;
   initiallyReady?: boolean;
@@ -137,8 +141,8 @@ export function ThreadInitialLoad({
   const pending = useSyncExternalStore(load.subscribe, load.snapshot);
   const [revealed, setRevealed] = useState(initiallyReady);
 
-  const [handoff, setHandoff] = useState(() =>
-    isRecentPendingChatHandoff(threadId),
+  const [handoff, setHandoff] = useState(
+    () => threadId !== undefined && isRecentPendingChatHandoff(threadId),
   );
 
   useEffect(() => {
@@ -148,6 +152,7 @@ export function ThreadInitialLoad({
     return () => clearTimeout(timer);
   }, [handoff]);
   useLayoutEffect(() => {
+    if (threadId === undefined) return;
     let loads = threadLoads.get(threadId);
 
     if (loads === undefined) {
@@ -165,16 +170,25 @@ export function ThreadInitialLoad({
   }, [load, threadId]);
 
   useEffect(() => {
+    if (threadId === undefined) return;
+
     const timer = setTimeout(
       () => load.expireSupportingData(),
       SUPPORTING_DATA_WAIT_MS,
     );
 
     return () => clearTimeout(timer);
-  }, [load]);
+  }, [load, threadId]);
 
   useEffect(() => {
     if (revealed || pending !== 0) return;
+
+    if (threadId === undefined && !load.hasStarted() && load.reveal()) {
+      setRevealed(true);
+
+      return;
+    }
+
     let secondFrame: number | undefined;
 
     const firstFrame = requestAnimationFrame(() => {
@@ -188,7 +202,7 @@ export function ThreadInitialLoad({
 
       if (secondFrame !== undefined) cancelAnimationFrame(secondFrame);
     };
-  }, [load, pending, revealed]);
+  }, [load, pending, revealed, threadId]);
 
   return (
     <InitialLoadContext.Provider value={load}>
@@ -212,4 +226,13 @@ export function ThreadInitialLoad({
       </div>
     </InitialLoadContext.Provider>
   );
+}
+
+export function ThreadInitialLoad(props: {
+  threadId: string;
+  children: ReactNode;
+  fallback: ReactNode;
+  initiallyReady?: boolean;
+}) {
+  return <InitialLoadSurface {...props} />;
 }

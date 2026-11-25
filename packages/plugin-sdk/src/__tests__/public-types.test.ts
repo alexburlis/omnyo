@@ -126,6 +126,7 @@ const EXPECTED_BACKEND_ROOT_TYPE_EXPORTS = [
   "ExperimentalPluginProviderEnvHealthContext",
   "ExperimentalPluginProviderModelNotice",
   "ExperimentalPluginProviderModelNoticeContext",
+  "ExperimentalPluginSettingSection",
   "PluginProviderExtensionKindDeclaration",
   "PluginProviderFallbackModel",
   "PluginProviderMaintenance",

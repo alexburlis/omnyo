@@ -222,6 +222,7 @@ it.skipIf(!process.env.OMNYO_FRONTEND_MEASUREMENT_OUTPUT)(
     try {
       const browser = await chromium.launch({
         headless: true,
+        chromiumSandbox: true,
         executablePath:
           "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
       });
@@ -236,6 +237,56 @@ it.skipIf(!process.env.OMNYO_FRONTEND_MEASUREMENT_OUTPUT)(
         if (address === null || typeof address === "string")
           throw new Error("Performance server did not expose a TCP port");
         const origin = `http://127.0.0.1:${address.port}`;
+
+        const inventoryPath = process.env.OMNYO_FRONTEND_PLUGIN_INVENTORY;
+
+        if (inventoryPath) {
+          const { checkPluginInventory } = await import(
+            new URL(
+              "../../../../tests/qa/plugin-loading/inventory.mjs",
+              import.meta.url,
+            ).href
+          );
+
+          results.push(
+            await checkPluginInventory({ browser, origin, inventoryPath }),
+          );
+          completed = true;
+
+          return;
+        }
+
+        const pluginLoadingOutput =
+          process.env.OMNYO_FRONTEND_PLUGIN_LOADING_PROOF_OUTPUT;
+
+        if (pluginLoadingOutput) {
+          const proof = await import(
+            new URL(
+              "../../../../tests/qa/plugin-loading/proof.mjs",
+              import.meta.url,
+            ).href
+          );
+
+          results.push(
+            await proof.runPluginLoadingProof({
+              browser,
+              origin,
+              output: pluginLoadingOutput,
+              appBuild: {
+                dist: appDist,
+                indexSha256: createHash("sha256")
+                  .update(await readFile(resolve(appDist, "index.html")))
+                  .digest("hex"),
+              },
+              validateRegistry: pluginListResponseSchema.parse,
+              notifyChanged: () =>
+                harness.deps.hub.notifySystem(["plugins-changed"]),
+            }),
+          );
+          completed = true;
+
+          return;
+        }
 
         if (process.env.OMNYO_PERFORMANCE_SUITE === "1") {
           await runAppPerformance({

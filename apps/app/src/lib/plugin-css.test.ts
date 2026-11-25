@@ -57,20 +57,26 @@ describe("usePluginCssReady", () => {
     expect(result.current).toBe(true);
   });
 
-  it("is ready at once on a remount after the release grace removed an applied stylesheet", async () => {
+  it("reuses the same parsed stylesheet synchronously after an inactive period", async () => {
     vi.useFakeTimers();
     applyPluginCss("demo", "/demo.css?h=1");
     const first = renderHook(() => useMountedPluginCssReady("demo"));
     dispatchLinkEvent(DEMO_STYLESHEET, "load");
+
+    const sheet =
+      document.head.querySelector<HTMLLinkElement>(DEMO_STYLESHEET)!;
+
     first.unmount();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_500);
     });
-    expect(document.head.querySelector(DEMO_STYLESHEET)).toBeNull();
+    expect(sheet.media).toBe("not all");
 
     const second = renderHook(() => useMountedPluginCssReady("demo"));
 
     expect(second.result.current).toBe(true);
+    expect(document.head.querySelector(DEMO_STYLESHEET)).toBe(sheet);
+    expect(sheet.media).toBe("all");
   });
 
   it("keeps a mounted plugin ready while its replacement stylesheet loads", () => {

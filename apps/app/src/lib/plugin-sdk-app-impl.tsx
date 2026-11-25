@@ -1,3 +1,4 @@
+import { usePluginResource } from "./plugin-resource";
 import { useInboxSnapshot } from "@/hooks/queries/use-inbox-snapshot";
 import { useThreadGroupActions } from "@/hooks/useThreadGroupActions";
 import { setChatSelection, useChatSelection } from "./chat-selection";
@@ -89,6 +90,7 @@ function useArchiveEnvironmentThreads(): (
 }
 
 export const pluginSdkAppImplementation = {
+  usePluginResource,
   experimental_useProjectSidebarItems: useProjectSidebarItems,
   experimental_useInitialLoadPending: useThreadInitialLoadPending,
   definePluginApp,

@@ -9,6 +9,39 @@ The authoritative contracts are the exported declarations in
 [`src/app-contract.ts`](src/app-contract.ts). Keep author-facing guidance in
 the built-in `omnyo-plugin-authoring` skill synchronized with those declarations.
 
+## Shared page reads
+
+Use `usePluginResource` from `@omnyo/plugin-sdk/app` for read-only page data:
+
+```tsx
+const rpc = useRpc<MyContract>();
+const page = usePluginResource({
+  key: ["issues", projectId, filter],
+  load: () => rpc.call("listIssues", { projectId, filter }),
+});
+```
+
+The host shares pending work and successful results within its query client,
+plugin generation and resource key. Include every route, filter, account or
+permission scope used by the loader in `key`. Cached success is available on the
+first render after returning to a page. Reads remain fresh until explicit
+invalidation by default; set `staleTime` in milliseconds when revisits should
+revalidate older data. Inactive entries expire after five minutes.
+
+Use `page.refresh()` for an explicit reload and handle its rejected promise.
+Use `page.invalidate()` after a successful mutation or a relevant realtime signal;
+active observers reload without clearing the previous value. Concurrent reloads
+share one request. `data` stays available during refresh and after refresh errors;
+render `error` so a failed refresh is visible. A different key has its own data and
+loading state. `enabled: false` prevents automatic and explicit reads until the
+scope is available. Mutations are ordinary uncached RPC calls.
+
+The host includes first reads in its initial page loading boundary. Refreshes do
+not hide previously loaded content. For isolated component tests, `renderSlot`
+provides the same implementation. Standalone component/browser fixtures can call
+`installTestPluginResourceRuntime()` from `@omnyo/plugin-sdk/testing/app` once,
+then call its returned `dispose()` after unmounting the fixture.
+
 ## Composer customization
 
 Composer UI extensions register through `app.composer.customize(...)`. A
