@@ -4,7 +4,7 @@ import { hostDirectoryQueryKey } from "../queries/query-keys";
 interface InvalidateHostDirectoryListingArgs {
   queryClient: QueryClient;
   hostId: string;
-  directory: string;
+  directory: string | null;
 }
 
 export function invalidateHostDirectoryListing({

@@ -135,7 +135,7 @@ export function Overview() {
       <StoryCard>
         <StoryRow
           label="create"
-          hint='kind="create" with one online machine — the folder browser opens there and the project-name preview follows the open folder'
+          hint="Select a folder to preview its project name, or open the folder to browse inside."
         >
           <DialogStage>
             <ProjectPathDialogContent

@@ -32,7 +32,7 @@ const mkdir = vi.mocked(sdk.files.mkdir);
 function listing(path: string, entries: string[]): HostDirectoryListing {
   return {
     directory: path,
-    parent: "/home",
+    parent: path.slice(0, path.lastIndexOf("/")) || "/",
     entries: entries.map((name) => ({
       kind: "directory" as const,
       name,
@@ -41,12 +41,12 @@ function listing(path: string, entries: string[]): HostDirectoryListing {
   };
 }
 
-const ENTRY_TEST_ROW_HEIGHT_PX = 28;
+const ENTRY_TEST_ROW_HEIGHT_PX = 36;
 
 beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(
     function (this: HTMLElement) {
-      return this.tagName === "LI" ? ENTRY_TEST_ROW_HEIGHT_PX : 224;
+      return this.tagName === "LI" ? ENTRY_TEST_ROW_HEIGHT_PX : 288;
     },
   );
 });
@@ -120,7 +120,7 @@ describe("RemotePathBrowser new folder", () => {
       </Wrapper>,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "next" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open next" }));
     await waitFor(() => {
       expect(directory).toHaveBeenCalledWith(
         expect.objectContaining({ path: "/home/me/next" }),
@@ -254,6 +254,73 @@ describe("RemotePathBrowser new folder", () => {
 });
 
 describe("RemotePathBrowser entry list", () => {
+  it("selects without navigating, reuses the prefetched listing, and returns to the cached parent", async () => {
+    let resolveChild: (listing: HostDirectoryListing) => void = () => {};
+
+    const child = new Promise<HostDirectoryListing>((resolve) => {
+      resolveChild = resolve;
+    });
+
+    directory.mockImplementation(({ path }) =>
+      path === "/home/me/repo"
+        ? child
+        : Promise.resolve(listing("/home/me", ["docs", "repo"])),
+    );
+    const onDirectoryChange = vi.fn();
+    const { wrapper: Wrapper } = createQueryClientTestHarness();
+
+    render(
+      <Wrapper>
+        <RemotePathBrowser
+          hostId="host_atum"
+          allowCreateFolder
+          selectInitialFolder={false}
+          onDirectoryChange={onDirectoryChange}
+        />
+      </Wrapper>,
+    );
+
+    await screen.findByRole("button", { name: "repo" });
+    expect(onDirectoryChange).toHaveBeenLastCalledWith(null);
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Filter folder contents" }),
+      { target: { value: "repo" } },
+    );
+    expect(screen.queryByRole("button", { name: "docs" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "repo" }));
+    expect(onDirectoryChange).toHaveBeenLastCalledWith("/home/me/repo");
+    expect(
+      screen.getByRole("button", { name: "repo" }).getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(directory).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open repo" }));
+    expect(onDirectoryChange).toHaveBeenLastCalledWith(null);
+    expect(screen.queryByRole("button", { name: "Open repo" })).toBeNull();
+    resolveChild(listing("/home/me/repo", ["src"]));
+    await screen.findByRole("button", { name: "src" });
+    expect(onDirectoryChange).toHaveBeenLastCalledWith("/home/me/repo");
+
+    fireEvent.click(screen.getByRole("button", { name: "Go back" }));
+    expect(screen.getByRole("button", { name: "docs" })).toBeTruthy();
+    expect(directory).toHaveBeenCalledTimes(2);
+
+    const folderContents = screen.getByRole("region", {
+      name: "Folder contents",
+    });
+
+    fireEvent.keyDown(folderContents, { key: "ArrowDown" });
+    expect(onDirectoryChange).toHaveBeenLastCalledWith("/home/me/docs");
+
+    fireEvent.click(screen.getByRole("button", { name: "Open repo" }));
+    await screen.findByRole("button", { name: "src" });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Go to parent folder" }),
+    );
+    expect(screen.getByRole("button", { name: "docs" })).toBeTruthy();
+    expect(directory).toHaveBeenCalledTimes(2);
+  });
+
   it("returns to the top when browsing into another large directory", async () => {
     const names = Array.from(
       { length: 4999 },
@@ -297,7 +364,7 @@ describe("RemotePathBrowser entry list", () => {
     });
     scrollBox.scrollTop = 4_999 * ENTRY_TEST_ROW_HEIGHT_PX;
     fireEvent.scroll(scrollBox);
-    fireEvent.click(await screen.findByRole("button", { name: "next" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open next" }));
 
     expect(scrollBox.scrollTop).toBe(0);
     expect(await screen.findByText("file_00000")).not.toBeNull();

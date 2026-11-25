@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type FormEvent } from "react";
+import { useCallback, useId, useState, type FormEvent } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,6 +17,7 @@ import type { ProjectResponse } from "@omnyo/server-contract";
 import { Button } from "@omnyo/shared-ui/button";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -29,6 +30,9 @@ import { RemotePathBrowser } from "@/components/dialogs/RemotePathBrowser";
 import { MachineStatusDot } from "@/components/machines/MachineStatusDot";
 import { usePointerCoarse } from "@omnyo/shared-ui/hooks/use-pointer-coarse";
 import { selectHosts } from "@/hooks/queries/host-queries";
+import { useHostDaemon } from "@/hooks/useHostDaemon";
+import { getMutationErrorMessage } from "@/lib/mutation-errors";
+import { sdk } from "@/lib/sdk";
 
 export type ProjectPathDialogTarget =
   | {
@@ -78,10 +82,24 @@ export function ProjectPathDialog({
 }: ProjectPathDialogProps) {
   return (
     <Dialog open={target !== null} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent
+        className="max-h-[calc(100dvh-2rem)] max-w-[min(42rem,calc(100%-2rem))] overflow-y-auto p-5 sm:p-6"
+        onEscapeKeyDown={(event) => {
+          if (
+            event.target instanceof HTMLElement &&
+            event.target.closest("[data-folder-picker-editor]")
+          ) {
+            event.preventDefault();
+          }
+        }}
+      >
         {target ? (
           <ProjectPathDialogContent
-            key={target.kind === "create" ? "create" : target.projectId}
+            key={
+              target.kind === "create"
+                ? "create"
+                : `${target.kind}:${target.projectId}`
+            }
             target={target}
             pending={pending}
             platform={platform}
@@ -171,9 +189,12 @@ export function ProjectPathDialogContent({
 }: ProjectPathDialogContentProps) {
   const inputId = useId();
   const isPointerCoarse = usePointerCoarse();
+  const { localDaemonHostId, supportsNativeFolderPicker } = useHostDaemon();
 
   const machineOptions =
-    target.kind === "create" ? selectHosts(hosts, "all") : undefined;
+    target.kind === "create" && hosts !== undefined
+      ? selectHosts(hosts, "all")
+      : undefined;
 
   const firstConnectedHostId = machineOptions?.find(
     (host) => host.status === "connected",
@@ -197,20 +218,25 @@ export function ProjectPathDialogContent({
 
   const selectedHostName = selectedHost?.name ?? hostName;
 
-  const selectedHostConnected =
-    selectedHost === undefined || selectedHost.status === "connected";
-
   const showMachinePicker = (machineOptions?.length ?? 0) > 1;
 
   const noMachineAvailable =
-    machineOptions !== undefined && selectedHostId === null;
+    target.kind === "create" && selectedHostId === null;
 
   const [manualPath, setManualPath] = useState(
     target.kind === "update" ? target.currentPath : "",
   );
 
-  const [browserDirectory, setBrowserDirectory] = useState<string | null>(
-    target.kind === "update" ? target.currentPath : null,
+  const [selection, setSelection] = useState<{
+    hostId: string;
+    path: string;
+  } | null>(null);
+
+  const [browseInOmnyo, setBrowseInOmnyo] = useState(false);
+  const [nativePickerPending, setNativePickerPending] = useState(false);
+
+  const [nativePickerError, setNativePickerError] = useState<string | null>(
+    null,
   );
 
   const [validationMessage, setValidationMessage] = useState<string | null>(
@@ -224,22 +250,69 @@ export function ProjectPathDialogContent({
       ? target.currentPath || copy.placeholder
       : copy.placeholder;
 
+  const setHostSelection = useCallback(
+    (path: string | null) => {
+      setSelection(
+        path && selectedHostId ? { hostId: selectedHostId, path } : null,
+      );
+      setValidationMessage(null);
+    },
+    [selectedHostId],
+  );
+
+  const canPickNatively =
+    supportsNativeFolderPicker &&
+    selectedHostId !== null &&
+    selectedHostId === localDaemonHostId;
+
+  const useNativePicker = canPickNatively && !browseInOmnyo;
+  const busy = pending || nativePickerPending;
+
   const selectedPath = selectedHostId
-    ? browserDirectory
+    ? selection?.hostId === selectedHostId
+      ? selection.path
+      : null
     : normalizeProjectPathInput(manualPath) || null;
 
   const derivedProjectName = selectedPath
     ? deriveProjectNameFromPath(selectedPath)
     : "";
 
-  useEffect(() => {
-    setValidationMessage(null);
-  }, [selectedPath]);
+  const browseNativeFolder = async () => {
+    if (!selectedHostId || !canPickNatively || busy) return;
+
+    setNativePickerPending(true);
+    setNativePickerError(null);
+
+    try {
+      const { path } = await sdk.hosts.pickFolder({
+        hostId: selectedHostId,
+        clientHostId: selectedHostId,
+      });
+
+      if (path) setHostSelection(path);
+    } catch (error) {
+      setNativePickerError(
+        getMutationErrorMessage({
+          error,
+          fallbackMessage: "Couldn't open the system folder picker.",
+        }),
+      );
+    } finally {
+      setNativePickerPending(false);
+    }
+  };
+
+  const selectBrowser = (browseInApp: boolean) => {
+    setHostSelection(null);
+    setNativePickerError(null);
+    setBrowseInOmnyo(browseInApp);
+  };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (pending) return;
+    if (busy || noMachineAvailable) return;
 
     if (!selectedPath) {
       setValidationMessage("Choose a project folder.");
@@ -274,11 +347,11 @@ export function ProjectPathDialogContent({
     <>
       <DialogHeader>
         <DialogTitle>{getDialogTitle(target.kind)}</DialogTitle>
-        <DialogDescription>
+        <DialogDescription
+          className={cn((selectedHostId || noMachineAvailable) && "sr-only")}
+        >
           {selectedHostId
-            ? `Browse to the project folder${
-                selectedHostName ? ` on ${selectedHostName}` : ""
-              }, or edit the path directly.`
+            ? `Choose a project folder${selectedHostName ? ` on ${selectedHostName}` : ""}.`
             : noMachineAvailable
               ? "No machine is online. Start one to choose a project folder."
               : copy.description}
@@ -287,20 +360,17 @@ export function ProjectPathDialogContent({
       <form className="min-w-0 space-y-4" onSubmit={handleSubmit}>
         {showMachinePicker ? (
           <DropdownMenu>
-            <DropdownMenuTrigger asChild disabled={pending}>
+            <DropdownMenuTrigger asChild disabled={busy}>
               <Button
                 type="button"
                 variant="outline"
                 aria-label="Machine"
-                disabled={pending}
-                className="w-full justify-between font-normal"
+                disabled={busy}
+                className="max-w-full justify-between font-normal"
               >
                 <span className="flex min-w-0 items-center gap-2">
                   {selectedHost ? (
-                    <MachineStatusDot
-                      connected={selectedHostConnected}
-                      label={selectedHostConnected ? "Online" : "Offline"}
-                    />
+                    <MachineStatusDot connected label="Online" />
                   ) : null}
                   <span className="min-w-0 truncate">
                     {selectedHost?.name ?? "Select a machine"}
@@ -315,7 +385,7 @@ export function ProjectPathDialogContent({
             <DropdownMenuContent
               align="start"
               mobileTitle="Machine"
-              className="max-h-72 w-[var(--radix-dropdown-menu-trigger-width)] overflow-y-auto"
+              className="max-h-72 min-w-48 overflow-y-auto"
             >
               {machineOptions?.map((host) => {
                 const connected = host.status === "connected";
@@ -328,7 +398,8 @@ export function ProjectPathDialogContent({
                     onSelect={() => {
                       if (!connected) return;
                       setSelectedHostId(host.id);
-                      setBrowserDirectory(null);
+
+                      if (host.id !== selectedHostId) selectBrowser(false);
                     }}
                   >
                     <MachineStatusDot
@@ -355,15 +426,56 @@ export function ProjectPathDialogContent({
               })}
             </DropdownMenuContent>
           </DropdownMenu>
+        ) : selectedHostId && selectedHostName ? (
+          <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+            <Icon name="Laptop" className="size-4 shrink-0" />
+            <span className="truncate" title={selectedHostName}>
+              {selectedHostName}
+            </span>
+          </div>
         ) : null}
-        {selectedHostId ? (
+        {useNativePicker ? (
+          <div className="flex flex-col items-center gap-3 rounded-lg border bg-muted/30 px-3 py-6">
+            <Icon name="FolderOpen" className="size-8 text-muted-foreground" />
+            <Button
+              type="button"
+              variant={selectedPath ? "outline" : "default"}
+              disabled={busy}
+              onClick={() => void browseNativeFolder()}
+            >
+              {nativePickerPending
+                ? "Waiting for system picker…"
+                : selectedPath
+                  ? "Choose another folder…"
+                  : "Choose folder…"}
+            </Button>
+            {nativePickerError ? (
+              <p
+                role="alert"
+                className="max-w-full break-words text-center text-sm text-destructive"
+              >
+                {nativePickerError}
+              </p>
+            ) : null}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={() => selectBrowser(true)}
+            >
+              Browse in Omnyo
+            </Button>
+          </div>
+        ) : selectedHostId ? (
           <RemotePathBrowser
             key={selectedHostId}
             hostId={selectedHostId}
             initialPath={target.kind === "update" ? target.currentPath : null}
             allowCreateFolder={target.kind === "create"}
-            onDirectoryChange={setBrowserDirectory}
-            disabled={pending || !selectedHostConnected}
+            selectInitialFolder={target.kind === "update"}
+            onDirectoryChange={setHostSelection}
+            disabled={busy}
           />
         ) : noMachineAvailable ? (
           <p className="rounded-md border px-3 py-6 text-center text-sm text-muted-foreground">
@@ -379,38 +491,69 @@ export function ProjectPathDialogContent({
             placeholder={placeholder}
             onChange={(event) => {
               setManualPath(event.target.value);
+              setValidationMessage(null);
             }}
           />
         )}
-        {(derivedProjectName && target.kind === "create") ||
-        validationMessage ? (
-          <div className="space-y-1">
-            {target.kind === "create" && derivedProjectName ? (
-              <p className="flex min-w-0 gap-1 text-sm text-muted-foreground">
-                <span className="shrink-0">Project name:</span>
-                <span className="min-w-0 truncate font-medium text-foreground">
-                  {derivedProjectName}
-                </span>
-              </p>
-            ) : null}
-            {validationMessage ? (
-              <p className="text-sm text-destructive">{validationMessage}</p>
-            ) : null}
-          </div>
+        {validationMessage ? (
+          <p role="alert" className="text-sm text-destructive">
+            {validationMessage}
+          </p>
         ) : null}
-        <DialogFooter>
-          <Button
-            type="submit"
-            disabled={
-              pending ||
-              !selectedPath ||
-              !selectedHostConnected ||
-              noMachineAvailable
-            }
-          >
-            {getDialogSubmitLabel(target.kind)}
-          </Button>
-        </DialogFooter>
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+          {selectedHostId ? (
+            <div
+              className="flex min-w-0 flex-[1_1_12rem] items-center gap-2.5"
+              role="status"
+            >
+              <span className="grid size-8 shrink-0 place-items-center rounded-md border text-muted-foreground">
+                <Icon name="Folder" className="size-4" />
+              </span>
+              <div className="min-w-0 text-sm">
+                <p
+                  className={cn(
+                    "truncate",
+                    selectedPath ? "font-medium" : "text-muted-foreground",
+                  )}
+                >
+                  {derivedProjectName ||
+                    (selectedPath ? "Filesystem root" : "No folder selected")}
+                </p>
+                {selectedPath ? (
+                  <p
+                    className="truncate text-xs text-muted-foreground"
+                    title={selectedPath}
+                  >
+                    {selectedPath}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter className="ml-auto max-w-full flex-row flex-wrap items-center justify-end gap-2">
+            {canPickNatively && !useNativePicker ? (
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => selectBrowser(false)}
+              >
+                System picker
+              </Button>
+            ) : null}
+            <DialogClose asChild>
+              <Button type="button" variant="outline" disabled={busy}>
+                Cancel
+              </Button>
+            </DialogClose>
+            <Button
+              type="submit"
+              disabled={busy || !selectedPath || noMachineAvailable}
+            >
+              {getDialogSubmitLabel(target.kind)}
+            </Button>
+          </DialogFooter>
+        </div>
       </form>
     </>
   );

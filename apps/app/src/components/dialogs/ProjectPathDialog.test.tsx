@@ -5,6 +5,22 @@ import { makeHost as host } from "@omnyo/test-helpers/domain-fixtures";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProjectPathDialog } from "./ProjectPathDialog";
 
+const nativePicker = vi.hoisted(() => ({
+  hostId: null as string | null,
+  pickFolder: vi.fn(),
+}));
+
+vi.mock("@/hooks/useHostDaemon", () => ({
+  useHostDaemon: () => ({
+    localDaemonHostId: nativePicker.hostId,
+    supportsNativeFolderPicker: nativePicker.hostId !== null,
+  }),
+}));
+
+vi.mock("@/lib/sdk", () => ({
+  sdk: { hosts: { pickFolder: nativePicker.pickFolder } },
+}));
+
 vi.mock("@/components/dialogs/RemotePathBrowser", () => ({
   RemotePathBrowser: ({
     hostId,
@@ -47,10 +63,61 @@ const offlineKunst = host({ ...kunst, status: "disconnected" });
 
 afterEach(() => {
   cleanup();
+  nativePicker.hostId = null;
   vi.clearAllMocks();
 });
 
 describe("ProjectPathDialog machine selection", () => {
+  it("offers the system picker on the local Mac and confirms its folder on that machine", async () => {
+    nativePicker.hostId = kunst.id;
+    nativePicker.pickFolder
+      .mockResolvedValueOnce({ path: null })
+      .mockResolvedValueOnce({ path: "/Users/me/projects/example" });
+    const onSubmit = vi.fn();
+
+    render(
+      <ProjectPathDialog
+        target={{ kind: "create" }}
+        platform="darwin"
+        hostId={atum.id}
+        hostName={atum.name}
+        hosts={[atum, kunst]}
+        onOpenChange={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Choose folder…" })).toBeNull();
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Machine" }), {
+      button: 0,
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: /Kunst/u }));
+    const choose = screen.getByRole("button", { name: "Choose folder…" });
+    expect(
+      screen.queryByRole("button", { name: "Choose folder on host_kunst" }),
+    ).toBeNull();
+    fireEvent.click(choose);
+    await screen.findByRole("button", { name: "Choose folder…" });
+    expect(screen.getByRole("button", { name: "Add project" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    fireEvent.click(choose);
+    await screen.findByText("/Users/me/projects/example");
+    expect(nativePicker.pickFolder).toHaveBeenLastCalledWith({
+      hostId: kunst.id,
+      clientHostId: kunst.id,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add project" }));
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith(
+      { kind: "create" },
+      "/Users/me/projects/example",
+      kunst.id,
+    );
+  });
+
   it("creates a project from a folder on the selected connected machine", () => {
     const onSubmit = vi.fn();
     render(

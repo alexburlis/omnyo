@@ -133,6 +133,10 @@ it("opens the shared project picker, keeps the plugin page through cancel and re
   fireEvent.click(screen.getByRole("button", { name: "Open project picker" }));
   const picker = await screen.findByRole("dialog", { name: "Add project" });
   const submit = within(picker).getByRole("button", { name: "Add project" });
+  expect(submit).toHaveProperty("disabled", true);
+  fireEvent.click(
+    await within(picker).findByRole("button", { name: "Select this folder" }),
+  );
   await waitFor(() => expect(submit).toHaveProperty("disabled", false));
   fireEvent.click(submit);
 

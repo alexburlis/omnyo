@@ -1,10 +1,5 @@
 import { useMemo } from "react";
-import {
-  keepPreviousData,
-  queryOptions,
-  skipToken,
-  useQuery,
-} from "@tanstack/react-query";
+import { queryOptions, skipToken, useQuery } from "@tanstack/react-query";
 import { hostSchema, type Host } from "@omnyo/domain";
 import type {
   HostDirectoryListing,
@@ -134,17 +129,15 @@ export function useHostDiscoveredRepos(
   });
 }
 
-export function useHostDirectory(hostId: string | null, path: string | null) {
-  return useQuery<HostDirectoryListing>({
+export function hostDirectoryQueryOptions(hostId: string, path: string | null) {
+  return queryOptions<HostDirectoryListing>({
     queryKey: hostDirectoryQueryKey(hostId, path),
     queryFn: ({ signal }) =>
       sdk.hosts.directory({
-        hostId: hostId as string,
+        hostId,
         ...(path ? { path } : {}),
         signal,
       }),
-    enabled: hostId != null,
-    placeholderData: keepPreviousData,
     staleTime: 30_000,
   });
 }
