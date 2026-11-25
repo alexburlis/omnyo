@@ -349,9 +349,7 @@ const DefaultNewThreadComposer = memo(function DefaultNewThreadComposer({
         project={project}
         environment={modeConfig.environment}
         worktree={modeConfig.worktree}
-        model={
-          <ExecutionControls {...execution} inline favoriteChips={false} />
-        }
+        favorites={<ExecutionControls {...execution} presentation="bar" />}
         approvals={approvals}
         sessionOptionsControl={modeConfig.sessionOptionsControl}
         environmentProviderInputsSlot={modeConfig.environmentProviderInputsSlot}
@@ -433,16 +431,21 @@ const DefaultNewThreadComposer = memo(function DefaultNewThreadComposer({
           ) : undefined
         }
         plusMenu={docked ? "none" : "inline"}
+        footerStart={
+          staged ? (
+            stageDock
+          ) : docked ? undefined : (
+            <ExecutionControls {...execution} />
+          )
+        }
       />
-      {staged ? (
-        stageDock
-      ) : dock !== undefined && project !== undefined ? (
+      {staged ? null : dock !== undefined && project !== undefined ? (
         <NewChatDock
           dock={dock}
           project={project}
           environment={modeConfig.environment}
           worktree={modeConfig.worktree}
-          favorites={<ExecutionControls {...execution} inline />}
+          favorites={<ExecutionControls {...execution} presentation="bar" />}
           approvals={approvals}
           sessionOptionsControl={modeConfig.sessionOptionsControl}
           environmentProviderInputsSlot={
@@ -456,10 +459,9 @@ const DefaultNewThreadComposer = memo(function DefaultNewThreadComposer({
       ) : (
         <div
           data-new-thread-footer=""
-          className="mt-2 grid select-none grid-cols-[minmax(0,1fr)_minmax(0,9rem)] items-start gap-2 max-sm:grid-cols-1"
+          className="mt-1 flex select-none items-center justify-between gap-2 px-3.5 max-md:mt-0 max-md:gap-1 max-md:px-1"
         >
-          <ExecutionControls {...execution} inline />
-          <div className="flex min-w-0 flex-col items-start gap-1">
+          <div className="flex min-w-0 flex-1 items-center gap-1">
             {project ? (
               <ProjectSelector
                 projects={project.projects}
@@ -482,8 +484,8 @@ const DefaultNewThreadComposer = memo(function DefaultNewThreadComposer({
               }
               machineProviderInputsSlot={modeConfig.machineProviderInputsSlot}
             />
-            {permissionControls}
           </div>
+          {permissionControls}
         </div>
       )}
     </div>

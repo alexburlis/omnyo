@@ -8,6 +8,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExperimentalComposerSelection } from "@omnyo/plugin-sdk";
@@ -171,19 +172,11 @@ function renderStage(options: Parameters<typeof renderDock>[0] = {}) {
   const shelf = document.createElement("div");
   document.body.append(shelf);
 
-  const { favorites: _favorites, ...stageProps } = props;
   const { wrapper } = createQueryClientTestHarness();
 
-  render(
-    <NewChatStageDock
-      {...stageProps}
-      model={<div data-testid="stage-model" />}
-      shelf={shelf}
-    />,
-    {
-      wrapper: ({ children }: { children: ReactNode }) => wrapper({ children }),
-    },
-  );
+  render(<NewChatStageDock {...props} shelf={shelf} />, {
+    wrapper: ({ children }: { children: ReactNode }) => wrapper({ children }),
+  });
 
   return { shelf, onProjectChange, select };
 }
@@ -205,6 +198,29 @@ describe("NewChatDock", () => {
     fireEvent.click(screen.getByRole("button", { name: "Stratoclash" }));
 
     expect(onProjectChange).toHaveBeenCalledExactlyOnceWith(stratoclash.id);
+  });
+
+  it("puts the favorites above one line that names the machine and workspace", () => {
+    renderDock();
+
+    const favorites = document.querySelector("[data-new-chat-favorites]");
+    const where = document.querySelector("[data-new-chat-where]");
+    const machine = screen.getByRole("button", { name: "Machine: Mac Pro" });
+
+    expect(
+      favorites?.querySelector('[data-testid="favorites-bar"]'),
+    ).not.toBeNull();
+    expect(
+      favorites?.compareDocumentPosition(where as Node) ??
+        Node.DOCUMENT_POSITION_PRECEDING,
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(machine.textContent).toBe("Mac Pro");
+    expect(machine.closest("[data-new-chat-where]")).toBe(where);
+    expect(
+      within(where as HTMLElement).getByRole("button", {
+        name: "Start in: main",
+      }),
+    ).toBeTruthy();
   });
 
   it("starts the chat in a new worktree on its machine with one toggle", async () => {
@@ -333,24 +349,23 @@ describe("NewChatStageDock", () => {
     document.body.replaceChildren();
   });
 
-  it("puts the model beside the machine, workspace, and new worktree controls", () => {
-    renderStage();
+  it("keeps plus, machine and workspace in the card and the favorites under it", () => {
+    const { shelf } = renderStage();
 
     const row = document.querySelector("[data-new-chat-controls]");
 
     expect(row).not.toBeNull();
-    expect(row?.firstElementChild?.getAttribute("data-testid")).toBe(
-      "stage-model",
-    );
+    expect(row?.querySelector('[data-testid="favorites-bar"]')).toBeNull();
+    expect(
+      shelf.querySelector(
+        '[data-new-chat-favorites] [data-testid="favorites-bar"]',
+      ),
+    ).not.toBeNull();
     expect(
       row?.querySelector('[aria-label="Machine: Mac Pro"]'),
     ).not.toBeNull();
     expect(row?.querySelector('[aria-label="Start in: main"]')).not.toBeNull();
-    expect(
-      screen
-        .getByRole("button", { name: "New worktree" })
-        .closest("[data-new-chat-where]"),
-    ).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "New worktree" })).toBeNull();
   });
 
   it("moves the project tiles out of the card onto rail plates in the shelf", () => {
@@ -400,11 +415,16 @@ describe("NewChatStageDock", () => {
     ).toBeNull();
   });
 
-  it("opens the workspace menu directly from the settings column", async () => {
+  it("opens the folded workspace menu from the machine picker", async () => {
     vi.mocked(sdk.plugins.callRpc).mockResolvedValue({ worktrees: [] });
     renderStage();
 
-    fireEvent.click(screen.getByRole("button", { name: "Start in: main" }));
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Machine: Mac Pro" }),
+      { button: 0 },
+    );
+
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Start in…" }));
 
     expect(
       await screen.findByRole("dialog", { name: "Start in" }),

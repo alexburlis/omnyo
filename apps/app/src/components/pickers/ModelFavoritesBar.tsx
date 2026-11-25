@@ -162,6 +162,18 @@ export function ModelFavoritesBar({
               {FAVORITES_FAILED_LABEL}
             </span>
           </div>
+        ) : centered && selects === "model-and-effort" ? (
+          <OpenFavorites
+            favorites={preference.items}
+            current={current}
+            providerOrder={providerOrder}
+            label={copy.label}
+            speed={speed}
+            allModels={allModels}
+            favoritesFull={preference.isFull}
+            onPick={onPick}
+            onKeep={onKeep}
+          />
         ) : selects === "model" ? (
           <FittedTrack
             {...track}
@@ -231,6 +243,108 @@ function PillWithSpeed({
           speed={speed}
           className={MODEL_SPEED_BUTTON_CLASS_NAME}
         />
+      )}
+    </div>
+  );
+}
+
+interface OpenFavoritesProps {
+  favorites: FavoriteBarsInput["favorites"];
+  current: CurrentPick;
+  providerOrder: readonly string[];
+  label: string;
+  speed: ModelSpeed | null;
+  allModels: (hidden: number) => ReactElement;
+  favoritesFull: boolean;
+  onPick: PickHandler;
+  onKeep: KeepHandler;
+}
+
+function OpenFavorites({
+  favorites,
+  current,
+  providerOrder,
+  label,
+  speed,
+  allModels,
+  favoritesFull,
+  onPick,
+  onKeep,
+}: OpenFavoritesProps) {
+  const { all } = buildFavoriteBars({
+    favorites,
+    current,
+    providerOrder,
+    widths: null,
+    shown: null,
+  });
+
+  return (
+    <div
+      role="group"
+      aria-label={label}
+      data-open-favorites=""
+      className="flex min-w-0 max-w-full flex-wrap items-center justify-center gap-1.5"
+    >
+      {all.map((group) => (
+        <OpenFavoriteGroup
+          key={group.key}
+          group={group}
+          favoritesFull={favoritesFull}
+          onPick={onPick}
+          onKeep={onKeep}
+        />
+      ))}
+      <div className={cn(FAVORITE_SEGMENTS_CLASS_NAME, "h-8 shrink-0")}>
+        {speed === null ? null : (
+          <ModelSpeedControl
+            speed={speed}
+            className={SPEED_SEGMENT_CLASS_NAME}
+          />
+        )}
+        {allModels(0)}
+      </div>
+    </div>
+  );
+}
+
+function OpenFavoriteGroup({
+  group,
+  favoritesFull,
+  onPick,
+  onKeep,
+}: {
+  group: FavoriteGroup;
+  favoritesFull: boolean;
+  onPick: PickHandler;
+  onKeep: KeepHandler;
+}) {
+  const captionId = useId();
+
+  return (
+    <div
+      role="group"
+      aria-labelledby={captionId}
+      data-favorite-group={group.key}
+      className={cn(FAVORITE_SEGMENTS_CLASS_NAME, "h-8 shrink-0")}
+    >
+      <FavoriteGroupCaption group={group} id={captionId} />
+      {group.segments.map((segment) =>
+        segment.kind === "pick" ? (
+          <TrackPickSegment
+            key={segment.key}
+            pick={segment}
+            modelLabel={group.modelLabel}
+            onPick={onPick}
+          />
+        ) : (
+          <KeepSegment
+            key="keep"
+            selection={segment.selection}
+            full={favoritesFull}
+            onKeep={onKeep}
+          />
+        ),
       )}
     </div>
   );
@@ -836,11 +950,24 @@ function ReasonTooltip({
   );
 }
 
+function pickAccessibleName(
+  pick: FavoritePick,
+  modelLabel: string | undefined,
+): string | undefined {
+  if (modelLabel === undefined && pick.tierLabel === null) return undefined;
+
+  return [modelLabel, pick.effortLabel, pick.tierLabel]
+    .filter((part) => part !== undefined && part !== null)
+    .join(", ");
+}
+
 function TrackPickSegment({
   pick,
+  modelLabel,
   onPick,
 }: {
   pick: FavoritePick;
+  modelLabel?: string;
   onPick: PickHandler;
 }) {
   const reasonId = useId();
@@ -852,11 +979,7 @@ function TrackPickSegment({
       aria-pressed={pick.current}
       aria-disabled={reason === null ? undefined : true}
       aria-describedby={reason === null ? undefined : reasonId}
-      aria-label={
-        pick.tierLabel === null
-          ? undefined
-          : `${pick.effortLabel}, ${pick.tierLabel}`
-      }
+      aria-label={pickAccessibleName(pick, modelLabel)}
       onMouseDown={(event) => event.preventDefault()}
       onClick={() => {
         if (reason === null) onPick(pick.selection);

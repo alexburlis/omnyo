@@ -142,33 +142,106 @@ const FAST: ModelSpeed = {
   onChange: vi.fn(),
 };
 
-it.each(["footer", "bar"] as const)(
-  "%s: opens the picker from the model name without changing the effort",
-  (presentation) => {
-    const onOpenModels = vi.fn();
-    const onPick = vi.fn();
-    render(
-      <ModelFavoritesBar {...barProps(presentation, onOpenModels, onPick)} />,
-    );
+it("footer: opens the picker from the model name without changing the effort", () => {
+  const onOpenModels = vi.fn();
+  const onPick = vi.fn();
+  render(<ModelFavoritesBar {...barProps("footer", onOpenModels, onPick)} />);
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Change model (Opus 5.5)" }),
-    );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Change model (Opus 5.5)" }),
+  );
 
-    expect(onOpenModels).toHaveBeenCalledOnce();
-    expect(onPick).not.toHaveBeenCalled();
+  expect(onOpenModels).toHaveBeenCalledOnce();
+  expect(onPick).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Medium" }));
+  fireEvent.click(screen.getByRole("button", { name: "Medium" }));
 
-    expect(onOpenModels).toHaveBeenCalledOnce();
-    expect(onPick).toHaveBeenCalledExactlyOnceWith({
-      providerId: "claude-code",
-      model: "claude-opus-5-5",
-      reasoningLevel: "medium",
-      serviceTier: "default",
-    });
-  },
-);
+  expect(onOpenModels).toHaveBeenCalledOnce();
+  expect(onPick).toHaveBeenCalledExactlyOnceWith({
+    providerId: "claude-code",
+    model: "claude-opus-5-5",
+    reasoningLevel: "medium",
+    serviceTier: "default",
+  });
+});
+
+it("bar: puts every favorite model and effort one click away", () => {
+  const onPick = vi.fn();
+  render(
+    <ModelFavoritesBar
+      {...barProps("bar", vi.fn(), onPick, FAVORITES, FAST)}
+    />,
+  );
+
+  const bar = screen.getByRole("group", { name: "Model and effort" });
+
+  expect(segments(bar)).toEqual([
+    "6.1-Sol, Low",
+    "6.1-Sol, Max",
+    "6-Astra, High",
+    "Opus 5.5, Medium*",
+    "Opus 5.5, High",
+    "Fast mode, faster responses*",
+    "All models",
+  ]);
+  expect(
+    within(bar).getByRole("group", { name: "6.1-Sol" }).textContent,
+  ).toContain("6.1-Sol");
+
+  fireEvent.click(within(bar).getByRole("button", { name: "6.1-Sol, Max" }));
+
+  expect(onPick).toHaveBeenCalledExactlyOnceWith({
+    providerId: "codex",
+    model: "gpt-6.1-sol",
+    reasoningLevel: "max",
+    serviceTier: "default",
+  });
+
+  fireEvent.click(within(bar).getByRole("button", { name: "6-Astra, High" }));
+
+  expect(onPick).toHaveBeenCalledOnce();
+});
+
+it("bar: offers every effort of the current model until something is starred", () => {
+  const onPick = vi.fn();
+  const props = barProps("bar", vi.fn(), onPick);
+
+  render(
+    <ModelFavoritesBar
+      {...props}
+      current={{
+        ...props.current,
+        efforts: [
+          { value: "low", label: "Low" },
+          { value: "medium", label: "Medium" },
+          { value: "high", label: "High" },
+        ],
+      }}
+    />,
+  );
+
+  const bar = screen.getByRole("group", { name: "Model and effort" });
+
+  expect(segments(bar)).toEqual([
+    "Opus 5.5, Low",
+    "Opus 5.5, Medium*",
+    "Opus 5.5, High",
+    "Add to favorites",
+    "All models",
+  ]);
+  expect(
+    screen.getByText("No favorites yet. Star efforts in ⌄ to pin them here."),
+  ).toBeTruthy();
+
+  fireEvent.click(within(bar).getByRole("button", { name: "Opus 5.5, High" }));
+
+  expect(onPick).toHaveBeenCalledExactlyOnceWith({
+    providerId: "claude-code",
+    model: "claude-opus-5-5",
+    reasoningLevel: "high",
+    serviceTier: "default",
+  });
+});
 
 it("expands the current model and collapses every other favorite into one chip", () => {
   const onPick = vi.fn();
@@ -261,7 +334,7 @@ it("fits the bar from resize observations without measuring each render", () => 
       return { left, width } as DOMRect;
     });
 
-  const props = barProps("bar", vi.fn(), vi.fn(), [], FAST);
+  const props = barProps("footer", vi.fn(), vi.fn(), [], FAST);
   const view = render(<ModelFavoritesBar {...props} />);
 
   view.rerender(<ModelFavoritesBar {...props} />);
