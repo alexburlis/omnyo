@@ -328,7 +328,7 @@ export function registerPoolCli(
               stdin: true,
               aliases: ["apikey", "key"],
               description:
-                "Anthropic API key, --provider claude only. Unsafe: exposes the key in process arguments, shell history, and agent transcripts",
+                "API key for the selected provider. Unsafe: exposes the key in process arguments, shell history, and agent transcripts",
             },
             label: {
               type: "string",
@@ -363,13 +363,6 @@ export function registerPoolCli(
                     priority: input.options.priority,
                   },
                   input.options.json === true,
-                );
-              }
-
-              if (provider !== "claude") {
-                throw new PluginCliError(
-                  "Anthropic API keys require --provider claude.",
-                  { code: "invalid_value" },
                 );
               }
 

@@ -76,7 +76,10 @@ import type {
 } from "./src/contracts.js";
 import type { accountPoolRpcContract } from "./src/rpc.js";
 import type { CodexDeviceLoginStart } from "./src/codex-device-login.js";
-import { NativeClaudeProfiles } from "./NativeClaudeProfiles.js";
+import {
+  NativeClaudeProfiles,
+  type ClaudeSetup,
+} from "./NativeClaudeProfiles.js";
 import {
   CLAUDE_POOL_LOGIN_RETIRED,
   DEFAULT_ACCOUNT_POOL_CONFIG,
@@ -93,7 +96,7 @@ import {
 type DialogState =
   | { kind: "account" | "priority" | "remove"; accountId: string }
   | { kind: "codex-login"; target: LoginTarget }
-  | { kind: "api-key" }
+  | { kind: "api-key"; provider: PoolProvider }
   | null;
 
 const NEW_LOGIN: LoginTarget = { kind: "add", label: null, priority: 100 };
@@ -123,12 +126,13 @@ const PROVIDERS: Array<{
     id: "claude",
     title: "Claude",
     description:
-      "Claude Code threads use these Anthropic API keys when routing is on. Sign in directly in Claude Code to use a subscription.",
+      "Manage Claude sign-ins by machine and Anthropic API keys for the pool.",
   },
   {
     id: "codex",
     title: "Codex",
-    description: "Codex threads route through these ChatGPT accounts.",
+    description:
+      "Route Codex threads through ChatGPT accounts or OpenAI API keys.",
   },
 ];
 
@@ -337,7 +341,7 @@ function SettingsSection({
   children: ReactNode;
 }) {
   return (
-    <section className="@container/pool-section space-y-3">
+    <section aria-label={title} className="@container/pool-section space-y-3">
       <div className="flex flex-col gap-3 @min-[36rem]/pool-section:flex-row @min-[36rem]/pool-section:items-start @min-[36rem]/pool-section:justify-between @min-[36rem]/pool-section:gap-4">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold text-foreground">{title}</h2>
@@ -620,24 +624,54 @@ function AccountRow({
   );
 }
 
-function AddCodexAccountMenu({ start }: { start: () => void }) {
+function AddAccountMenu({
+  provider,
+  proxying,
+  signIn,
+  adopt,
+  addApiKey,
+}: {
+  provider: PoolProvider;
+  proxying: boolean;
+  signIn: () => void;
+  adopt: () => void;
+  addApiKey: () => void;
+}) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button size="sm" variant="outline">
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={proxying && provider === "codex"}
+        >
           <Icon name="Plus" className="size-3.5" />
           Add account
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64">
-        <DropdownMenuItem className="items-start py-2" onSelect={start}>
+        <DropdownMenuItem className="items-start py-2" onSelect={signIn}>
           <Icon name="UserRound" className="mt-0.5" />
           <span>
-            <span className="block">Sign in to Codex</span>
+            <span className="block">
+              {provider === "claude" ? "Sign in to Claude" : "Sign in to Codex"}
+            </span>
             <span className="block text-xs text-muted-foreground">
-              Opens ChatGPT with a device code
+              {provider === "claude"
+                ? "Opens Claude Code sign-in on the selected machine"
+                : "Opens ChatGPT with a device code"}
             </span>
           </span>
+        </DropdownMenuItem>
+        {provider === "claude" ? (
+          <DropdownMenuItem onSelect={adopt}>
+            <Icon name="UserRound" />
+            Use existing Claude sign-in
+          </DropdownMenuItem>
+        ) : null}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem disabled={proxying} onSelect={addApiKey}>
+          Add API key
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -952,6 +986,7 @@ function AccountPoolSettings() {
   );
 
   const [loginDone, setLoginDone] = useState<string | null>(null);
+  const [claudeSetup, setClaudeSetup] = useState<ClaudeSetup | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [priority, setPriority] = useState("100");
   const [countdown, setCountdown] = useState(0);
@@ -1246,11 +1281,14 @@ function AccountPoolSettings() {
   }
 
   function closeDialog(): void {
+    if (dialog?.kind === "api-key" && pending.has("api-key")) return;
+
     if (dialog?.kind === "codex-login" && codexStep !== null)
       void rpc.call("codexLogin.cancel", { sessionId: codexStep.sessionId });
     setDialog(null);
     setCodexStep(null);
     setLoginDone(null);
+    setApiKey("");
     setError(null);
   }
 
@@ -1261,9 +1299,13 @@ function AccountPoolSettings() {
   const parent = status?.parent ?? null;
   const proxying = parent !== null && parent.mode === "proxy";
 
+  const apiKeyVendor =
+    dialog?.kind === "api-key" && dialog.provider === "codex"
+      ? "OpenAI"
+      : "Anthropic";
+
   return (
     <div className="w-full space-y-6">
-      <NativeClaudeProfiles />
       {parent === null ? null : (
         <div className="rounded-lg border border-border px-4 py-3">
           <div className="flex items-start justify-between gap-4">
@@ -1295,16 +1337,13 @@ function AccountPoolSettings() {
           </div>
         </div>
       )}
-      <div
-        className={proxying ? "space-y-6 opacity-50" : "space-y-6"}
-        inert={proxying ? true : undefined}
-      >
+      <div className="space-y-6">
         <p className="text-xs text-subtle-foreground">
           Hub {status?.accepting ? "accepting" : "not accepting"} ·{" "}
           {status?.inFlight ?? 0} in flight · used by {hubHosts}
           {statusIsCached ? " · refreshing…" : null}
         </p>
-        {error === null ? null : (
+        {error === null || dialog?.kind === "api-key" ? null : (
           <div
             role="alert"
             className="rounded-md border border-destructive/40 bg-surface-destructive px-3 py-2 text-sm text-destructive-text"
@@ -1312,26 +1351,6 @@ function AccountPoolSettings() {
             {error}
           </div>
         )}
-        {status !== null && !statusIsCached && accounts.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-border px-5 py-6 text-center">
-            <h2 className="text-sm font-semibold text-foreground">
-              No accounts in the pool
-            </h2>
-            <p className="mx-auto mt-1 max-w-lg text-xs leading-relaxed text-muted-foreground">
-              Add an Anthropic API key or sign in to Codex to route threads
-              through the pool. For a Claude subscription, sign in directly in
-              Claude Code.
-            </p>
-            <div className="mt-4 flex flex-wrap justify-center gap-2">
-              <Button size="sm" onClick={() => setDialog({ kind: "api-key" })}>
-                Add Anthropic API key
-              </Button>
-              <Button size="sm" onClick={() => void startCodex(NEW_LOGIN)}>
-                Sign in to Codex
-              </Button>
-            </div>
-          </div>
-        ) : null}
         {PROVIDERS.map((provider) => {
           const serverAccounts = accounts.filter(
             (account) => account.provider === provider.id,
@@ -1359,6 +1378,7 @@ function AccountPoolSettings() {
               action={
                 <div className="flex items-center gap-2">
                   <Switch
+                    disabled={proxying}
                     checked={switchValue(
                       `routing-${provider.id}`,
                       status?.routing[provider.id] ?? true,
@@ -1377,75 +1397,97 @@ function AccountPoolSettings() {
                       )
                     }
                   />
-                  {provider.id === "claude" ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setDialog({ kind: "api-key" })}
-                    >
-                      Add API key
-                    </Button>
-                  ) : (
-                    <AddCodexAccountMenu
-                      start={() => void startCodex(NEW_LOGIN)}
-                    />
-                  )}
+                  <AddAccountMenu
+                    provider={provider.id}
+                    proxying={proxying}
+                    signIn={() => {
+                      if (provider.id === "claude") setClaudeSetup("sign-in");
+                      else void startCodex(NEW_LOGIN);
+                    }}
+                    adopt={() => setClaudeSetup("adopt")}
+                    addApiKey={() => {
+                      setError(null);
+                      setDialog({ kind: "api-key", provider: provider.id });
+                    }}
+                  />
                 </div>
               }
             >
-              {status === null ? (
-                <p className="py-2.5 text-sm text-muted-foreground">Loading…</p>
-              ) : providerAccounts.length === 0 ? (
-                <p className="py-2.5 text-sm text-subtle-foreground">
-                  No accounts yet.
-                </p>
-              ) : (
-                <DndContext
-                  sensors={sensors}
-                  collisionDetection={closestCenter}
-                  modifiers={accountDragModifiers}
-                  onDragEnd={(event: DragEndEvent) =>
-                    void reorderAccounts(provider.id, event)
-                  }
-                >
-                  <SortableContext
-                    items={providerAccounts.map((account) => account.id)}
-                    strategy={verticalListSortingStrategy}
+              {provider.id === "claude" ? (
+                <NativeClaudeProfiles
+                  setup={claudeSetup}
+                  onCloseSetup={() => setClaudeSetup(null)}
+                  showEmpty={status !== null && providerAccounts.length === 0}
+                />
+              ) : null}
+              <div
+                inert={proxying}
+                className={proxying ? "opacity-50" : undefined}
+              >
+                {status === null ? (
+                  <p className="py-2.5 text-sm text-muted-foreground">
+                    Loading…
+                  </p>
+                ) : providerAccounts.length === 0 ? (
+                  provider.id === "claude" ? null : (
+                    <p className="py-2.5 text-sm text-subtle-foreground">
+                      No accounts yet.
+                    </p>
+                  )
+                ) : (
+                  <DndContext
+                    sensors={sensors}
+                    collisionDetection={closestCenter}
+                    modifiers={accountDragModifiers}
+                    onDragEnd={(event: DragEndEvent) =>
+                      void reorderAccounts(provider.id, event)
+                    }
                   >
-                    <div className="divide-y divide-border">
-                      {providerAccounts.map((account) => (
-                        <AccountRow
-                          key={account.id}
-                          account={account}
-                          threshold={threshold}
-                          pending={accountPending(account.id)}
-                          refreshing={
-                            statusIsCached ||
-                            pending.has(`refresh-${account.id}`)
-                          }
-                          reorderDisabled={
-                            providerAccounts.length < 2 ||
-                            pending.has(`order-${provider.id}`)
-                          }
-                          onAction={(action) =>
-                            void accountAction(account, action)
-                          }
-                          onOpen={() =>
-                            setDialog({
-                              kind: "account",
-                              accountId: account.id,
-                            })
-                          }
-                        />
-                      ))}
-                    </div>
-                  </SortableContext>
-                </DndContext>
-              )}
+                    <SortableContext
+                      items={providerAccounts.map((account) => account.id)}
+                      strategy={verticalListSortingStrategy}
+                    >
+                      <div className="divide-y divide-border">
+                        {providerAccounts.map((account) => (
+                          <AccountRow
+                            key={account.id}
+                            account={account}
+                            threshold={threshold}
+                            pending={accountPending(account.id)}
+                            refreshing={
+                              statusIsCached ||
+                              pending.has(`refresh-${account.id}`)
+                            }
+                            reorderDisabled={
+                              providerAccounts.length < 2 ||
+                              pending.has(`order-${provider.id}`)
+                            }
+                            onAction={(action) =>
+                              void accountAction(account, action)
+                            }
+                            onOpen={() =>
+                              setDialog({
+                                kind: "account",
+                                accountId: account.id,
+                              })
+                            }
+                          />
+                        ))}
+                      </div>
+                    </SortableContext>
+                  </DndContext>
+                )}
+              </div>
             </SettingsSection>
           );
         })}
-        <Collapsible className="rounded-lg border border-border px-4">
+        <Collapsible
+          inert={proxying}
+          className={cn(
+            "rounded-lg border border-border px-4",
+            proxying && "opacity-50",
+          )}
+        >
           <CollapsibleTrigger className="flex w-full items-center gap-2 py-2.5 text-sm font-medium text-foreground">
             <Icon
               name="ChevronRight"
@@ -1623,7 +1665,7 @@ function AccountPoolSettings() {
         ) : null}
         {dialog?.kind === "api-key" ? (
           <DialogFrame
-            title="Add an Anthropic API key"
+            title={`Add an ${apiKeyVendor} API key`}
             footer={
               <>
                 <span className="flex-1" />
@@ -1637,7 +1679,7 @@ function AccountPoolSettings() {
                   onClick={() =>
                     void run("api-key", async () => {
                       await rpc.call("account.add", {
-                        provider: "claude",
+                        provider: dialog.provider,
                         apiKey: apiKey.trim(),
                         label: null,
                         priority: 100,
@@ -1653,16 +1695,20 @@ function AccountPoolSettings() {
             }
           >
             <p className="text-sm text-muted-foreground">
-              Anthropic bills requests served by this key.
+              {apiKeyVendor} bills requests served by this key.
             </p>
             <Input
               type="password"
               autoComplete="off"
-              aria-label="Anthropic API key"
-              placeholder="sk-ant-…"
+              aria-label={`${apiKeyVendor} API key`}
               value={apiKey}
               onChange={(event) => setApiKey(event.target.value)}
             />
+            {error === null ? null : (
+              <p role="alert" className="text-sm text-destructive-text">
+                {error}
+              </p>
+            )}
           </DialogFrame>
         ) : null}
         {dialog?.kind === "remove" && selectedAccount !== null ? (

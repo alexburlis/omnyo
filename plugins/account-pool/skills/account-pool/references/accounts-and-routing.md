@@ -1,13 +1,14 @@
 The builtin Account Pooler plugin is on by default. Until an account is added
-each machine authenticates through Claude Code or Codex. Add an Anthropic API
-key or a Codex account to serve matching threads through the pool.
+each machine authenticates through Claude Code or Codex. The pool routes
+Claude through Anthropic API keys and Codex through ChatGPT accounts or OpenAI
+API keys.
 
 ```sh
 omnyo pool account add --provider codex --login [--label <text>] [--priority <n>]
 omnyo pool account login-poll --session <id>
 omnyo pool account login <id>
 printf '%s\n' "$ANTHROPIC_API_KEY" | omnyo pool account add --provider claude --api-key-stdin [--label <text>] [--priority <n>]
-omnyo pool account add --provider claude --api-key <key> [--label <text>] [--priority <n>]
+printf '%s\n' "$OPENAI_API_KEY" | omnyo pool account add --provider codex --api-key-stdin [--label <text>] [--priority <n>]
 omnyo pool account list [--json]
 omnyo pool account remove <id>
 omnyo pool account enable <id>
@@ -49,16 +50,24 @@ OpenAI endpoints and may fail if that provider contract changes. No checkout,
 purchase, arbitrary authenticated fetch, credential export or account failover
 is available through this interface.
 
-For a Claude subscription, sign in directly in Claude Code on the machine that
-runs the thread. Account Pooler only accepts Anthropic API keys for Claude.
-Old Claude subscription entries remain visible so you can remove them. Use
+To set up a Claude subscription, select **Claude → Add account** and choose
+**Sign in to Claude** or **Use existing Claude sign-in**. Claude Code uses the
+sign-in on the selected machine. The Claude menu also has **Add API key** for
+pooled Anthropic API use. Old Claude subscription pool entries remain visible
+so you can remove them. Use
 `omnyo pool bypass <thread-id>` to resume a thread through its machine's Claude
-Code sign-in if its pooled subscription was retired. Anthropic bills usage on
-pooled API keys.
+Code sign-in if its pooled subscription was retired.
 
 Codex `--login` prints a device verification URL, one-time code, session ID,
 and an `account login-poll` command that waits for authorization. The browser
-may be on another machine. In Account Pooler settings, use **Sign in to Codex**.
+may be on another machine. In Account Pooler settings, select
+**Codex → Add account → Sign in to Codex**.
+
+Select **Codex → Add account → Add API key** to add an OpenAI API key. The
+pool sends requests for that key to the OpenAI API. OpenAI bills those requests
+to the key's project. Available subscription quota takes priority over paid
+API keys. The model picker lists available general-purpose GPT-5 and GPT-6
+model aliases for the key.
 
 Use `omnyo pool account login <id>` or **Sign in again** in settings to renew a
 Codex login in place. The RPC is `codexLogin.start` with

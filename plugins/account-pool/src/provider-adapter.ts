@@ -93,7 +93,11 @@ export interface ProviderAdapter {
     model: string,
     signal: AbortSignal,
   ): Promise<ModelRejectionInspection>;
-  upstreamUrl(request: Request, settings: AccountPoolConfig): URL;
+  upstreamUrl(
+    request: Request,
+    settings: AccountPoolConfig,
+    account: Account,
+  ): URL;
   requestHeaders(
     inbound: Headers,
     account: Account,

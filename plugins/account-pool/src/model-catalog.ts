@@ -47,6 +47,60 @@ const upstreamCatalogSchema = z
   .object({ models: z.array(z.record(z.string(), z.unknown())) })
   .passthrough();
 
+const openAiModelListSchema = z.object({
+  data: z.array(z.object({ id: z.string() })),
+});
+
+export function codexCatalogFromOpenAi(text: string): string | null {
+  let payload: unknown;
+
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    return null;
+  }
+
+  const list = openAiModelListSchema.safeParse(payload);
+
+  if (!list.success) return null;
+
+  const models = list.data.data.flatMap(({ id }) => {
+    const match =
+      /^gpt-([56])(?:\.(\d+))?(?:-(astra|sol|terra|luna|codex(?:-max|-mini)?|mini|nano))?$/u.exec(
+        id,
+      );
+
+    return match === null
+      ? []
+      : [
+          {
+            id,
+            generation: Number(match[1]),
+            revision: Number(match[2] ?? 0),
+            preferred: Number(match[3] === "sol"),
+          },
+        ];
+  });
+
+  return JSON.stringify({
+    models: models
+      .sort(
+        (a, b) =>
+          b.generation - a.generation ||
+          b.revision - a.revision ||
+          b.preferred - a.preferred ||
+          a.id.localeCompare(b.id),
+      )
+      .map(({ id }, priority) => ({
+        slug: id,
+        display_name: id,
+        default_reasoning_level: "medium",
+        visibility: "list",
+        priority,
+      })),
+  });
+}
+
 export interface ParsedModelCatalog {
   body: Record<string, unknown>;
   entries: Record<string, unknown>[];

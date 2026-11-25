@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSdk } from "@omnyo/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -25,10 +33,20 @@ const STATUS_LABELS: Record<Profile["status"], string> = {
   unavailable: "Unavailable",
 };
 
-export function NativeClaudeProfiles() {
+export type ClaudeSetup = "sign-in" | "adopt";
+
+export function NativeClaudeProfiles({
+  setup,
+  onCloseSetup,
+  showEmpty,
+}: {
+  setup: ClaudeSetup | null;
+  onCloseSetup: () => void;
+  showEmpty: boolean;
+}) {
   const sdk = useSdk();
   const profiles = useMemo(() => sdk.providers.claudeProfiles, [sdk]);
-  const [machines, setMachines] = useState<Machines>([]);
+  const [machines, setMachines] = useState<Machines | null>(null);
   const [hostId, setHostId] = useState("");
   const [data, setData] = useState<ProfileList | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -96,7 +114,6 @@ export function NativeClaudeProfiles() {
 
     try {
       await action();
-      await refresh();
     } catch (cause) {
       setError(
         cause instanceof Error
@@ -104,6 +121,11 @@ export function NativeClaudeProfiles() {
           : "The Claude account could not be updated.",
       );
     } finally {
+      await refresh().catch(() => {
+        setError(
+          (current) => current ?? "The Claude accounts could not be refreshed.",
+        );
+      });
       setPending(false);
     }
   };
@@ -117,43 +139,53 @@ export function NativeClaudeProfiles() {
   };
 
   const supported = data?.supported === true;
+  const hasProfiles = (data?.profiles.length ?? 0) > 0;
+  const unavailable = data?.supported === false || profiles === undefined;
+
+  const selectMachine = (
+    <Select value={hostId} onValueChange={setHostId} disabled={pending}>
+      <SelectTrigger
+        className="w-44 max-w-full"
+        aria-label="Claude account machine"
+      >
+        <SelectValue placeholder="Choose a machine" />
+      </SelectTrigger>
+      <SelectContent>
+        {machines?.map((machine) => (
+          <SelectItem
+            key={machine.id}
+            value={machine.id}
+            disabled={machine.status !== "connected"}
+          >
+            {machine.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+
+  function closeSetup() {
+    setLabel("");
+    setError(null);
+    onCloseSetup();
+  }
 
   return (
-    <section className="space-y-3" aria-label="Native Claude accounts">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-semibold text-foreground">
-            Claude accounts
-          </h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Sign in to Claude Code and choose the account for new chats.
-          </p>
+    <>
+      {hasProfiles || (machines?.length ?? 0) > 1 ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border py-2.5">
+          <p className="text-xs text-muted-foreground">Claude Code sign-ins</p>
+          {selectMachine}
         </div>
-        <Select value={hostId} onValueChange={setHostId} disabled={pending}>
-          <SelectTrigger className="w-44" aria-label="Claude account machine">
-            <SelectValue placeholder="Choose a machine" />
-          </SelectTrigger>
-          <SelectContent>
-            {machines.map((machine) => (
-              <SelectItem
-                key={machine.id}
-                value={machine.id}
-                disabled={machine.status !== "connected"}
-              >
-                {machine.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      {error === null ? null : (
+      ) : null}
+      {setup === null && error !== null ? (
         <p role="alert" className="text-sm text-destructive-text">
           {error}
         </p>
-      )}
-      {data?.supported === false || profiles === undefined ? (
-        <p className="text-xs text-muted-foreground">
-          Native Claude accounts are not enabled on this machine.
+      ) : null}
+      {showEmpty && !hasProfiles ? (
+        <p className="py-2.5 text-sm text-subtle-foreground">
+          No accounts yet.
         </p>
       ) : null}
       {data?.profiles.map((profile) => (
@@ -251,52 +283,8 @@ export function NativeClaudeProfiles() {
           </Button>
         </div>
       )}
-      <div className="flex flex-wrap gap-2">
-        <Input
-          value={label}
-          onChange={(event) => setLabel(event.target.value)}
-          aria-label="Claude account name"
-          placeholder="Account name (optional)"
-          maxLength={80}
-          className="w-48"
-          disabled={pending || !supported}
-        />
-        <Button
-          size="sm"
-          disabled={pending || !supported}
-          onClick={() =>
-            void run(async () => {
-              const { profile } = await profiles.add({
-                hostId,
-                label:
-                  label.trim() ||
-                  `Claude account ${(data?.profiles.length ?? 0) + 1}`,
-              });
-
-              setLabel("");
-              await signIn(profile.id);
-            })
-          }
-        >
-          Add Claude account
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={pending || !supported}
-          onClick={() =>
-            void run(async () => {
-              await profiles.add({
-                hostId,
-                label: "Existing Claude sign-in",
-                adoptExisting: true,
-              });
-            })
-          }
-        >
-          Use existing Claude sign-in
-        </Button>
-        {data?.defaultSelection.kind !== "profile" ? null : (
+      {data?.defaultSelection.kind !== "profile" ? null : (
+        <div className="border-b border-border py-2">
           <Button
             size="sm"
             variant="ghost"
@@ -312,8 +300,88 @@ export function NativeClaudeProfiles() {
           >
             Use ordinary Claude sign-in by default
           </Button>
+        </div>
+      )}
+      <Dialog
+        open={setup !== null}
+        onOpenChange={(open) => {
+          if (!open && !pending) closeSetup();
+        }}
+      >
+        {setup === null ? null : (
+          <DialogContent hideCloseButton>
+            <DialogHeader>
+              <DialogTitle>
+                {setup === "adopt"
+                  ? "Use existing Claude sign-in"
+                  : "Sign in to Claude"}
+              </DialogTitle>
+              <DialogDescription>
+                {setup === "adopt"
+                  ? "Add the Claude Code account already signed in on this machine."
+                  : "Claude Code opens sign-in in the browser on this machine."}
+              </DialogDescription>
+            </DialogHeader>
+            {selectMachine}
+            {setup === "sign-in" ? (
+              <Input
+                value={label}
+                onChange={(event) => setLabel(event.target.value)}
+                aria-label="Claude account name"
+                placeholder="Account name (optional)"
+                maxLength={80}
+                disabled={pending || !supported}
+              />
+            ) : null}
+            {unavailable ? (
+              <p className="text-sm text-muted-foreground">
+                Claude account setup is unavailable on this machine.
+              </p>
+            ) : hostId === "" && machines !== null && error === null ? (
+              <p className="text-sm text-muted-foreground">
+                No connected machines.
+              </p>
+            ) : null}
+            {error === null ? null : (
+              <p role="alert" className="text-sm text-destructive-text">
+                {error}
+              </p>
+            )}
+            <DialogFooter>
+              <Button variant="outline" disabled={pending} onClick={closeSetup}>
+                Cancel
+              </Button>
+              <Button
+                disabled={pending || !supported}
+                onClick={() =>
+                  void run(async () => {
+                    if (setup === "adopt") {
+                      await profiles.add({
+                        hostId,
+                        label: "Existing Claude sign-in",
+                        adoptExisting: true,
+                      });
+                      closeSetup();
+                    } else {
+                      const { profile } = await profiles.add({
+                        hostId,
+                        label:
+                          label.trim() ||
+                          `Claude account ${(data?.profiles.length ?? 0) + 1}`,
+                      });
+
+                      closeSetup();
+                      await signIn(profile.id);
+                    }
+                  })
+                }
+              >
+                {setup === "adopt" ? "Use existing sign-in" : "Sign in"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
         )}
-      </div>
-    </section>
+      </Dialog>
+    </>
   );
 }

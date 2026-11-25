@@ -347,8 +347,12 @@ export type PoolStatusReport = z.infer<typeof statusReportSchema>;
 
 export const accountAddInputSchema = z
   .object({
-    provider: z.literal("claude"),
-    apiKey: z.string().min(1),
+    provider: providerSchema,
+    apiKey: z
+      .string()
+      .trim()
+      .min(1)
+      .regex(/^[\x21-\x7e]+$/u, "Enter an API key without spaces."),
     label: z.string().min(1).nullable(),
     priority: z.number().int(),
   })

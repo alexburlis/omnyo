@@ -7,7 +7,10 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { NativeClaudeProfiles } from "./NativeClaudeProfiles.js";
+import {
+  NativeClaudeProfiles,
+  type ClaudeSetup,
+} from "./NativeClaudeProfiles.js";
 
 const client = vi.hoisted(() => ({
   hosts: { list: vi.fn() },
@@ -47,6 +50,19 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
+function renderProfiles(setup: ClaudeSetup | null = null) {
+  const onCloseSetup = vi.fn();
+  render(
+    <NativeClaudeProfiles
+      setup={setup}
+      onCloseSetup={onCloseSetup}
+      showEmpty
+    />,
+  );
+
+  return onCloseSetup;
+}
+
 describe("Native Claude accounts", () => {
   it("disables setup on an unsupported server", async () => {
     client.providers.claudeProfiles.list.mockResolvedValue({
@@ -55,14 +71,12 @@ describe("Native Claude accounts", () => {
       profiles: [],
       defaultSelection: { kind: "unprofiled" },
     });
-    render(<NativeClaudeProfiles />);
+    renderProfiles("sign-in");
     await screen.findByText(
-      "Native Claude accounts are not enabled on this machine.",
+      "Claude account setup is unavailable on this machine.",
     );
     expect(
-      screen
-        .getByRole("button", { name: "Add Claude account" })
-        .hasAttribute("disabled"),
+      screen.getByRole("button", { name: "Sign in" }).hasAttribute("disabled"),
     ).toBe(true);
   });
 
@@ -76,9 +90,15 @@ describe("Native Claude accounts", () => {
       profile,
       loginState: "running",
     });
-    render(<NativeClaudeProfiles />);
-    await screen.findByText("Personal Claude");
-    fireEvent.click(screen.getByRole("button", { name: "Add Claude account" }));
+    const close = renderProfiles("sign-in");
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("button", { name: "Sign in" })
+          .hasAttribute("disabled"),
+      ).toBe(false),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
     await screen.findByText("Finish sign-in in the browser on this machine.");
     expect(client.providers.claudeProfiles.add).toHaveBeenCalledExactlyOnceWith(
       { hostId: "host-mac", label: "Claude account 2" },
@@ -93,10 +113,11 @@ describe("Native Claude accounts", () => {
     expect(
       screen.getByRole("textbox", { name: "Claude account name" }),
     ).toBeTruthy();
+    expect(close).toHaveBeenCalledOnce();
   });
 
   it("changes the default only on the explicit action", async () => {
-    render(<NativeClaudeProfiles />);
+    renderProfiles();
     await screen.findByText("Personal Claude");
     expect(client.providers.claudeProfiles.defaultsSet).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Make default" }));
@@ -108,5 +129,27 @@ describe("Native Claude accounts", () => {
         selection: { kind: "profile", profileId: profile.id },
       }),
     );
+  });
+
+  it("adopts the sign-in on the selected machine", async () => {
+    client.providers.claudeProfiles.add.mockResolvedValue({
+      action: "add",
+      profile,
+    });
+    const close = renderProfiles("adopt");
+    const submit = screen.getByRole("button", { name: "Use existing sign-in" });
+
+    await waitFor(() => expect(submit.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(submit);
+
+    await waitFor(() => expect(close).toHaveBeenCalledOnce());
+    expect(client.providers.claudeProfiles.add).toHaveBeenCalledExactlyOnceWith(
+      {
+        hostId: "host-mac",
+        label: "Existing Claude sign-in",
+        adoptExisting: true,
+      },
+    );
+    expect(client.providers.claudeProfiles.loginStart).not.toHaveBeenCalled();
   });
 });

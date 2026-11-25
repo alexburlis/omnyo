@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { loadPluginApp, renderSlot } from "@omnyo/plugin-sdk/testing/app";
 import type {
@@ -145,6 +151,25 @@ function render(
       sdk: { hosts: { list: async () => [] } },
       experimental_copyToClipboard: copyToClipboard,
     },
+  );
+}
+
+async function openAddMenu(
+  slot: ReturnType<typeof render>,
+  provider: "Claude" | "Codex",
+) {
+  const section = await slot.findByRole("region", { name: provider });
+  const trigger = within(section).getByRole("button", { name: "Add account" });
+
+  if (window.matchMedia?.("(max-width: 767px)").matches)
+    fireEvent.click(trigger);
+  else fireEvent.pointerDown(trigger);
+}
+
+async function startCodexFromMenu(slot: ReturnType<typeof render>) {
+  await openAddMenu(slot, "Codex");
+  fireEvent.click(
+    await slot.findByRole("menuitem", { name: /Sign in to Codex/ }),
   );
 }
 
@@ -393,25 +418,78 @@ describe("Account Pool settings", () => {
     });
   });
 
-  it("offers an Anthropic API key for Claude and preserves Codex sign-in", async () => {
-    const slot = render([account()], {
-      "codexLogin.start": codexLoginStart,
+  it("opens Claude sign-in and adoption from the Claude section", async () => {
+    const slot = render([]);
+    expect(slot.queryByRole("heading", { name: "Claude accounts" })).toBeNull();
+    expect(slot.queryByLabelText("Claude account name")).toBeNull();
+
+    await openAddMenu(slot, "Claude");
+    fireEvent.click(
+      await slot.findByRole("menuitem", { name: /Sign in to Claude/ }),
+    );
+
+    const signIn = await slot.findByRole("dialog", {
+      name: "Sign in to Claude",
     });
 
-    fireEvent.click(await slot.findByRole("button", { name: "Add API key" }));
     expect(
-      await slot.findByRole("dialog", { name: "Add an Anthropic API key" }),
+      within(signIn).getByLabelText("Claude account machine"),
     ).toBeTruthy();
-    expect(slot.queryByText("Sign in to Claude")).toBeNull();
-    fireEvent.click(slot.getByRole("button", { name: "Close" }));
-    fireEvent.pointerDown(
-      await slot.findByRole("button", { name: "Add account" }),
+    fireEvent.click(within(signIn).getByRole("button", { name: "Cancel" }));
+
+    await openAddMenu(slot, "Claude");
+    fireEvent.click(
+      await slot.findByRole("menuitem", {
+        name: "Use existing Claude sign-in",
+      }),
     );
-    fireEvent.click(await slot.findByText("Sign in to Codex"));
-    expect(
-      (await slot.findByLabelText("Codex user code")).textContent,
-    ).toContain("ABCD-1234");
+
+    const adopt = await slot.findByRole("dialog", {
+      name: "Use existing Claude sign-in",
+    });
+
+    expect(within(adopt).getByLabelText("Claude account machine")).toBeTruthy();
   });
+
+  it.each([
+    { section: "Claude", vendor: "Anthropic", provider: "claude" },
+    { section: "Codex", vendor: "OpenAI", provider: "codex" },
+  ] as const)(
+    "saves a key from the $section menu",
+    async ({ section, vendor, provider }) => {
+      const slot = render([], {
+        "account.add": () => account({ provider, kind: "api-key" }),
+      });
+
+      await openAddMenu(slot, section);
+      fireEvent.click(
+        await slot.findByRole("menuitem", { name: "Add API key" }),
+      );
+
+      const dialog = await slot.findByRole("dialog", {
+        name: `Add an ${vendor} API key`,
+      });
+
+      const input = within(dialog).getByLabelText(`${vendor} API key`);
+      expect(input.getAttribute("type")).toBe("password");
+      fireEvent.change(input, { target: { value: "fixture-key" } });
+      fireEvent.click(
+        within(dialog).getByRole("button", { name: "Add API key" }),
+      );
+
+      await waitFor(() =>
+        expect(slot.rpcCalls).toContainEqual({
+          method: "account.add",
+          input: {
+            provider,
+            apiKey: "fixture-key",
+            label: null,
+            priority: 100,
+          },
+        }),
+      );
+    },
+  );
 
   it("keeps the retired Claude account visible with recovery and removal", async () => {
     const slot = render([
@@ -589,9 +667,7 @@ describe("Account Pool settings", () => {
 
   it("names the sign-in dialog once and keeps the step instructions", async () => {
     const slot = render([], { "codexLogin.start": codexLoginStart });
-    fireEvent.click(
-      await slot.findByRole("button", { name: "Sign in to Codex" }),
-    );
+    await startCodexFromMenu(slot);
 
     const dialog = await slot.findByRole("dialog", {
       name: "Sign in to Codex",
@@ -620,9 +696,7 @@ describe("Account Pool settings", () => {
         "codexLogin.cancel": () => ({ cancelled: true }),
       });
 
-      fireEvent.click(
-        await slot.findByRole("button", { name: "Sign in to Codex" }),
-      );
+      await startCodexFromMenu(slot);
       await slot.findByRole("dialog", { name: "Sign in to Codex" });
       fireEvent.click(slot.getByRole("button", { name: "Close" }));
       await waitFor(() =>
@@ -656,9 +730,7 @@ describe("Account Pool settings", () => {
       () => copy.promise,
     );
 
-    fireEvent.click(
-      await slot.findByRole("button", { name: "Sign in to Codex" }),
-    );
+    await startCodexFromMenu(slot);
 
     const button = await slot.findByRole("button", {
       name: "Copy Codex sign-in code",
@@ -683,9 +755,7 @@ describe("Account Pool settings", () => {
       () => copy.promise,
     );
 
-    fireEvent.click(
-      await slot.findByRole("button", { name: "Sign in to Codex" }),
-    );
+    await startCodexFromMenu(slot);
 
     const button = await slot.findByRole("button", {
       name: "Copy Codex authorization URL",
@@ -720,9 +790,7 @@ describe("Account Pool settings", () => {
       () => copy.promise,
     );
 
-    fireEvent.click(
-      await slot.findByRole("button", { name: "Sign in to Codex" }),
-    );
+    await startCodexFromMenu(slot);
     fireEvent.click(
       await slot.findByRole("button", { name: "Copy Codex sign-in code" }),
     );
@@ -761,9 +829,7 @@ describe("Account Pool settings", () => {
       "codexLogin.poll": () => ({ status: "error", message: "Code expired." }),
     });
 
-    fireEvent.click(
-      await slot.findByRole("button", { name: "Sign in to Codex" }),
-    );
+    await startCodexFromMenu(slot);
     fireEvent.click(await slot.findByRole("button", { name: "Start again" }));
     await waitFor(() => expect(starts).toBe(2));
   });

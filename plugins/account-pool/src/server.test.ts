@@ -343,7 +343,7 @@ async function createFixture(args: {
         })
       : accountSchema.parse(
           await host.harness.behavior.callRpc("account.add", {
-            provider: "claude",
+            provider: args.provider ?? "claude",
             apiKey: args.apiKey ?? "sk-account",
             label: null,
             priority: args.priority ?? 100,
@@ -507,6 +507,121 @@ describe("Account Pool config schema", () => {
 });
 
 describe("Account Pool plugin", () => {
+  it("discovers Codex models and routes with an OpenAI API key without forwarding machine or ChatGPT credentials", async () => {
+    const forwarded: Array<{
+      url: string;
+      authorization: string | null;
+      privateHeaders: boolean;
+    }> = [];
+
+    let rejectKey = false;
+
+    const fixture = await createFixture({
+      upstreamUrl: "https://chatgpt-fixture.example/backend-api/codex",
+      provider: "codex",
+      apiKey: "fixture-openai-key",
+      options: {
+        fetch: async (input, init) => {
+          const headers = new Headers(init?.headers);
+          forwarded.push({
+            url: String(input),
+            authorization: headers.get("authorization"),
+            privateHeaders: [
+              "chatgpt-account-id",
+              "x-omnyo-account-pool-token",
+              "x-codex-test",
+            ].some((name) => headers.has(name)),
+          });
+
+          if (rejectKey)
+            return Response.json(
+              { error: { message: "Rejected fixture-openai-key" } },
+              { status: 401 },
+            );
+
+          if (String(input).endsWith("/models"))
+            return Response.json({
+              data: [
+                { id: "text-embedding-3-small" },
+                { id: "gpt-6.2-astra" },
+                { id: "gpt-6.2-sol" },
+                { id: "gpt-5.4-mini" },
+                { id: "gpt-5.4" },
+              ],
+            });
+
+          return Response.json({ result: "forwarded" });
+        },
+      },
+    });
+
+    expect(fixture.account).toMatchObject({
+      label: "Codex API key",
+      kind: "api-key",
+      provider: "codex",
+    });
+
+    const headers = {
+      "content-type": "application/json",
+      authorization: "Bearer fixture-host-login",
+      "x-omnyo-account-pool-token": fixture.key,
+      "chatgpt-account-id": "fixture-chatgpt-account",
+      "x-codex-test": "fixture-private-header",
+    };
+
+    const fetchHttp = fixture.host.harness.behavior.fetchHttp;
+
+    const models = await fetchHttp("GET", "/v1/models?client_version=0.172.0", {
+      headers,
+    });
+
+    expect(models.status).toBe(200);
+    expect(await models.json()).toMatchObject({
+      models: [
+        { slug: "gpt-6.2-sol", priority: 0, default_reasoning_level: "medium" },
+        { slug: "gpt-6.2-astra", priority: 1 },
+        { slug: "gpt-5.4", priority: 2 },
+        { slug: "gpt-5.4-mini", priority: 3 },
+      ],
+    });
+
+    for (const route of ["/v1/responses", "/v1/responses/compact"]) {
+      const response = await fetchHttp("POST", route, {
+        headers,
+        body: JSON.stringify({ model: "gpt-5.4", input: "fixture prompt" }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ result: "forwarded" });
+    }
+
+    expect(forwarded).toEqual(
+      ["models", "responses", "responses/compact"].map((route) => ({
+        url: `https://api.openai.com/v1/${route}`,
+        authorization: "Bearer fixture-openai-key",
+        privateHeaders: false,
+      })),
+    );
+
+    rejectKey = true;
+
+    const rejected = await fetchHttp("POST", "/v1/responses", {
+      headers,
+      body: JSON.stringify({ model: "gpt-5.4", input: "fixture prompt" }),
+    });
+
+    expect(rejected.status).toBe(401);
+    expect(await rejected.text()).not.toContain("fixture-openai-key");
+
+    const status = await fixture.host.harness.behavior.callRpc(
+      "status.get",
+      null,
+    );
+
+    expect(statusSchema.parse(status).accounts[0]?.error).toBe(
+      "OpenAI rejected this API key (HTTP 401).",
+    );
+  });
   it("removes persisted cache debugging settings while preserving pool configuration across reloads", async () => {
     const dataDir = await mkdtemp(
       path.join(tmpdir(), "omnyo-account-pool-config-upgrade-"),

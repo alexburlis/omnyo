@@ -42,7 +42,11 @@ import {
   readParentPool,
   type ParentPool,
 } from "./parent-pool.js";
-import { createHub, DEFAULT_ACCOUNT_POOL_DRAIN_TIMEOUT_MS } from "./hub.js";
+import {
+  CODEX_COMPACT_PATH,
+  createHub,
+  DEFAULT_ACCOUNT_POOL_DRAIN_TIMEOUT_MS,
+} from "./hub.js";
 
 import { PoolOperations } from "./operations.js";
 import { poolModelNotice } from "./model-notice.js";
@@ -631,6 +635,7 @@ export function createAccountPoolPlugin(
 
     for (const route of [
       "/v1/responses",
+      CODEX_COMPACT_PATH,
       "/v1/images/generations",
       "/v1/images/edits",
       "/v1/alpha/search",

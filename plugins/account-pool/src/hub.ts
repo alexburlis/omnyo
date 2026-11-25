@@ -63,6 +63,7 @@ import {
 } from "./model-compatibility.js";
 import {
   advertisesServiceTier,
+  codexCatalogFromOpenAi,
   codexServiceTierId,
   isActiveModelCatalog,
   listsModel,
@@ -136,6 +137,8 @@ const AFFINITY_IDLE_TTL_MS = 65 * 60 * 1_000;
 const MAX_AFFINITY_BINDINGS = 4_096;
 
 const MODEL_ROUTED_PATH = "/v1/responses";
+
+export const CODEX_COMPACT_PATH = "/v1/responses/compact";
 
 const CODEX_MODELS_PATH = "/v1/models";
 
@@ -470,7 +473,15 @@ export class AccountPoolHub {
     if (text === null) return adapter.errorResponse(502, CATALOG_TOO_LARGE);
 
     const headers = new Headers(response.headers);
-    const body = text;
+
+    const body =
+      account.kind === "api-key" ? codexCatalogFromOpenAi(text) : text;
+
+    if (body === null)
+      return adapter.errorResponse(
+        502,
+        "OpenAI returned an invalid model list.",
+      );
 
     const reply = (content: string) =>
       new Response(content, {
@@ -687,7 +698,11 @@ export class AccountPoolHub {
       AbortSignal.timeout(MODEL_CATALOG_PROBE_TIMEOUT_MS),
     ]);
 
-    const url = adapter.upstreamUrl(request, this.options.getSettings());
+    const url = adapter.upstreamUrl(
+      request,
+      this.options.getSettings(),
+      account,
+    );
 
     const retryLater = () =>
       this.catalogProbeRetryAt.set(
@@ -713,6 +728,7 @@ export class AccountPoolHub {
               credential,
             ),
             signal: tracked.controller.signal,
+            ...(account.kind === "api-key" ? { redirect: "error" } : {}),
           });
 
           if (
@@ -739,7 +755,13 @@ export class AccountPoolHub {
             return;
           }
 
-          const text = await readCatalogText(response, signal);
+          const raw = await readCatalogText(response, signal);
+
+          const text =
+            raw !== null && account.kind === "api-key"
+              ? codexCatalogFromOpenAi(raw)
+              : raw;
+
           const parsed = text === null ? null : parseModelCatalog(text);
 
           const latest = (await this.options.accounts.listRoutable()).find(
@@ -756,7 +778,9 @@ export class AccountPoolHub {
           this.options.quotas.replaceModelCatalog({
             accountId: account.id,
             plan: latest.subscriptionType,
-            clientVersion: url.searchParams.get("client_version"),
+            clientVersion: new URL(request.url).searchParams.get(
+              "client_version",
+            ),
             etag: response.headers.get("etag"),
             fetchedAt: this.options.now(),
             models: parsed.models,
@@ -1618,7 +1642,9 @@ export class AccountPoolHub {
     let usageRefreshed = false;
 
     const accounts = (await this.options.accounts.list()).filter(
-      (account) => account.provider === adapter.provider,
+      (account) =>
+        account.provider === adapter.provider &&
+        (routePath !== "/v1/alpha/search" || account.kind === "oauth"),
     );
 
     const candidateIds = new Set(
@@ -1631,7 +1657,8 @@ export class AccountPoolHub {
     const family = parsed.family;
 
     const model =
-      request.method === "POST" && routePath === MODEL_ROUTED_PATH
+      request.method === "POST" &&
+      (routePath === MODEL_ROUTED_PATH || routePath === CODEX_COMPACT_PATH)
         ? parsed.model
         : null;
 
@@ -1919,19 +1946,27 @@ export class AccountPoolHub {
             response.status === 529
           ) {
             const retryAfter = response.headers.get("retry-after");
-            const detail = await this.discardUpstream(upstream, true);
+            const rejected = response.status === 401 || response.status === 403;
+
+            const openAiKeyRejected =
+              rejected &&
+              adapter.provider === "codex" &&
+              secret.kind === "api-key";
+
+            const detail = await this.discardUpstream(
+              upstream,
+              !openAiKeyRejected,
+            );
+
             signal.throwIfAborted();
             failure = {
               status: response.status,
-              message:
-                detail ||
-                adapter.upstreamName +
-                  " returned HTTP " +
-                  response.status +
-                  ".",
+              message: openAiKeyRejected
+                ? `OpenAI rejected this API key (HTTP ${response.status}).`
+                : detail ||
+                  `${adapter.upstreamName} returned HTTP ${response.status}.`,
               headers: retryAfter === null ? {} : { "retry-after": retryAfter },
             };
-            const rejected = response.status === 401 || response.status === 403;
 
             if (!rejected) {
               if (await retryTransient(retryAfter)) continue;
@@ -2749,7 +2784,13 @@ export class AccountPoolHub {
     try {
       const upstreamBody = new ArrayBuffer(body.byteLength);
       new Uint8Array(upstreamBody).set(body);
-      const url = adapter.upstreamUrl(request, this.options.getSettings());
+
+      const url = adapter.upstreamUrl(
+        request,
+        this.options.getSettings(),
+        account,
+      );
+
       const headers = adapter.requestHeaders(request.headers, account, secret);
 
       const context = this.upstreamContext(
@@ -2765,6 +2806,9 @@ export class AccountPoolHub {
         .fetch(url, {
           method: request.method,
           headers,
+          ...(account.provider === "codex" && account.kind === "api-key"
+            ? { redirect: "error" }
+            : {}),
           ...(request.method === "GET" || request.method === "HEAD"
             ? {}
             : { body: upstreamBody }),

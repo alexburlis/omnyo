@@ -2,7 +2,7 @@ Keep Claude Code and Codex threads running across limits. Account Pooler routes 
 
 ## What you get
 
-- Add Claude or Codex accounts by browser/device sign-in, or an Anthropic API key. Each has a separate pool login; **Sign in again** renews it.
+- Open **Add account** in either provider section. For Claude, manage Claude Code sign-ins by machine or add an Anthropic API key to the pool. For Codex, sign in to ChatGPT with a device code or add an OpenAI API key.
 - Accounts run one after another in priority order, with ties following the order added. New conversations stay on the current fallback even when an earlier account recovers. Existing conversations keep their own account until it becomes unavailable.
 - Reorder accounts in settings with drag handles or Space and arrow keys, or `omnyo pool account reorder <claude|codex> <id>...`.
 - Live account and model-family limits in settings and `omnyo pool status`.
@@ -10,6 +10,8 @@ Keep Claude Code and Codex threads running across limits. Account Pooler routes 
 - Provider Retry recovery times, Composer Predictions, and selected-account Codex reset credits in the private distribution.
 
 ## Routing and cost
+
+Anthropic and OpenAI bill requests served by their API keys. The Codex pool uses available subscription quota before paid API keys.
 
 The switch threshold defaults to 98 percent. It moves new conversations toward accounts below that threshold; provider-allowed subscription quota above it remains usable before paid fallback. Existing conversations keep their included-quota pin while the provider permits it. Usable subscription allowance takes precedence over reported Claude extra usage or Codex credits. Exhausted accounts are checked before fallback. Spending-control and explicit credit-depletion restrictions block Codex routing. The pool does not enable extra usage, buy credits, change spending limits, or treat reported credit availability as current billing activity.
 

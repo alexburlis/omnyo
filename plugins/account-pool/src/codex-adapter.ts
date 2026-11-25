@@ -30,6 +30,8 @@ export const CODEX_CLIENT_RETRY_LIMIT_MS = 60_000;
 export const DEFAULT_CODEX_USAGE_URL =
   "https://chatgpt.com/backend-api/wham/usage";
 
+const OPENAI_API_BASE_URL = "https://api.openai.com";
+
 const USAGE_REQUEST_TIMEOUT_MS = 15_000;
 
 const ALLOWED_REQUEST_HEADERS = new Set([
@@ -46,6 +48,13 @@ const ALLOWED_REQUEST_HEADERS = new Set([
 ]);
 
 const ALLOWED_REQUEST_HEADER_PREFIXES = ["x-codex-", "x-stainless-"];
+
+const ALLOWED_OPENAI_API_HEADERS = new Set([
+  "accept",
+  "content-encoding",
+  "content-type",
+  "user-agent",
+]);
 
 const refreshResponseSchema = z
   .object({
@@ -530,14 +539,36 @@ export function createCodexAdapter(options: {
 
     parseRequest: parseCodexRequestBody,
     inspectModelRejection: inspectCodexModelRejection,
-    upstreamUrl: (request, settings) =>
-      mountedUpstreamUrl(request, settings.codexUpstreamBaseUrl, "v1/"),
-    requestHeaders(inbound, account, secret) {
-      if (secret.kind !== "oauth" || account.codexAccountId === undefined) {
-        throw new Error(
-          "Codex accounts require OAuth credentials and a ChatGPT account id.",
+    upstreamUrl(request, settings, account) {
+      if (account.kind === "oauth")
+        return mountedUpstreamUrl(
+          request,
+          settings.codexUpstreamBaseUrl,
+          "v1/",
         );
+
+      const url = mountedUpstreamUrl(request, OPENAI_API_BASE_URL);
+
+      if (url.pathname === "/v1/models")
+        url.searchParams.delete("client_version");
+
+      return url;
+    },
+    requestHeaders(inbound, account, secret) {
+      if (secret.kind === "api-key") {
+        const headers = filterRequestHeaders(
+          inbound,
+          ALLOWED_OPENAI_API_HEADERS,
+          [],
+        );
+
+        headers.set("authorization", `Bearer ${secret.apiKey}`);
+
+        return headers;
       }
+
+      if (account.codexAccountId === undefined)
+        throw new Error("Codex OAuth accounts require a ChatGPT account id.");
 
       const headers = filterRequestHeaders(
         inbound,

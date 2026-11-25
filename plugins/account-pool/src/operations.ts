@@ -94,7 +94,9 @@ export class PoolOperations {
       {
         provider: input.provider,
         kind: "api-key",
-        label: input.label ?? "Claude API key",
+        label:
+          input.label ??
+          (input.provider === "claude" ? "Claude API key" : "Codex API key"),
         email: null,
         accountUuid: null,
         subscriptionType: null,
