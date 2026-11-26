@@ -1,3 +1,4 @@
+import { shouldQueueFollowUpMessage } from "@omnyo/client-core";
 import type {
   ThreadQueuedMessage,
   ThreadRuntimeDisplayStatus,
@@ -8,10 +9,16 @@ import type { OutboxEntry } from "./send-outbox-entry";
 
 const EMPTY: readonly PendingSentMessage[] = [];
 
-export function isBackgroundSend(
+export function followUpShowsInChat(
+  status: ThreadRuntimeDisplayStatus | undefined,
+): boolean {
+  return status === undefined || !shouldQueueFollowUpMessage(status);
+}
+
+export function queuedMessageShowsInChat(
   message: ThreadQueuedMessage,
-  status: ThreadRuntimeDisplayStatus,
-) {
+  status: ThreadRuntimeDisplayStatus | undefined,
+): boolean {
   return (
     status === "idle" &&
     message.failureReason === null &&
@@ -21,8 +28,28 @@ export function isBackgroundSend(
   );
 }
 
+export function outboxEntryShowsInChat(
+  entry: OutboxEntry,
+  threadId: string,
+  status: ThreadRuntimeDisplayStatus | undefined,
+): entry is OutboxEntry & {
+  action: Extract<OutboxEntry["action"], { kind: "thread-message" }>;
+} {
+  return (
+    followUpShowsInChat(status) &&
+    entry.action.kind === "thread-message" &&
+    "threadId" in entry.action.target &&
+    entry.action.target.threadId === threadId &&
+    entry.state.kind === "waiting" &&
+    entry.action.message.input.some(
+      (part) => part.submissionId === entry.submissionId,
+    )
+  );
+}
+
 export function pendingTimelineSubmissions(
   threadId: string,
+  status: ThreadRuntimeDisplayStatus | undefined,
   entries: readonly OutboxEntry[],
   queue: readonly ThreadQueuedMessage[],
 ): readonly PendingSentMessage[] {
@@ -48,17 +75,8 @@ export function pendingTimelineSubmissions(
   }
 
   for (const entry of entries) {
-    if (
-      entry.action.kind !== "thread-message" ||
-      !("threadId" in entry.action.target) ||
-      entry.action.target.threadId !== threadId ||
-      entry.state.kind !== "waiting"
-    )
-      continue;
+    if (!outboxEntryShowsInChat(entry, threadId, status)) continue;
     const input = entry.action.message.input;
-
-    if (!input.some((part) => part.submissionId === entry.submissionId))
-      continue;
 
     const paths = new Map(
       entry.attachments.map((file) => [file.token, file.uploadedPath]),
@@ -79,7 +97,11 @@ export function pendingTimelineSubmissions(
   for (const message of queue) {
     const id = message.content.find((part) => part.submissionId)?.submissionId;
 
-    if (id && message.threadId === threadId && !message.failureReason)
+    if (
+      id &&
+      message.threadId === threadId &&
+      queuedMessageShowsInChat(message, status)
+    )
       add(id, message.createdAt, message.content);
   }
 

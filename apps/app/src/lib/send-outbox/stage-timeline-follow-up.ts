@@ -25,6 +25,7 @@ export async function stageTimelineFollowUp({
   submission,
   execution,
   sourceOf,
+  showsInChat,
 }: {
   queryClient: QueryClient;
   threadId: string;
@@ -35,6 +36,7 @@ export async function stageTimelineFollowUp({
   >;
   execution: FollowUpExecutionSelection;
   sourceOf: (attachment: PromptDraftAttachment) => File | null;
+  showsInChat: boolean;
 }): Promise<boolean> {
   const submissionId = createSubmissionId();
 
@@ -48,7 +50,7 @@ export async function stageTimelineFollowUp({
     threadStatus: null,
   });
 
-  addPendingSentMessage(queryClient, threadId, row);
+  if (showsInChat) addPendingSentMessage(queryClient, threadId, row);
 
   const prediction = trackOutboxThreadMessage({
     queryClient,

@@ -7,6 +7,7 @@ import {
 } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  threadQueryKey,
   threadQueuedMessagesQueryKey,
   threadTimelineQueryKey,
 } from "@/hooks/queries/query-keys";
@@ -15,7 +16,11 @@ import {
   getPendingSentMessages,
   subscribePendingSentMessages,
 } from "@/hooks/cache-owners/pending-sent-messages";
-import type { ThreadQueuedMessage } from "@omnyo/domain";
+import type {
+  ThreadQueuedMessage,
+  ThreadRuntimeDisplayStatus,
+} from "@omnyo/domain";
+import type { ThreadResponse } from "@omnyo/server-contract";
 import { pendingTimelineSubmissions } from "@/lib/send-outbox/timeline-submissions";
 import {
   readSendOutboxSnapshot,
@@ -44,9 +49,19 @@ export function usePendingTimelineMessages(threadId: string) {
     enabled: false,
   });
 
+  const { data: status } = useQuery<
+    ThreadResponse,
+    Error,
+    ThreadRuntimeDisplayStatus
+  >({
+    queryKey: threadQueryKey(threadId),
+    enabled: false,
+    select: (thread) => thread.runtime.displayStatus,
+  });
+
   const submissions = useMemo(
-    () => pendingTimelineSubmissions(threadId, entries, queue ?? []),
-    [threadId, entries, queue],
+    () => pendingTimelineSubmissions(threadId, status, entries, queue ?? []),
+    [threadId, status, entries, queue],
   );
 
   const [retained, setRetained] = useState<readonly PendingSentMessage[]>([]);

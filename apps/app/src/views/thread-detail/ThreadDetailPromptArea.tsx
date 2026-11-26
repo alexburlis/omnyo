@@ -1,5 +1,9 @@
 import { stageTimelineFollowUp } from "@/lib/send-outbox/stage-timeline-follow-up";
-import { isBackgroundSend } from "@/lib/send-outbox/timeline-submissions";
+import {
+  followUpShowsInChat,
+  outboxEntryShowsInChat,
+  queuedMessageShowsInChat,
+} from "@/lib/send-outbox/timeline-submissions";
 import { useLiveThreadSpeed } from "@/hooks/useLiveThreadSpeed";
 import { ThreadInboxReason } from "@/components/thread/ThreadInboxReason";
 import { useThreadInitialLoadPending } from "@/components/thread/ThreadInitialLoad";
@@ -1581,6 +1585,7 @@ export function ThreadDetailPromptArea({
             submission,
             execution: followUpExecutionSelection,
             sourceOf: uploadedAttachmentSource,
+            showsInChat: followUpShowsInChat(runtimeDisplayStatus),
           }))
         ) {
           setFullHistoryThreadId(null);
@@ -2759,7 +2764,7 @@ export function ThreadDetailPromptArea({
   const actionableQueuedMessages = useMemo(
     () =>
       queuedMessages.filter(
-        (message) => !isBackgroundSend(message, runtimeDisplayStatus),
+        (message) => !queuedMessageShowsInChat(message, runtimeDisplayStatus),
       ),
     [queuedMessages, runtimeDisplayStatus],
   );
@@ -2951,10 +2956,10 @@ export function ThreadDetailPromptArea({
             <WaitingToSendCard
               entries={waitingToSendEntries.filter(
                 (entry) =>
-                  entry.state.kind === "paused" ||
-                  entry.action.kind !== "thread-message" ||
-                  !entry.action.message.input.some(
-                    (part) => part.submissionId === entry.submissionId,
+                  !outboxEntryShowsInChat(
+                    entry,
+                    thread.id,
+                    runtimeDisplayStatus,
                   ),
               )}
             />

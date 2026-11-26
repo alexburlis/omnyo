@@ -165,6 +165,7 @@ function fixture() {
     projectId: idle.projectId,
     execution: null,
     sourceOf: () => null,
+    showsInChat: true,
     submission: {
       input: [{ type: "text" as const, text: "Send", mentions: [] }],
       prepareInput: undefined,

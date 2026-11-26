@@ -5,7 +5,10 @@ import {
   withPendingSentMessages,
 } from "@/hooks/cache-owners/pending-sent-messages";
 import { stageTimelineFollowUp } from "./stage-timeline-follow-up";
-import { pendingTimelineSubmissions } from "./timeline-submissions";
+import {
+  followUpShowsInChat,
+  pendingTimelineSubmissions,
+} from "./timeline-submissions";
 import * as outbox from "./send-outbox";
 import type { OutboxEntry } from "./send-outbox-entry";
 
@@ -76,6 +79,7 @@ it("renders identical sends immediately and replaces only the confirmed submissi
       projectId: "project",
       execution: null,
       sourceOf: () => null,
+      showsInChat: true,
       submission: {
         input: [{ type: "text", text: "same words", mentions: [] }],
         prepareInput: undefined,
@@ -94,7 +98,7 @@ it("renders identical sends immediately and replaces only the confirmed submissi
   expect(entries).toHaveLength(0);
   resume(true);
   expect(await Promise.all([first, second])).toEqual([true, true]);
-  const staged = pendingTimelineSubmissions(threadId, entries, []);
+  const staged = pendingTimelineSubmissions(threadId, "idle", entries, []);
   expect(staged.map((item) => item.row.id)).toEqual(
     immediate.map((item) => item.row.id),
   );
@@ -110,6 +114,7 @@ it("renders identical sends immediately and replaces only the confirmed submissi
   expect(
     pendingTimelineSubmissions(
       threadId,
+      "idle",
       [
         {
           ...entries[0]!,
@@ -120,6 +125,39 @@ it("renders identical sends immediately and replaces only the confirmed submissi
     ),
   ).toHaveLength(0);
 });
+
+it.each([
+  ["idle", 1],
+  ["active", 0],
+] as const)(
+  "adds an optimistic chat row for a follow-up to an %s thread only when it will run at once",
+  async (status, chatRows) => {
+    vi.mocked(outbox.isSendOutboxAvailable).mockResolvedValue(true);
+    vi.mocked(outbox.stageThreadMessageInOutbox).mockResolvedValue("staged");
+    const queryClient = new QueryClient();
+    const threadId = `thr_${status}`;
+
+    const send = stageTimelineFollowUp({
+      queryClient,
+      threadId,
+      projectId: "project",
+      execution: null,
+      sourceOf: () => null,
+      showsInChat: followUpShowsInChat(status),
+      submission: {
+        input: [{ type: "text", text: "Queue me", mentions: [] }],
+        prepareInput: undefined,
+        getDraft: () => ({ text: "Queue me", mentions: [], attachments: [] }),
+      },
+    });
+
+    expect(getPendingSentMessages(queryClient, threadId)).toHaveLength(
+      chatRows,
+    );
+    expect(await send).toBe(true);
+    queryClient.clear();
+  },
+);
 
 it.each(["unavailable", "failure"] as const)(
   "removes the click prediction after %s staging",
@@ -138,6 +176,7 @@ it.each(["unavailable", "failure"] as const)(
       projectId: "proj_a",
       execution: null,
       sourceOf: () => null,
+      showsInChat: true,
       submission: {
         input: [{ type: "text", text: "Send", mentions: [] }],
         prepareInput: undefined,
