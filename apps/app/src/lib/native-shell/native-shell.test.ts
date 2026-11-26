@@ -5,9 +5,9 @@ import {
   type NativeShellHandshake,
 } from "@omnyo/mobile-bridge";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render } from "@testing-library/react";
-import { createElement } from "react";
-import { MemoryRouter } from "react-router-dom";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import { createElement, useState } from "react";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import {
   installNativeShellForTest,
   removeNativeShellForTest,
@@ -28,6 +28,100 @@ const baseHandshake: Partial<NativeShellHandshake> = {
   appVersion: "0.39.0",
   capabilities: ["haptic", "badge", "share", "open-external", "safe-area"],
 };
+
+describe("native shell navigation", () => {
+  function CurrentPath() {
+    const location = useLocation();
+    const [draft, setDraft] = useState("");
+
+    return createElement(
+      "div",
+      null,
+      createElement(
+        "output",
+        { "data-testid": "path" },
+        `${location.pathname}${location.search}`,
+      ),
+      createElement("input", {
+        "aria-label": "Draft",
+        value: draft,
+        onChange: (event: React.ChangeEvent<HTMLInputElement>) =>
+          setDraft(event.target.value),
+      }),
+    );
+  }
+
+  function renderNavigator(path = "/projects/p1/threads/thr_open") {
+    return render(
+      createElement(
+        MemoryRouter,
+        { initialEntries: [path] },
+        createElement(NativeShellReporter),
+        createElement(
+          Routes,
+          null,
+          createElement(Route, {
+            path: "*",
+            element: createElement(CurrentPath),
+          }),
+        ),
+      ),
+    );
+  }
+
+  function sendEvent(event: unknown): void {
+    act(() => {
+      new Function("window", buildBridgeEventScript(event))(window);
+    });
+  }
+
+  it("announces navigation support and opens notification and deep-link paths in place", () => {
+    const shell = installShell();
+    const { getByLabelText, getByTestId } = renderNavigator();
+    fireEvent.change(getByLabelText("Draft"), {
+      target: { value: "unsent message" },
+    });
+    expect(shell.messages()).toContainEqual({
+      type: "capabilities",
+      capabilities: ["navigate"],
+    });
+    sendEvent({ type: "navigate", path: "/projects/p1/threads/thr_notified" });
+    expect(getByTestId("path").textContent).toBe(
+      "/projects/p1/threads/thr_notified",
+    );
+    sendEvent({ type: "navigate", path: "/?initialPrompt=hello" });
+    expect(getByTestId("path").textContent).toBe("/?initialPrompt=hello");
+    expect(getByLabelText("Draft")).toHaveProperty("value", "unsent message");
+  });
+
+  it("reports the requested cold-start path without navigating away", () => {
+    const shell = installShell();
+    const path = "/projects/p2/threads/thr_notified?from=push";
+    const { getByTestId } = renderNavigator(path);
+    expect(getByTestId("path").textContent).toBe(path);
+    expect(shell.messages()).toContainEqual({ type: "ready", path });
+  });
+
+  it("ignores navigation outside the app's own paths", () => {
+    installShell();
+    const { getByTestId } = renderNavigator();
+    sendEvent({ type: "navigate", path: "//evil.example/threads" });
+    sendEvent({ type: "navigate", path: "https://evil.example/" });
+    expect(getByTestId("path").textContent).toBe(
+      "/projects/p1/threads/thr_open",
+    );
+  });
+
+  it("stays silent in a plain browser", () => {
+    const post = vi.fn();
+    Object.defineProperty(window, "ReactNativeWebView", {
+      configurable: true,
+      value: { postMessage: post },
+    });
+    renderNavigator();
+    expect(post).not.toHaveBeenCalled();
+  });
+});
 
 function installShell(
   overrides: Partial<NativeShellHandshake> = {},
