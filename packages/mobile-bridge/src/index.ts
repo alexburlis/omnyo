@@ -15,12 +15,14 @@ export {
 
 export {
   type NativeScreen,
+  type PageCapability,
   parsePageToShellMessage,
   type BridgeSharePayload,
   type PageToShellMessage,
 } from "./messages.js";
 
 export {
+  parseAppPath,
   parseShellToPageEvent,
   type BridgeResponse,
   type ShellToPageEvent,

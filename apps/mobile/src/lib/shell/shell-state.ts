@@ -117,17 +117,33 @@ export function revealsShellFailure(
   );
 }
 
-export function resolveShellLoadPath(input: {
-  visitedPath: string | null;
-  requestedPath: string | undefined;
-}): string {
-  if (input.visitedPath !== null) return input.visitedPath;
+export interface ShellPath {
+  scope: string;
+  path: string;
+}
 
-  if (input.requestedPath !== undefined && input.requestedPath.length > 0) {
-    return input.requestedPath;
-  }
+export function resolveShellLoadPath(input: {
+  scope: string | null;
+  openPath: ShellPath | null;
+  visitedPath: ShellPath | null;
+}): string {
+  if (input.openPath?.scope === input.scope) return input.openPath.path;
+
+  if (input.visitedPath?.scope === input.scope) return input.visitedPath.path;
 
   return "/";
+}
+
+export function resolveShellOpen(input: {
+  switchingProfile: boolean;
+  load: ShellLoadPhase;
+  pageNavigates: boolean;
+}): "navigate" | "load" {
+  return !input.switchingProfile &&
+    input.load.kind === "ready" &&
+    input.pageNavigates
+    ? "navigate"
+    : "load";
 }
 
 export function shouldReloadForSession(

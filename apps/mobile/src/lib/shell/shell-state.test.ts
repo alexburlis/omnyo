@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { SessionState } from "../session/session-scheduler";
 import {
   resolveShellLoadPath,
+  resolveShellOpen,
   resolveShellScreenState,
   revealsShellFailure,
   shouldReloadForSession,
@@ -251,31 +252,125 @@ describe("revealsShellFailure", () => {
 });
 
 describe("resolveShellLoadPath", () => {
-  it("reloads the page where the user is, not where it was first opened", () => {
-    expect(
-      resolveShellLoadPath({
-        visitedPath: "/projects/p1/threads/thr_new",
-        requestedPath: "/projects/p1/threads/thr_notified",
-      }),
-    ).toBe("/projects/p1/threads/thr_new");
-  });
+  const firstScope = "profile-a#https://first.example";
+  const secondScope = "profile-b#https://second.example";
 
-  it("opens a requested thread before the page reports where it is", () => {
+  it("loads a thread the user asked to open before the last visited page", () => {
     expect(
       resolveShellLoadPath({
-        visitedPath: null,
-        requestedPath: "/projects/p1/threads/thr_notified",
+        scope: firstScope,
+        openPath: {
+          scope: firstScope,
+          path: "/projects/p1/threads/thr_notified",
+        },
+        visitedPath: {
+          scope: firstScope,
+          path: "/projects/p1/threads/thr_new",
+        },
       }),
     ).toBe("/projects/p1/threads/thr_notified");
   });
 
+  it("reloads the last visited page after an open request has loaded", () => {
+    expect(
+      resolveShellLoadPath({
+        openPath: null,
+        scope: firstScope,
+        visitedPath: {
+          scope: firstScope,
+          path: "/projects/p1/threads/thr_new",
+        },
+      }),
+    ).toBe("/projects/p1/threads/thr_new");
+  });
+
   it("opens the new-thread page on a cold start", () => {
     expect(
-      resolveShellLoadPath({ visitedPath: null, requestedPath: undefined }),
+      resolveShellLoadPath({
+        scope: firstScope,
+        openPath: null,
+        visitedPath: null,
+      }),
     ).toBe("/");
-    expect(resolveShellLoadPath({ visitedPath: null, requestedPath: "" })).toBe(
-      "/",
-    );
+  });
+
+  it("opens a requested cold-start path before the page has reported a location", () => {
+    expect(
+      resolveShellLoadPath({
+        scope: firstScope,
+        openPath: { scope: firstScope, path: "/threads/thr_notified" },
+        visitedPath: null,
+      }),
+    ).toBe("/threads/thr_notified");
+  });
+
+  it("keeps another profile's request off the current page while activation is pending", () => {
+    const openPath = { scope: secondScope, path: "/threads/thr_second" };
+    const visitedPath = { scope: firstScope, path: "/threads/thr_first" };
+    expect(
+      resolveShellLoadPath({ scope: firstScope, openPath, visitedPath }),
+    ).toBe("/threads/thr_first");
+    expect(
+      resolveShellLoadPath({ scope: secondScope, openPath, visitedPath }),
+    ).toBe("/threads/thr_second");
+  });
+
+  it("does not carry the previous server's visited path to a different profile", () => {
+    expect(
+      resolveShellLoadPath({
+        scope: secondScope,
+        openPath: null,
+        visitedPath: { scope: firstScope, path: "/threads/thr_first" },
+      }),
+    ).toBe("/");
+  });
+});
+
+describe("resolveShellOpen", () => {
+  it("navigates a ready page in place when the page supports it", () => {
+    expect(
+      resolveShellOpen({
+        switchingProfile: false,
+        load: READY,
+        pageNavigates: true,
+      }),
+    ).toBe("navigate");
+  });
+
+  it("loads a requested path for an older page without navigation support", () => {
+    expect(
+      resolveShellOpen({
+        switchingProfile: false,
+        load: READY,
+        pageNavigates: false,
+      }),
+    ).toBe("load");
+  });
+
+  it("loads a path when the page is loading or failed", () => {
+    for (const load of [
+      { kind: "loading" },
+      { kind: "failed", detail: "offline", code: -1009 },
+      { kind: "http-error", status: 502 },
+    ] satisfies ShellLoadPhase[]) {
+      expect(
+        resolveShellOpen({
+          switchingProfile: false,
+          load,
+          pageNavigates: true,
+        }),
+      ).toBe("load");
+    }
+  });
+
+  it("loads another profile instead of navigating the current server's page", () => {
+    expect(
+      resolveShellOpen({
+        switchingProfile: true,
+        load: READY,
+        pageNavigates: true,
+      }),
+    ).toBe("load");
   });
 });
 

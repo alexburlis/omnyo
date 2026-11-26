@@ -31,7 +31,7 @@ function shellHref({ profileId, path }: ShellHrefParams): string {
 
   if (profileId !== null) params.set("profileId", profileId);
 
-  if (path !== "/") params.set("path", path);
+  params.set("path", path);
   const query = params.toString();
 
   return query.length > 0 ? `${SHELL_ROUTE_PATH}?${query}` : SHELL_ROUTE_PATH;
