@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import {
   copyFile,
   mkdir,
+  open,
   readdir,
   rename,
   rm,
@@ -16,6 +17,8 @@ import {
   parseAppManagedConfig,
 } from "@omnyo/config/managed-app-config";
 import { mutateManagedJsonFile } from "@omnyo/config/managed-json-file";
+import { withFileLock } from "@omnyo/config/file-lock";
+import { SERVER_DATA_DIR_LOCK_FILE_NAME } from "@omnyo/config/server";
 import { hasErrorCode, ServerArchiveError } from "./errors.js";
 import { lstatOrNull, moveFile } from "./fs-utils.js";
 import { parseJsonText, readJsonFileText } from "./json-file.js";
@@ -668,6 +671,35 @@ export async function archiveExistingServerData(
   args: ArchiveExistingServerDataArgs,
 ): Promise<string> {
   const dataDir = resolve(args.dataDir);
+  const directory = await lstatOrNull(dataDir);
+
+  if (directory?.isDirectory() !== true) {
+    throw new Error(`Server data directory does not exist: ${dataDir}`);
+  }
+
+  const lockPath = join(dataDir, SERVER_DATA_DIR_LOCK_FILE_NAME);
+  const lockFile = await open(lockPath, "a+", 0o600);
+
+  const identity = await lockFile
+    .stat({ bigint: true })
+    .finally(() => lockFile.close());
+
+  return withFileLock({
+    path: lockPath,
+    timeoutMs: 0,
+    existingOnly: true,
+    identity: {
+      device: identity.dev.toString(),
+      inode: identity.ino.toString(),
+    },
+    work: () => archiveLockedServerData({ ...args, dataDir }),
+  });
+}
+
+async function archiveLockedServerData(
+  args: ArchiveExistingServerDataArgs,
+): Promise<string> {
+  const dataDir = args.dataDir;
   const basePath = `${dataDir}.before-move-${formatArchiveTimestamp(args.now)}`;
 
   for (let attempt = 1; attempt <= MAX_ARCHIVE_NAME_ATTEMPTS; attempt += 1) {

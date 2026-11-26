@@ -11,6 +11,8 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { acquireFileLock, FileLockTimeoutError } from "@omnyo/config/file-lock";
+import { SERVER_DATA_DIR_LOCK_FILE_NAME } from "@omnyo/config/server";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   archiveExistingServerData,
@@ -527,6 +529,7 @@ describe("server-owned allowlist on import", () => {
 
   it.each([
     ...HOST_OWNED_FIXTURE_PATHS,
+    SERVER_DATA_DIR_LOCK_FILE_NAME,
     "app.db/nested",
     "plugins/docs",
     "plugins/docs/host-data",
@@ -652,6 +655,47 @@ describe("discardImportBackups", () => {
 });
 
 describe("archiveExistingServerData", () => {
+  it("refuses to rename a running server directory, then archives it once released", async () => {
+    const parent = await makeTempDir();
+    const dataDir = path.join(parent, ".omnyo");
+    await writeDataFile(dataDir, "app.db", "running server");
+
+    const release = await acquireFileLock({
+      path: path.join(dataDir, SERVER_DATA_DIR_LOCK_FILE_NAME),
+      timeoutMs: 100,
+    });
+
+    try {
+      await expect(
+        archiveExistingServerData({ dataDir, now: 0 }),
+      ).rejects.toBeInstanceOf(FileLockTimeoutError);
+      expect(await readDataFile(dataDir, "app.db")).toBe("running server");
+      expect(await readdir(parent)).toEqual([".omnyo"]);
+      const inventory = await listServerOwnedEntries(dataDir);
+      expect(
+        inventory.entries
+          .flatMap((entry) => entry.files)
+          .map((file) => file.path),
+      ).not.toContain(SERVER_DATA_DIR_LOCK_FILE_NAME);
+    } finally {
+      await release();
+    }
+
+    const archivedPath = await archiveExistingServerData({ dataDir, now: 0 });
+    expect(await readDataFile(archivedPath, "app.db")).toBe("running server");
+  });
+
+  it("does not create a nonexistent archive input", async () => {
+    const parent = await makeTempDir();
+    await expect(
+      archiveExistingServerData({
+        dataDir: path.join(parent, "absent"),
+        now: 0,
+      }),
+    ).rejects.toThrow("does not exist");
+    expect(await readdir(parent)).toEqual([]);
+  });
+
   it("renames the data directory with a local timestamp suffix and avoids collisions", async () => {
     const parent = await makeTempDir();
     const dataDir = path.join(parent, ".omnyo");
