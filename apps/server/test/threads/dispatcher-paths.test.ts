@@ -214,10 +214,15 @@ describe("queued delivery mode", () => {
         status: "active",
       });
 
+      const requester = seedThread(harness.deps, {
+        projectId: thread.projectId,
+        title: "Background requester",
+      });
+
       const queued = createQueuedThreadMessage(harness.db, harness.deps.hub, {
         threadId: thread.id,
         content: textInput("Scheduled background result"),
-        requestedBy: { initiator: "system", senderThreadId: null },
+        requestedBy: { initiator: "system", senderThreadId: requester.id },
         model: "gpt-5",
         reasoningLevel: "medium",
         permissionMode: "accept-edits",

@@ -121,7 +121,7 @@ it("passes contributed environment to Codex children without overriding their sh
   harness.sendRequest(2, "turn/start", {
     threadId: THREAD_ID,
     providerThreadId,
-    clientRequestId: "creq_envlaunch1",
+    clientRequestId: "creq_22222222aa",
     input: [{ type: "text", text: "Continue", mentions: [] }],
     options: {
       ...FULL_ACCESS_SESSION_OPTIONS,
@@ -725,7 +725,7 @@ it.each(["thread/start", "thread/resume", "thread/fork"] as const)(
     harness.sendRequest(2, "turn/start", {
       threadId: THREAD_ID,
       providerThreadId,
-      clientRequestId: "creq_readonly12",
+      clientRequestId: "creq_22222222ab",
       input: [{ type: "text", text: "Inspect files", mentions: [] }],
       options: autoAskSessionOptions,
     });
