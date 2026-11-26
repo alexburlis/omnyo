@@ -11,6 +11,7 @@ export type DirectoryProcessInspection =
 export type DirectoryProcessInspector = (
   directory: string,
   signal?: AbortSignal,
+  options?: { timeoutMs: number },
 ) => Promise<DirectoryProcessInspection>;
 
 const MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
@@ -82,7 +83,8 @@ export function parseDirectoryLsof(
 
 async function inspectMac(
   directory: string,
-  signal?: AbortSignal,
+  signal: AbortSignal | undefined,
+  timeoutMs: number,
 ): Promise<DirectoryProcessInspection> {
   const uid = process.getuid?.();
 
@@ -111,7 +113,7 @@ async function inspectMac(
 
     const timeout = setTimeout(
       () => stop("Native process inspection timed out."),
-      INSPECTION_TIMEOUT_MS,
+      timeoutMs,
     );
 
     const abort = () => stop("Native process inspection was cancelled.");
@@ -295,8 +297,16 @@ async function inspectWindows(
 export const inspectDirectoryProcesses: DirectoryProcessInspector = (
   directory,
   signal,
+  options,
 ) => {
-  if (process.platform === "darwin") return inspectMac(directory, signal);
+  if (process.platform === "darwin") {
+    const timeoutMs =
+      options && Number.isFinite(options.timeoutMs)
+        ? Math.min(Math.max(options.timeoutMs, INSPECTION_TIMEOUT_MS), 30_000)
+        : INSPECTION_TIMEOUT_MS;
+
+    return inspectMac(directory, signal, timeoutMs);
+  }
 
   if (process.platform === "linux") return inspectLinux(directory, signal);
 

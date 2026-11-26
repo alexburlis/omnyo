@@ -3,6 +3,7 @@ import { realpath } from "node:fs/promises";
 import { resolve, sep } from "node:path";
 import type { PluginRpcHandlers } from "@omnyo/plugin-sdk";
 import {
+  chatOwns,
   discover,
   isPathWithin,
   withCleanupPriority,
@@ -198,11 +199,43 @@ export function createWorktreeService(
       ],
     }));
 
-    return { projects: ownedProjects, protection: protectedPaths, chatTargets };
+    const projectRoots = new Set(
+      allSources.map((path) => canonical.get(path)!),
+    );
+
+    const inactiveEnvironmentRoots = new Set<string>();
+    const protectedEnvironmentRoots = new Set<string>();
+
+    for (const environment of environments) {
+      if (!environment.path || environment.status === "destroyed") continue;
+      const path = canonical.get(environment.path)!;
+
+      if (
+        !currentTargets ||
+        projectRoots.has(path) ||
+        !["ready", "error"].includes(environment.status) ||
+        chatOwns(environment.path, chatTargets) ||
+        chatOwns(path, chatTargets)
+      )
+        protectedEnvironmentRoots.add(path);
+      else inactiveEnvironmentRoots.add(path);
+    }
+
+    for (const path of protectedEnvironmentRoots)
+      inactiveEnvironmentRoots.delete(path);
+
+    return {
+      projects: ownedProjects,
+      protection: protectedPaths,
+      chatTargets,
+      projectRoots,
+      inactiveEnvironmentRoots,
+    };
   }
 
   async function buildCatalog(projectIds?: ReadonlySet<string>) {
-    const { projects } = await metadata();
+    const { projects, projectRoots, inactiveEnvironmentRoots } =
+      await metadata();
 
     const selected = projectIds
       ? projects.filter((project) => projectIds.has(project.id))
@@ -210,33 +243,37 @@ export function createWorktreeService(
 
     const roots = [...new Set(selected.flatMap((project) => project.roots))];
 
-    const found = await discover(roots, (repo) => {
-      const candidates = projects.flatMap((project) =>
-        project.roots.flatMap((root) =>
-          isPathWithin(root, repo)
-            ? [{ project, specificity: root.length }]
-            : [],
-        ),
-      );
+    const found = await discover(
+      roots,
+      (repo) => {
+        const candidates = projects.flatMap((project) =>
+          project.roots.flatMap((root) =>
+            isPathWithin(root, repo)
+              ? [{ project, specificity: root.length }]
+              : [],
+          ),
+        );
 
-      candidates.sort((a, b) => b.specificity - a.specificity);
-      const owner = candidates[0]?.project;
+        candidates.sort((a, b) => b.specificity - a.specificity);
+        const owner = candidates[0]?.project;
 
-      if (!owner || (projectIds && !projectIds.has(owner.id))) return;
-      let allowed = knownRepos.get(owner.id);
+        if (!owner || (projectIds && !projectIds.has(owner.id))) return;
+        let allowed = knownRepos.get(owner.id);
 
-      if (!allowed) {
-        allowed = new Set();
-        knownRepos.set(owner.id, allowed);
-      }
+        if (!allowed) {
+          allowed = new Set();
+          knownRepos.set(owner.id, allowed);
+        }
 
-      allowed.add(repo);
-      publish("repository-found", {
-        projectId: owner.id,
-        projectName: owner.name,
-        path: repo,
-      });
-    });
+        allowed.add(repo);
+        publish("repository-found", {
+          projectId: owner.id,
+          projectName: owner.name,
+          path: repo,
+        });
+      },
+      { projectRoots, inactiveEnvironmentRoots },
+    );
 
     const result = selected.map((project) => ({
       id: project.id,
@@ -278,6 +315,11 @@ export function createWorktreeService(
       projects: result.filter((project) => project.repos.length > 0),
       errors: found.errors,
       projectErrors,
+      missingInactiveEnvironments: found.missingInactive.flatMap((path) =>
+        selected
+          .filter((project) => project.roots.includes(path))
+          .map(({ id }) => ({ projectId: id, path })),
+      ),
     };
   }
 
@@ -404,6 +446,7 @@ export function createWorktreeService(
     return {
       entries,
       issues: catalogue.errors,
+      missingInactiveEnvironments: catalogue.missingInactiveEnvironments,
       scannedAt: new Date().toISOString(),
     };
   }

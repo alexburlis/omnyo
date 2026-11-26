@@ -1,5 +1,3 @@
-import "./voice-dictionary.css";
-
 export const label =
   "Settings → Dictation in Omnyo: under Speech model, the download finishes and the status reads Speech model downloaded. Dictation runs on this Mac. Below it, project names are added to the Custom dictionary one per line: harbor-ledger, atlas-notes, de-DE and Parakeet.";
 

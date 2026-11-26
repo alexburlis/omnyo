@@ -1,5 +1,3 @@
-import "./goals-and-waits-approve.css";
-
 export const label =
   "An agent's proposal in the Inbox to watch the staging health URL, with the exact key shown. Accepting it moves the chat to Waiting, where Omnyo checks the URL every minute and shows when it checks next.";
 

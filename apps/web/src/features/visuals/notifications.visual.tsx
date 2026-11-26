@@ -1,5 +1,3 @@
-import "./notifications.css";
-
 export const label =
   "Omnyo notice cards sliding in beside the sidebar: Review: Add CSV export asks which date format to use, the recommended answer is tapped and the card confirms Sent before the next waiting chat slides in.";
 

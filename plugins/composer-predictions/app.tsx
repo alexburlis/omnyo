@@ -337,6 +337,7 @@ function ThreadPrediction({
 
   const status = state?.status ?? null;
   const message = state?.message ?? null;
+  const canRequestPrediction = state?.sameChat !== true;
 
   const omissionReason =
     currentPrediction !== null &&
@@ -358,10 +359,10 @@ function ThreadPrediction({
         status: "ready",
         text: currentText,
         onDismiss: () => settle("dismiss"),
-        onRegenerate: force,
+        ...(canRequestPrediction ? { onRegenerate: force } : {}),
       };
 
-    if (status === "failed")
+    if (status === "failed" && canRequestPrediction)
       return {
         status: "failed",
         message: message ?? "Prediction unavailable.",
@@ -369,7 +370,7 @@ function ThreadPrediction({
         onDismiss: () => settle("dismiss"),
       };
 
-    if (omissionReason !== null)
+    if (omissionReason !== null && canRequestPrediction)
       return {
         status: "none",
         reason: omissionReason,
@@ -380,6 +381,7 @@ function ThreadPrediction({
     return null;
   }, [
     available,
+    canRequestPrediction,
     currentText,
     force,
     forcing,
@@ -412,6 +414,7 @@ function ThreadPrediction({
 
   const requestOffered =
     available &&
+    canRequestPrediction &&
     status !== null &&
     status !== "disabled" &&
     (work === null || work.requiredInput.length === 0);

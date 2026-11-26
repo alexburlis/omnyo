@@ -344,7 +344,7 @@ function ReadyGitControl({
                 className="h-7 px-3 text-xs"
                 onClick={() => runCommit(commit)}
               >
-                Commit…
+                Ask chat to commit…
               </Button>
             )}
           </div>
@@ -358,7 +358,7 @@ function ReadyGitControl({
           className={cn(PILL_CLASS, "shrink-0", JOINED_END_CLASS)}
           onClick={commit}
         >
-          Commit
+          Ask chat to commit
         </Button>
       ) : null}
     </span>

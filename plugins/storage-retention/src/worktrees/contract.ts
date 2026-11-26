@@ -58,6 +58,7 @@ const worktree = z.object({
 const repository = z.object({
   path: z.string(),
   base: z.string().nullable(),
+  baseRef: z.string().nullable().default(null),
   branches: z.array(
     z.object({
       name: z.string(),
@@ -108,6 +109,9 @@ export const scanInventory = z.object({
     }),
   ),
   issues: z.array(z.string()),
+  missingInactiveEnvironments: z
+    .array(z.object({ projectId: z.string(), path: z.string() }))
+    .optional(),
   scannedAt: z.string(),
 });
 

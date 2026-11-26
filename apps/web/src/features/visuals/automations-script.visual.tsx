@@ -1,5 +1,3 @@
-import "./automations-script.css";
-
 export const label =
   "A script automation in Omnyo: a three-line shell script checks harbor-ledger for outdated packages every Monday. Quiet weeks are recorded as Skipped with empty output, and when a run finds outdated packages its output is kept in the Runs list.";
 

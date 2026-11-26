@@ -1,5 +1,3 @@
-import "./chat-import-handoff.css";
-
 export const label =
   "Moving work over from Conductor: after the prompt from the switch guide, the agent checks git, reads the old transcript and writes a handoff with the goal, what is done, the decisions made and what is left.";
 

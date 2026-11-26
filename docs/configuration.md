@@ -451,14 +451,7 @@ commits to `omnyo: automated commit`. Each plugin picks its own model.
 Omnyo ignores them in `~/.omnyo/config.json` with a warning, and `omnyo-app config set`
 refuses them.
 
-With a ChatGPT subscription login, Codex voice transcription posts to a
-`chatgpt.com` endpoint that sits behind Cloudflare bot protection. On some
-networks Cloudflare challenges that request and transcription fails. If that
-happens often, run `codex login --with-api-key` on the primary machine, or pick
-another voice service.
-
-Omnyo accepts voice recordings up to 25 MB. A service may set a lower limit;
-Codex transcribes recordings up to 20 MB.
+Dictation by Paraspeech transcribes on the machine running your Omnyo server. Omnyo accepts voice recordings up to 25 MB. A saved Codex voice selection now resolves to Dictation by Paraspeech. If the Dictation plugin or model is unavailable, Omnyo reports that voice input is unavailable.
 
 Open microphone preferences by right-clicking the composer microphone, pressing
 Shift+F10 while it is focused, or clicking the Microphone control in Settings →

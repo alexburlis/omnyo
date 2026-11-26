@@ -495,10 +495,12 @@ describe("pending chats in the Inbox", () => {
 
     return {
       pending,
+      queryClient,
       lists: () => {
         const snapshot = readPredictedInboxSnapshot(queryClient);
 
         return {
+          inbox: snapshot?.inbox.map((entry) => entry.threadId),
           running: snapshot?.running.map((entry) => entry.threadId),
           waiting: snapshot?.waiting.map((entry) => entry.threadId),
           counts: snapshot?.counts,
@@ -548,6 +550,32 @@ describe("pending chats in the Inbox", () => {
       running: [],
       waiting: [pending.id],
       counts: { waiting: 1, nextBackAt: sendAt },
+    });
+  });
+
+  it("keeps a scheduled chat waiting under its real id while the last snapshot predates its queued send", async () => {
+    const sendAt = Date.now() + 3_600_000;
+    const creation = createDeferredPromise<ThreadResponse>();
+
+    const { pending, lists, queryClient } = startChat(
+      { ...REQUEST, sendAt },
+      creation.promise,
+    );
+
+    queryClient.setQueryData(INBOX_SNAPSHOT_QUERY_KEY, {
+      ...emptyInbox(),
+      inbox: [finishedInboxEntry("real-scheduled-chat")],
+      counts: { ...emptyInbox().counts, inbox: 1 },
+    });
+
+    creation.resolve(
+      makeThreadResponse({ id: "real-scheduled-chat", projectId: "p" }),
+    );
+    await pending.completion;
+
+    expect(lists()).toMatchObject({
+      waiting: ["real-scheduled-chat"],
+      inbox: [],
     });
   });
 
@@ -607,3 +635,27 @@ describe("pending chats in the Inbox", () => {
     );
   });
 });
+
+function finishedInboxEntry(threadId: string): InboxSnapshot["inbox"][number] {
+  return {
+    threadId,
+    projectId: "p",
+    title: "Scheduled chat",
+    shelved: false,
+    automationId: null,
+    state: "finished",
+    reason: { kind: "unassessed", text: "Finished, not assessed", threadId },
+    recap: null,
+    archiveReady: false,
+    optionalQuestion: null,
+    pendingResults: 0,
+    view: "inbox",
+    card: null,
+    waiting: null,
+    running: null,
+    runs: null,
+    incident: null,
+    sortAt: 0,
+    latch: "inbox",
+  };
+}

@@ -1,5 +1,3 @@
-import "./canvas-inline.css";
-
 export const label =
   "An agent's reply in an Omnyo chat built from native blocks: a bold answer, a status table of checks, a row of metrics, a progress bar for the release checklist and a file card for the sample export, each appearing as the reply streams in.";
 

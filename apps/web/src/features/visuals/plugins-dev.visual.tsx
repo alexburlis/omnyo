@@ -1,5 +1,3 @@
-import "./plugins-dev.css";
-
 export const label =
   "Building a plugin: in a terminal, omnyo plugin new invoices scaffolds it and omnyo plugin dev watches it. Omnyo reloads the plugin, an Invoice totals panel appears in the sidebar, and after the next save the panel gains an overdue line without a restart.";
 

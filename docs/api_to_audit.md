@@ -1264,6 +1264,13 @@ collection attempt with `refresh: true`. Provider Usage consumes the same
 contract that Account Pooler, ACP Providers, ACP Providers (New Adapter),
 Claude Code Provider, and Codex Provider register.
 
+The four host-local providers use
+`experimental_registerHostProviderUsageSourceV1(api, { ownsProvider, description })`
+from the same entry. The helper registers both methods with a separate cache
+for each registration. The caller supplies the ownership predicate and
+discovery description. Account Pooler manages its shared account measurements
+through its own registration.
+
 Before stabilizing the export, verify that an independently packaged provider
 and a consumer from a different SDK build can discover both v1 methods and
 exchange results for each usage state. Preserve the method names and wire

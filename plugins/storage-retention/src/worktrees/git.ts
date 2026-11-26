@@ -186,6 +186,127 @@ function hasUnpreservedReflog(
   return hasUnpreservedHeads(repo, heads, retainedHeads, preservedHeads);
 }
 
+async function equivalentRecoveryChanges(
+  repo: string,
+  contents: string,
+  retainedHeads: string[],
+  preservedHeads: ReadonlySet<string>,
+  preservedBy: string,
+) {
+  const heads = new Set<string>();
+  const rewrites = new Map<string, string>();
+
+  for (const line of contents.split("\n")) {
+    if (!line) continue;
+    const [entry, action] = line.split("\t", 2);
+    const [previous, next] = entry.split(" ", 2);
+
+    for (const head of [previous, next])
+      if (!/^0+$/.test(head) && !preservedHeads.has(head)) heads.add(head);
+
+    if (
+      action?.startsWith("commit (amend):") ||
+      action?.startsWith("rebase (finish):")
+    )
+      rewrites.set(previous, next);
+  }
+
+  if (!rewrites.size || heads.size > 256) return false;
+
+  const missing = (
+    await git(repo, [
+      "rev-list",
+      "--max-count=9",
+      ...heads,
+      "--not",
+      ...retainedHeads,
+      "--",
+    ])
+  )
+    .trim()
+    .split("\n")
+    .filter(Boolean);
+
+  if (!missing.length || missing.length > 8) return false;
+
+  const replacements = missing.flatMap((head) => {
+    const replacement = rewrites.get(head);
+
+    return replacement ? [{ head, replacement }] : [];
+  });
+
+  if (replacements.length !== missing.length) return false;
+
+  if (
+    (
+      await git(repo, [
+        "rev-list",
+        "--max-count=1",
+        ...replacements.map(({ replacement }) => replacement),
+        "--not",
+        preservedBy,
+        "--",
+      ])
+    ).trim()
+  )
+    return false;
+
+  const metadata = new Map(
+    (
+      await git(repo, [
+        "log",
+        "--no-walk=unsorted",
+        "--format=%H %T %P",
+        ...new Set(
+          replacements.flatMap(({ head, replacement }) => [head, replacement]),
+        ),
+        "--",
+      ])
+    )
+      .trim()
+      .split("\n")
+      .map((line) => {
+        const [head, tree, ...parents] = line.trim().split(" ");
+
+        return [head, { tree, parents }] as const;
+      }),
+  );
+
+  function changedBlobs(head: string) {
+    return git(repo, [
+      "diff-tree",
+      "--no-renames",
+      "--no-abbrev",
+      "--no-commit-id",
+      "--raw",
+      "-r",
+      "-z",
+      head,
+      "--",
+    ]);
+  }
+
+  for (const { head, replacement } of replacements) {
+    const before = metadata.get(head);
+    const after = metadata.get(replacement);
+
+    if (!before || !after) return false;
+
+    if (before.tree === after.tree) continue;
+
+    if (before.parents.length !== 1 || after.parents.length !== 1) return false;
+
+    const [oldChanges, newChanges] = await Promise.all([
+      changedBlobs(head),
+      changedBlobs(replacement),
+    ]);
+
+    if (oldChanges !== newChanges) return false;
+  }
+
+  return true;
+}
+
 async function hasUnpreservedRecovery(
   repo: string,
   gitDirectory: string,
@@ -219,6 +340,10 @@ async function hasUnpreservedRecovery(
 export async function discover(
   roots: string[],
   onRepository?: (path: string) => void,
+  options: {
+    projectRoots?: ReadonlySet<string>;
+    inactiveEnvironmentRoots?: ReadonlySet<string>;
+  } = {},
 ) {
   const repos = new Map<
     string,
@@ -229,6 +354,19 @@ export async function discover(
   >();
 
   const errors: string[] = [];
+  const missingInactive = new Set<string>();
+  const possibleUmbrellas = new Set<string>();
+  const observedRepos = new Set<string>();
+
+  const gitIdentityFiles = new Set([
+    "HEAD",
+    "commondir",
+    "config",
+    "objects",
+    "refs",
+    "packed-refs",
+    "shallow",
+  ]);
 
   const canonicalRoots = await Promise.all(
     roots.map(async (root) => {
@@ -296,9 +434,18 @@ export async function discover(
   }
 
   async function visit(path: string, budget: Budget) {
-    const canonical = await realpath(path);
+    const canonical = await realpath(path).catch((error: unknown) => {
+      if (
+        !options.inactiveEnvironmentRoots?.has(path) ||
+        !missingFile.safeParse(error).success
+      )
+        throw error;
+      missingInactive.add(path);
 
-    if (visited.has(canonical)) return;
+      return null;
+    });
+
+    if (!canonical || visited.has(canonical)) return;
 
     if (budget.count >= 20000)
       throw new DiscoveryLimit("Repository scan exceeded 20,000 directories");
@@ -306,8 +453,24 @@ export async function discover(
     budget.count++;
     const entries = await readdir(canonical, { withFileTypes: true });
     let recognized = false;
+    const gitEntry = entries.find((entry) => entry.name === ".git");
 
-    if (entries.some((e) => e.name === ".git")) {
+    if (gitEntry?.isDirectory() && options.projectRoots?.has(canonical)) {
+      const metadata = await readdir(join(canonical, ".git")).catch(() => null);
+
+      if (
+        metadata &&
+        !metadata.some((name) => gitIdentityFiles.has(name)) &&
+        (!metadata.includes("worktrees") ||
+          (await readdir(join(canonical, ".git", "worktrees")).then(
+            (worktrees) => worktrees.length === 0,
+            () => false,
+          )))
+      )
+        possibleUmbrellas.add(canonical);
+    }
+
+    if (gitEntry && !possibleUmbrellas.has(canonical)) {
       try {
         const common = (
           await git(canonical, [
@@ -316,6 +479,8 @@ export async function discover(
             "--git-common-dir",
           ])
         ).trim();
+
+        observedRepos.add(canonical);
 
         const priority = canonicalRoots.findIndex((root) =>
           isPathWithin(root, canonical),
@@ -407,6 +572,32 @@ export async function discover(
         return;
       } catch (error) {
         if (error instanceof DiscoveryLimit) throw error;
+
+        if (!recognized && gitEntry.isFile()) {
+          const contents = await readGitMetadataAt(
+            join(canonical, ".git"),
+          ).catch(() => "");
+
+          const pointer = /^gitdir: ([^\r\n]+)\r?\n?$/.exec(contents);
+
+          if (pointer) {
+            const target = resolve(canonical, pointer[1]);
+
+            if (
+              await access(target).then(
+                () => false,
+                (cause) => missingFile.safeParse(cause).success,
+              )
+            ) {
+              errors.push(
+                `${canonical}: Git metadata directory is missing at ${target}`,
+              );
+
+              return;
+            }
+          }
+        }
+
         errors.push(
           `${canonical}: ${error instanceof Error ? error.message : String(error)}`,
         );
@@ -613,11 +804,22 @@ export async function discover(
 
   await Promise.all(Array.from({ length: 8 }, () => worker()));
 
+  for (const root of possibleUmbrellas)
+    if (
+      ![...observedRepos].some(
+        (path) => root !== path && isPathWithin(root, path),
+      )
+    )
+      errors.push(
+        `${root}: Git metadata is incomplete and no child repository was found`,
+      );
+
   return {
     repos: [...repos.values()]
       .sort((a, b) => a.priority - b.priority || a.path.localeCompare(b.path))
       .map((repo) => repo.path),
     errors,
+    missingInactive: [...missingInactive],
   };
 }
 
@@ -735,10 +937,6 @@ function localBaseline(branches: string[]) {
       : null;
 }
 
-async function baseline(repo: string, branches: string[]) {
-  return (await originBaseline(repo)) ?? localBaseline(branches);
-}
-
 function gitCommonDirectory(repo: string) {
   return git(repo, [
     "rev-parse",
@@ -836,6 +1034,29 @@ async function localBranchRefs(repo: string) {
     });
 }
 
+function comparisonBaseline(
+  refs: Awaited<ReturnType<typeof localBranchRefs>>,
+  primaryBranch: string | null | undefined,
+  fallback: string | null,
+) {
+  const upstream = refs.find(({ name }) => name === primaryBranch)?.upstream;
+
+  if (upstream)
+    return {
+      base: upstream.replace(/^refs\/(?:heads|remotes)\//, ""),
+      baseRef: upstream,
+    };
+
+  return {
+    base: fallback,
+    baseRef: fallback
+      ? refs.some(({ name }) => name === fallback)
+        ? `refs/heads/${fallback}`
+        : `refs/remotes/${fallback}`
+      : null,
+  };
+}
+
 type BranchBatch = {
   kind: "branchBatch";
   bases: ReadonlyMap<string, string>;
@@ -845,7 +1066,7 @@ type BranchBatch = {
   retained: Map<string, string>;
 };
 
-function chatOwns(target: string, chatTargets?: ReadonlySet<string>) {
+export function chatOwns(target: string, chatTargets?: ReadonlySet<string>) {
   if (!chatTargets?.size) return false;
 
   if (chatTargets.has(target)) return true;
@@ -900,15 +1121,16 @@ async function inspectTargets(
     ]);
 
   const names = refs.map((ref) => ref.name);
-  const base = origin ?? localBaseline(names);
+  const retentionBase = origin ?? localBaseline(names);
+
+  const { base, baseRef } = comparisonBaseline(
+    refs,
+    records[0]?.branch,
+    retentionBase,
+  );
 
   const baseSha =
-    base && !target
-      ? await revision(
-          repo,
-          names.includes(base) ? `refs/heads/${base}` : `refs/remotes/${base}`,
-        )
-      : null;
+    baseRef && !target ? await revision(repo, baseRef).catch(() => null) : null;
 
   const counts = new Map<
     string,
@@ -949,7 +1171,9 @@ async function inspectTargets(
     chatOwners.filter((w) => !w.branch).map((w) => w.head),
   );
 
-  const localBase = base?.startsWith("origin/") ? base.slice(7) : base;
+  const localBase = retentionBase?.startsWith("origin/")
+    ? retentionBase.slice(7)
+    : retentionBase;
 
   const baseNames = [localBase, "main", "master"].filter(
     (name) => name && names.includes(name),
@@ -1452,9 +1676,28 @@ async function inspectTargets(
             retainedHeads,
             preservedHeads,
           )
-        )
-          reasons.push("Unique commits in branch history");
-        else if (upstream && !(await mergedIntoUpstream(head, upstream)))
+        ) {
+          const preservedBy = deleteBase
+            ? refsByName.get(deleteBase)
+            : undefined;
+
+          const equivalent =
+            !target &&
+            preservedBy &&
+            (await equivalentRecoveryChanges(
+              repo,
+              contents,
+              retainedHeads,
+              preservedHeads,
+              preservedBy,
+            ).catch(() => false));
+
+          reasons.push(
+            equivalent
+              ? "Recovery changes match retained commits · Original commit IDs kept"
+              : "Unique commits in branch history",
+          );
+        } else if (upstream && !(await mergedIntoUpstream(head, upstream)))
           reasons.push("Not merged into its upstream");
       } catch {
         reasons.push("Cannot verify Git deletion check");
@@ -1488,34 +1731,24 @@ async function inspectTargets(
     ),
   );
 
-  return { path: repo, base, branches, worktrees };
+  return { path: repo, base, baseRef, branches, worktrees };
 }
 
 export async function inspectSidebarRepo(repo: string) {
-  const refs = (
-    await git(repo, [
-      "for-each-ref",
-      "--format=%(refname:strip=2)%09%(objectname)",
-      "refs/heads/",
-    ])
-  )
-    .trim()
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => {
-      const [name, head] = line.split("\t");
+  const [refs, records, origin] = await Promise.all([
+    localBranchRefs(repo),
+    worktreeRecords(repo),
+    originBaseline(repo),
+  ]);
 
-      return { name, head };
-    });
+  const { base, baseRef } = comparisonBaseline(
+    refs,
+    records[0]?.branch,
+    origin ?? localBaseline(refs.map(({ name }) => name)),
+  );
 
-  const names = refs.map((ref) => ref.name);
-  const base = await baseline(repo, names);
-
-  const baseSha = base
-    ? await revision(
-        repo,
-        names.includes(base) ? `refs/heads/${base}` : `refs/remotes/${base}`,
-      )
+  const baseSha = baseRef
+    ? await revision(repo, baseRef).catch(() => null)
     : null;
 
   const counts = new Map<string, Promise<number | null>>();
@@ -1535,8 +1768,6 @@ export async function inspectSidebarRepo(repo: string) {
 
     return count;
   }
-
-  const records = await worktreeRecords(repo);
 
   const worktrees = await Promise.all(
     records.map(async (w) => {

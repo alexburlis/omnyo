@@ -1,5 +1,3 @@
-import "./devices.css";
-
 import type { CSSProperties } from "react";
 
 export const label =

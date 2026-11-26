@@ -27,11 +27,13 @@ to inspect their published contracts. RPC calls accept JSON through
 `omnyo settings usage --json` and `api.sdk.system.usageLimits()` remain the
 host-local provider-maintenance view; they do not aggregate shared pool accounts.
 
-Codex, Claude Code, and ACP provider plugins explicitly implement the usage contract
-for their own providers. Account Pooler implements it for shared accounts. The
-contract is owned here and copied into each source; no additional adapter plugin,
-provider-kit helper, or core runtime convention is required. Other providers must
-explicitly implement the contract to appear in these displays.
+Codex, Claude Code, ACP, and ACP Next each register their own providers through
+`experimental_registerHostProviderUsageSourceV1` from
+`@omnyo/plugin-sdk/provider-usage`. Each registration supplies its ownership
+predicate and description. The SDK owns inventory, measurement, and refresh
+handling, with a separate cache for each registration. Account Pooler registers
+the same RPC contract for shared accounts using its own collector. Providers
+expose usage in these displays by registering the contract.
 
 OpenCode's host-local source reports OpenCode Go subscription limits when a Go
 Console account or API key is configured on the selected machine. Its five-hour, weekly, and monthly

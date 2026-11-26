@@ -1,4 +1,5 @@
-import "../../features/visuals/kit.css";
+import "../app-mock/app-mock.css";
+import "../../features/visuals/styles.css";
 import "./styles.css";
 
 import { type ComponentType, useEffect, useState } from "react";

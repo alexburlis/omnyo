@@ -1,5 +1,3 @@
-import "./waits.css";
-
 export const label =
   "A chat with the goal All date parser tests pass waiting for another chat, Review: Add CSV export. When that review finishes the wait ends, the tests run again and the goal check moves from 3 of 12 to 4 of 12.";
 

@@ -9,7 +9,6 @@ import {
   projectInboxFamily,
   type InboxEntry,
   type InboxFamilyFacts,
-  type InboxSnapshot,
   type PromptInput,
   type ThreadQueuedMessage,
 } from "@omnyo/domain";
@@ -220,20 +219,8 @@ function pendingChatInboxEntry(
   });
 }
 
-function hasInboxThread(snapshot: InboxSnapshot, threadId: string): boolean {
-  return [
-    snapshot.inbox,
-    snapshot.waiting,
-    snapshot.running,
-    snapshot.shelf,
-  ].some((list) => list.some((entry) => entry.threadId === threadId));
-}
-
 function showPendingChatInInbox(entry: InboxEntry): InboxPredict {
-  return (snapshot) =>
-    hasInboxThread(snapshot, entry.threadId)
-      ? snapshot
-      : withInboxEntry(snapshot, entry.threadId, entry);
+  return (snapshot) => withInboxEntry(snapshot, entry.threadId, entry);
 }
 
 function predictPendingChatInbox(

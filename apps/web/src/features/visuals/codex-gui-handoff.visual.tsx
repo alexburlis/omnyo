@@ -1,5 +1,3 @@
-import "./codex-gui-handoff.css";
-
 export const label =
   "A Codex chat's favorites bar offers Opus 5.5 as a New chat chip. Clicking it hands the work to a new Claude Code chat, which opens with a Continued from banner linking back to the Codex chat.";
 

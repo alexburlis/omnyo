@@ -1,5 +1,3 @@
-import "./parallel-agents-cleanup.css";
-
 export const label =
   "After a chat is archived, its worktree waits five minutes, Omnyo stops the dev server and watcher still running inside it and removes the folder, while the feat/csv-export branch and its three commits stay.";
 

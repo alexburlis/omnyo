@@ -906,6 +906,7 @@ function cleanupSnapshot(): SavedScan {
         repo: {
           path: shared.repo,
           base: "main",
+          baseRef: null,
           branches: [
             {
               name: "merged-branch",
@@ -966,6 +967,45 @@ function cleanupSnapshot(): SavedScan {
     ],
   };
 }
+
+it("shows comparison and cleanup independently and filters two-sided divergence", async () => {
+  const snapshot = cleanupSnapshot();
+  const repo = snapshot.entries[0]?.repo;
+  const merged = repo?.branches[0];
+
+  if (!repo || !merged) throw new Error("Missing branch fixture");
+
+  repo.base = "origin/2.0";
+  repo.baseRef = "refs/remotes/origin/2.0";
+  merged.behind = 5;
+
+  const protectedBranch = {
+    ...merged,
+    deleteReady: false,
+    deleteBase: null,
+    reasons: ["Used by an open or protected chat"],
+  };
+
+  repo.branches.push(
+    { ...protectedBranch, name: "ahead-only", ahead: 1, behind: 0 },
+    { ...protectedBranch, name: "two-sided", ahead: 1, behind: 1 },
+  );
+
+  const { slot } = fixture("", { snapshot });
+  const page = within(slot.container);
+  fireEvent.click(await page.findByText("Fixture project"));
+  const row = within(page.getByTitle("View changes on merged-branch"));
+  expect(row.getByText("0 ahead · 5 behind vs origin/2.0")).toBeTruthy();
+  expect(
+    row.getByText("Safe to delete branch · Commits kept in local main"),
+  ).toBeTruthy();
+
+  const filter = within(page.getByLabelText("Inventory status"));
+  fireEvent.click(filter.getByRole("button", { name: /^Diverged\s*1$/ }));
+  expect(page.getByTitle("View changes on two-sided")).toBeTruthy();
+  expect(page.queryByTitle("View changes on merged-branch")).toBeNull();
+  expect(page.queryByTitle("View changes on ahead-only")).toBeNull();
+});
 
 it("starts project inventories collapsed and reveals matching search results", async () => {
   const { slot } = fixture("", { snapshot: cleanupSnapshot() });

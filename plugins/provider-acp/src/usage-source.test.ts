@@ -258,3 +258,100 @@ it("coalesces concurrent reads and makes a forced refresh wait for a fresh colle
     await harness.lifecycle.dispose();
   }
 });
+
+it("retains the last observation on unavailable reads and prunes it when inventory loses the resource", async () => {
+  let disconnected = false;
+  let removed = false;
+
+  const collect = vi.fn(async () => ({
+    "acp-custom": {
+      status: "ok" as const,
+      accountKey: "issuer:account",
+      accountEmail: null,
+      planLabel: null,
+      windows: [],
+    },
+  }));
+
+  const { api, harness } = createFakePluginHost({
+    sdk: {
+      hosts: {
+        list: async () => [
+          makeHostResponse({
+            id: "host",
+            status: disconnected ? "disconnected" : "connected",
+          }),
+        ],
+        get: async ({ hostId }) =>
+          makeHostResponse({
+            id: hostId,
+            status: disconnected ? "disconnected" : "connected",
+          }),
+      },
+      providers: {
+        list: async () =>
+          removed
+            ? []
+            : [
+                {
+                  id: "acp-custom",
+                  displayName: "Custom",
+                  pluginId: "provider-acp",
+                },
+              ],
+      },
+      system: { usageLimits: collect },
+    },
+  });
+
+  try {
+    plugin(api);
+
+    const read = async (refresh = false) =>
+      usageMeasurementSchema.parse(
+        await harness.behavior.callRpc(usageFetchMethod, {
+          resourceId: JSON.stringify(["host", "acp-custom"]),
+          refresh,
+        }),
+      );
+
+    const first = await read();
+    disconnected = true;
+    expect(await read()).toMatchObject({
+      accountKey: first.accountKey,
+      observedAt: first.observedAt,
+      usage: { status: "error", message: "Machine is disconnected." },
+    });
+    expect(collect).toHaveBeenCalledTimes(1);
+    disconnected = false;
+    collect.mockRejectedValueOnce(new Error("Transport unavailable"));
+    expect(await read(true)).toMatchObject({
+      accountKey: first.accountKey,
+      observedAt: first.observedAt,
+      usage: {
+        status: "error",
+        message: "Usage could not be collected from this machine.",
+      },
+    });
+    expect(await read()).toEqual(first);
+    expect(collect).toHaveBeenCalledTimes(2);
+    removed = true;
+    await expect(read()).rejects.toThrow("Usage resource no longer exists.");
+    expect(
+      usageResourceListSchema.parse(
+        await harness.behavior.callRpc(usageListMethod, {}),
+      ).resources,
+    ).toEqual([]);
+    expect(collect).toHaveBeenCalledTimes(2);
+    removed = false;
+    expect(
+      usageResourceListSchema.parse(
+        await harness.behavior.callRpc(usageListMethod, {}),
+      ).resources[0]?.accountKey,
+    ).toBeNull();
+    await read();
+    expect(collect).toHaveBeenCalledTimes(3);
+  } finally {
+    await harness.lifecycle.dispose();
+  }
+});

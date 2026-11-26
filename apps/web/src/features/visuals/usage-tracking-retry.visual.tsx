@@ -1,5 +1,3 @@
-import "./usage-tracking-retry.css";
-
 export const label =
   "A chat paused by a Claude usage limit. Above the composer a queued card reads Continue this turn, Rate limited, retrying at 14:05, attempt 1, with Send now. The clock reaches 14:05, the card sends itself, and the chat goes from Paused back to Working and finishes the tests.";
 

@@ -1,5 +1,3 @@
-import "./browser-logins.css";
-
 export const label =
   "Omnyo's browser settings on a Mac: Keep logins synced is off, with Arc · Personal offered as your default browser. You click Connect Arc, the switch turns on, Sync from shows Arc · Personal and the status moves from Syncing… to Synced just now with the cookie count.";
 

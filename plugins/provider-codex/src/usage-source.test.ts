@@ -256,3 +256,65 @@ it("coalesces concurrent reads and makes a forced refresh wait for a fresh colle
     await harness.lifecycle.dispose();
   }
 });
+
+it("keeps successful observations private to each registration", async () => {
+  const createSource = (accountKey: string) => {
+    const collect = vi.fn(async () => ({
+      codex: {
+        status: "ok" as const,
+        accountKey,
+        accountEmail: null,
+        planLabel: null,
+        windows: [],
+      },
+    }));
+
+    const host = createFakePluginHost({
+      sdk: {
+        hosts: {
+          get: async ({ hostId }) =>
+            makeHostResponse({ id: hostId, status: "connected" }),
+        },
+        providers: {
+          list: async () => [
+            { id: "codex", displayName: "Codex", pluginId: "provider-codex" },
+          ],
+        },
+        system: { usageLimits: collect },
+      },
+    });
+
+    plugin(host.api);
+
+    return {
+      ...host,
+      collect,
+      read: async () =>
+        usageMeasurementSchema.parse(
+          await host.harness.behavior.callRpc(usageFetchMethod, {
+            resourceId: JSON.stringify(["host", "codex"]),
+            refresh: false,
+          }),
+        ),
+    };
+  };
+
+  const first = createSource("issuer:first");
+  const second = createSource("issuer:second");
+
+  try {
+    const firstValue = await first.read();
+    const secondValue = await second.read();
+    expect(firstValue.accountKey).toBe("issuer:first");
+    expect(secondValue.accountKey).toBe("issuer:second");
+    expect(await first.read()).toEqual(firstValue);
+    expect(await second.read()).toEqual(secondValue);
+    expect(first.collect).toHaveBeenCalledTimes(1);
+    expect(second.collect).toHaveBeenCalledTimes(1);
+  } finally {
+    await Promise.all([
+      first.harness.lifecycle.dispose(),
+      second.harness.lifecycle.dispose(),
+    ]);
+  }
+});

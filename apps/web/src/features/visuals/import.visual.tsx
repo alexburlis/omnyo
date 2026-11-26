@@ -1,5 +1,3 @@
-import "./import.css";
-
 export const label =
   "Chat import lists recent Claude Code and Codex chats found on this machine, three of them ticked, with the button Import 3 chats.";
 

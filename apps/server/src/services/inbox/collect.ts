@@ -24,6 +24,7 @@ import {
 import type { AppDeps } from "../../types.js";
 import { readWorkContinuations } from "../threads/thread-completion.js";
 import { toThreadListEntryResponses } from "../threads/thread-runtime-display.js";
+import { isAdmittingToInbox } from "./admission.js";
 import { listFamilyThreads, type InboxThreadRow } from "./family.js";
 import { readTurnProgress } from "./turn-progress.js";
 import {
@@ -171,7 +172,10 @@ export function collectInboxEntries(
   options: { now: number; rootIds?: readonly string[] } = { now: Date.now() },
 ): InboxEntry[] {
   const db = deps.db;
-  const roots = listInboxRoots(db, options.rootIds);
+
+  const roots = listInboxRoots(db, options.rootIds).filter(
+    (root) => !isAdmittingToInbox(root.id),
+  );
 
   const continuations = readWorkContinuations(
     db,
@@ -186,7 +190,10 @@ export function collectInboxEntries(
   const memberIds = roots.flatMap((root) => [
     root.id,
     ...(families.get(root.id) ?? [])
-      .filter((member) => member.archivedAt === null)
+      .filter(
+        (member) =>
+          member.archivedAt === null && !isAdmittingToInbox(member.id),
+      )
       .map((member) => member.id),
   ]);
 

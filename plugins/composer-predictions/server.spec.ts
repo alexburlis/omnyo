@@ -60,7 +60,9 @@ function pendingPrediction() {
 
 const loaded: ReturnType<typeof createFakePluginHost>[] = [];
 
-async function setup(savedSettings: Record<string, string> = {}) {
+async function setup(
+  savedSettings: Record<string, string> = { provider: "codex" },
+) {
   const pending = pendingPrediction();
 
   const source = {
@@ -703,8 +705,9 @@ describe("prediction server public boundaries", () => {
     },
   );
 
-  it("uses Codex when saved settings still select Claude", async () => {
+  it("uses fixed Codex when saved settings still contain retired Claude choices", async () => {
     const test = await setup({
+      provider: "codex",
       codexChats: "claude",
       claudeChats: "claude",
       otherChats: "claude",
@@ -1706,6 +1709,77 @@ describe("prediction server public boundaries", () => {
       });
       expect(test.source.thread.work?.archive.recommended).toBe(false);
     });
+  });
+
+  it.each([false, true])(
+    "uses the Claude turn's own suggestion without contacting Account Pooler (changed input: %s)",
+    async (changed) => {
+      const test = await setup({});
+      test.source.thread.providerId = "claude-code";
+      const [completed] = test.source.events.splice(0);
+
+      const request = {
+        seq: 10,
+        type: "client/turn/requested",
+        data: { requestId: "request_one" },
+      };
+
+      test.source.reportEvents = {
+        started: [
+          { seq: 11, type: "turn/started", scope: completed.scope, data: {} },
+        ],
+        requests: [request],
+        accepted: [
+          {
+            seq: 12,
+            type: "turn/input/accepted",
+            scope: completed.scope,
+            data: { clientRequestId: request.data.requestId },
+          },
+        ],
+      };
+      await expect(
+        test.harness.callAgentTool(
+          "report_chat_outcome",
+          {
+            report: {
+              status: "complete",
+              outcome: "Updated the configuration.",
+              evidence: "The configuration checks passed.",
+            },
+            suggestedReply: "Please show me the configuration diff.",
+          },
+          { threadId: "thr_one" },
+        ),
+      ).resolves.toBe("Recorded.");
+
+      if (changed)
+        test.source.reportEvents.requests = [{ ...request, seq: 35 }];
+      test.source.events.push(completed);
+      test.source.replies = [reply("Configuration updated.")];
+
+      await expect(test.request()).resolves.toMatchObject({
+        status: changed ? "none" : "ready",
+        text: changed ? null : "Please show me the configuration diff.",
+        sameChat: true,
+      });
+      expect(poolCalls(test)).toEqual([]);
+    },
+  );
+
+  it("cancels a pending fixed Codex request when switched to Same chat", async () => {
+    const test = await setup();
+    await test.request();
+    expect(poolCalls(test)).toHaveLength(1);
+
+    await test.harness.setSettings({ provider: "same-chat" });
+
+    expect(poolCalls(test)[0]?.signal?.aborted).toBe(true);
+    await expect(test.request()).resolves.toMatchObject({
+      sameChat: true,
+      text: null,
+    });
+    expect(poolCalls(test)).toHaveLength(1);
   });
 
   describe("without prediction allowance", () => {
@@ -4012,6 +4086,39 @@ describe("automatic compaction", () => {
 
     return { test, prediction };
   }
+
+  it.each([false, true])(
+    "reads a same-chat report after compaction (newer user request: %s)",
+    async (newerRequest) => {
+      const test = await setup({});
+
+      const appended = [
+        turnCompleted(60, "turn_compact"),
+        turnRequest(50, true),
+        ...(newerRequest ? [turnRequest(45, false)] : []),
+        turnRequest(30, false),
+      ];
+
+      await test.api.storage.kv.set("completion-report:v1:thr_one", {
+        turnId: "turn_one",
+        requestSeq: 30,
+        report: {
+          status: "complete",
+          outcome: "Updated the configuration.",
+          evidence: "The configuration checks passed.",
+        },
+        suggestedReply: "Please show me the configuration diff.",
+      });
+      test.harness.sdk.stub("threads.events.list", eventLog(test, appended));
+
+      await expect(test.request()).resolves.toMatchObject({
+        status: newerRequest ? "none" : "ready",
+        text: newerRequest ? null : "Please show me the configuration diff.",
+        sameChat: true,
+      });
+      expect(poolCalls(test)).toHaveLength(0);
+    },
+  );
 
   it("keeps the prediction through a maintenance compaction without new inference", async () => {
     const { test, prediction } = await predicted();

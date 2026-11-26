@@ -1984,8 +1984,22 @@ export function PromptBoxInternal({
   const suggestionEngaged =
     suggestionKey !== null && suggestionEngagedKey === suggestionKey;
 
+  const [sentSuggestion, setSentSuggestion] = useState<{
+    key: string;
+    text: string;
+  } | null>(null);
+
+  const suggestionSent =
+    sentSuggestion !== null &&
+    sentSuggestion.key === suggestionKey &&
+    suggestion?.status === "ready" &&
+    suggestion.text === sentSuggestion.text;
+
+  if (sentSuggestion !== null && !suggestionSent) setSentSuggestion(null);
+
   const suggestionAvailable =
     suggestion !== null &&
+    !suggestionSent &&
     value === "" &&
     attachments.length === 0 &&
     !pendingUploads?.length &&
@@ -4832,16 +4846,19 @@ export function PromptBoxInternal({
     )
       return;
     const reservation = host.reserveSubmission?.();
+    const sent = { key: host.textEffectKey, text: readySuggestion.text };
     shellHaptic("impact-light");
+    setSentSuggestion(sent);
 
     void host
       .submitDraft(
-        { ...emptyPromptDraftState(), text: readySuggestion.text },
+        { ...emptyPromptDraftState(), text: sent.text },
         { experimental_data: null },
         undefined,
         reservation,
       )
       .catch((error: unknown) => {
+        setSentSuggestion((current) => (current === sent ? null : current));
         appToast.error(
           error instanceof Error
             ? error.message

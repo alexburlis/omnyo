@@ -1,5 +1,3 @@
-import "./remote-push.css";
-
 export const label =
   "Phone notifications that wait until you step away: while you are active at studio-mac, the phone stays quiet. Once you leave the desk, the iPhone lock screen shows an Omnyo push asking which date format the CSV export should use, then a second one saying Date parser tests hit an error. Each chat is set to All activity, Needs input only or Muted.";
 

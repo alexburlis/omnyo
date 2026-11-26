@@ -1,5 +1,3 @@
-import "./goals-and-waits-judge.css";
-
 export const label =
   "A chat working toward the goal All date parser tests pass. After its turn a separate judge inspects the workspace read-only and answers UNMET with what is missing, the chat gets a continuation and the count moves from 3 to 4 of 12, and the next check answers MET.";
 

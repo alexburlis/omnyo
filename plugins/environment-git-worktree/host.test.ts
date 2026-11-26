@@ -11,7 +11,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { experimental_createHostEntryHarness } from "@omnyo/plugin-sdk/testing/host";
@@ -132,6 +132,80 @@ afterEach(async () => {
 });
 
 describe("worktree host entry", () => {
+  it("removes one reviewed folder with missing Git registration and preserves all refs", async () => {
+    const { sourcePath, dataDir } = await createSourceRepository();
+    const harness = createHarness(await realpath(dataDir));
+    const pathKey = "broken";
+
+    const created = await harness.experimental_call(
+      "create",
+      createInput({
+        operationId: "broken-create",
+        sourcePath,
+        pathKey,
+        branchName: "omnyo/broken",
+      }),
+    );
+
+    if (created.status !== "created") throw new Error(created.message);
+
+    const path = created.path;
+    const pointer = await readFile(join(path, ".git"), "utf8");
+    await rm(resolve(path, pointer.replace(/^gitdir: /u, "").trim()), {
+      recursive: true,
+    });
+    const ref = "refs/heads/main";
+    const inspect = { sourcePath, path, pathKey, ref };
+    const refs = await git(sourcePath, "show-ref");
+
+    try {
+      const proof = await harness.experimental_call(
+        "inspectMissingRegistration",
+        inspect,
+      );
+
+      expect(proof).toMatchObject({
+        head: (await git(sourcePath, "rev-parse", "main")).trim(),
+        fileCount: 1,
+        bytes: 6,
+      });
+
+      const remove = {
+        operationId: "broken-remove",
+        pathKey,
+        path,
+        recovery: {
+          sourcePath,
+          ref,
+          proof: {
+            head: proof.head,
+            identity: proof.identity,
+            registration: proof.registration,
+          },
+        },
+      };
+
+      await writeFile(join(path, "local.tmp"), "unique data\n");
+      expect(await harness.experimental_call("remove", remove)).toMatchObject({
+        status: "failed",
+        message: expect.stringContaining("Extra worktree entry"),
+      });
+      expect(await readFile(join(path, "local.tmp"), "utf8")).toBe(
+        "unique data\n",
+      );
+      await rm(join(path, "local.tmp"));
+
+      expect(await harness.experimental_call("remove", remove)).toEqual({
+        status: "removed",
+      });
+      expect(existsSync(path)).toBe(false);
+      expect(existsSync(`${path}.completed`)).toBe(false);
+      expect(await git(sourcePath, "show-ref")).toBe(refs);
+    } finally {
+      await harness.experimental_dispose();
+    }
+  }, 120_000);
+
   it("automatic worktree cleanup preserves a real consumer without stopping it", async () => {
     const { sourcePath, dataDir } = await createSourceRepository();
     const harness = createHarness(dataDir);

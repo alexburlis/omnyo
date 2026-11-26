@@ -1,5 +1,3 @@
-import "./open-source-providers.css";
-
 export const label =
   "Omnyo's provider plugins: Claude Code Provider and Codex Provider are on, Pi Provider and ACP Providers are off. ACP Providers is switched on, and the new chat's agent menu gains Cursor and opencode beside Claude Code and Codex.";
 

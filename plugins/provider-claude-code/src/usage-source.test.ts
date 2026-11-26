@@ -266,3 +266,115 @@ it("coalesces concurrent reads and makes a forced refresh wait for a fresh colle
     await harness.lifecycle.dispose();
   }
 });
+
+it("expires successful reads at sixty seconds", async () => {
+  const clock = vi.spyOn(Date, "now").mockReturnValue(100_000);
+
+  const collect = vi.fn(async () => ({
+    "claude-code": {
+      status: "ok" as const,
+      accountKey: "issuer:account",
+      accountEmail: null,
+      planLabel: null,
+      windows: [],
+    },
+  }));
+
+  const { api, harness } = createFakePluginHost({
+    sdk: {
+      hosts: {
+        get: async ({ hostId }) =>
+          makeHostResponse({ id: hostId, status: "connected" }),
+      },
+      providers: {
+        list: async () => [
+          {
+            id: "claude-code",
+            displayName: "Claude",
+            pluginId: "provider-claude-code",
+          },
+        ],
+      },
+      system: { usageLimits: collect },
+    },
+  });
+
+  try {
+    plugin(api);
+
+    const read = async (refresh = false) =>
+      usageMeasurementSchema.parse(
+        await harness.behavior.callRpc(usageFetchMethod, {
+          resourceId: JSON.stringify(["host", "claude-code"]),
+          refresh,
+        }),
+      );
+
+    const first = await read();
+    expect(first.observedAt).toBe(100_000);
+    clock.mockReturnValue(159_999);
+    expect(await read()).toEqual(first);
+    expect(collect).toHaveBeenCalledTimes(1);
+    clock.mockReturnValue(160_000);
+    expect((await read()).observedAt).toBe(160_000);
+    expect(collect).toHaveBeenCalledTimes(2);
+  } finally {
+    clock.mockRestore();
+    await harness.lifecycle.dispose();
+  }
+});
+
+it.each(["not_installed", "unauthenticated", "expired", "error"] as const)(
+  "returns %s observations without treating them as fresh cache hits",
+  async (status) => {
+    const collect = vi.fn(async () => ({
+      "claude-code": {
+        status,
+        accountEmail: null,
+        planLabel: null,
+        message: "Provider failure",
+      },
+    }));
+
+    const { api, harness } = createFakePluginHost({
+      sdk: {
+        hosts: {
+          get: async ({ hostId }) =>
+            makeHostResponse({ id: hostId, status: "connected" }),
+        },
+        providers: {
+          list: async () => [
+            {
+              id: "claude-code",
+              displayName: "Claude",
+              pluginId: "provider-claude-code",
+            },
+          ],
+        },
+        system: { usageLimits: collect },
+      },
+    });
+
+    try {
+      plugin(api);
+
+      const read = async () =>
+        usageMeasurementSchema.parse(
+          await harness.behavior.callRpc(usageFetchMethod, {
+            resourceId: JSON.stringify(["host", "claude-code"]),
+            refresh: false,
+          }),
+        );
+
+      expect(await read()).toMatchObject({
+        accountKey: null,
+        observedAt: null,
+        usage: { status, accountEmail: null, planLabel: null, plan: null },
+      });
+      await read();
+      expect(collect).toHaveBeenCalledTimes(2);
+    } finally {
+      await harness.lifecycle.dispose();
+    }
+  },
+);

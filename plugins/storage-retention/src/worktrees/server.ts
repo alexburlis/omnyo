@@ -693,6 +693,10 @@ export function registerWorktrees(
           (entry) => entry.projectId === projectId,
         ),
         items: snapshot.items.filter((item) => item.projectId === projectId),
+        missingInactiveEnvironments:
+          snapshot.missingInactiveEnvironments?.filter(
+            (entry) => entry.projectId === projectId,
+          ),
       },
     };
   }

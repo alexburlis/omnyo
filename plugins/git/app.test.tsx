@@ -103,7 +103,7 @@ describe("Git header control", () => {
     expect(slot.getByRole("status", { name: "Git: loading" })).toBeTruthy();
   });
 
-  it("summarises a dirty branch in the trigger and keeps Commit one click away", () => {
+  it("summarises a dirty branch in the trigger and keeps the commit request one click away", () => {
     const git = readyGit();
     const slot = renderControl(git);
 
@@ -113,7 +113,7 @@ describe("Git header control", () => {
 
     expect(trigger.textContent).toBe("x+1,200 −88");
 
-    fireEvent.click(slot.getByRole("button", { name: "Commit" }));
+    fireEvent.click(slot.getByRole("button", { name: "Ask chat to commit" }));
     expect(git.commit).toHaveBeenCalledTimes(1);
   });
 
@@ -218,20 +218,26 @@ describe("Git header control", () => {
       }),
     );
 
-    expect(slot.queryByRole("button", { name: "Commit" })).toBeNull();
+    expect(
+      slot.queryByRole("button", { name: "Ask chat to commit" }),
+    ).toBeNull();
     openPopover(slot);
     expect(slot.getByText("Working tree clean")).toBeTruthy();
     expect(slot.getByText("Up to date with main")).toBeTruthy();
-    expect(slot.queryByRole("button", { name: "Commit…" })).toBeNull();
+    expect(
+      slot.queryByRole("button", { name: "Ask chat to commit…" }),
+    ).toBeNull();
   });
 
   it("moves Commit into the panel on a compact viewport", () => {
     const git = readyGit();
     const slot = renderControl(git, true);
 
-    expect(slot.queryByRole("button", { name: "Commit" })).toBeNull();
+    expect(
+      slot.queryByRole("button", { name: "Ask chat to commit" }),
+    ).toBeNull();
     openPopover(slot);
-    fireEvent.click(slot.getByRole("button", { name: "Commit…" }));
+    fireEvent.click(slot.getByRole("button", { name: "Ask chat to commit…" }));
     expect(git.commit).toHaveBeenCalledTimes(1);
   });
 

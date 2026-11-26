@@ -77,12 +77,14 @@ function renderComposer(
   {
     compactViewport = false,
     submission,
+    send = async () => {},
   }: {
     compactViewport?: boolean;
     submission?: PromptBoxSubmissionConfig;
+    send?: () => Promise<void>;
   } = {},
 ) {
-  const submitDraft = vi.fn(async (_draft: PromptDraftState) => {});
+  const submitDraft = vi.fn((_draft: PromptDraftState) => send());
   const onSubmit = vi.fn();
   const controls = { setText: (_text: string) => {} };
   const box: { current: PromptBoxHandle | null } = { current: null };
@@ -205,6 +207,41 @@ describe("composer suggestion", () => {
     expect(onSubmit).not.toHaveBeenCalled();
     expect(document.activeElement).not.toBe(editorElement());
   });
+
+  it.each([false, true])(
+    "removes a sent suggestion at once while the send is in flight, and restores it if the send fails (compact %s)",
+    async (compactViewport) => {
+      let fail: (error: Error) => void = () => {};
+
+      const { submitDraft } = renderComposer("", {
+        compactViewport,
+        send: () =>
+          new Promise<void>((_resolve, reject) => {
+            fail = reject;
+          }),
+      });
+
+      publish(ready());
+      await screen.findByText("Update the README, then push.");
+
+      fireEvent.click(screen.getByRole("button", { name: "Send suggestion" }));
+
+      expect(submitDraft).toHaveBeenCalledTimes(1);
+      expect(screen.queryByText("Update the README, then push.")).toBeNull();
+      expect(
+        screen.queryByRole("button", { name: "Send suggestion" }),
+      ).toBeNull();
+
+      publish(ready());
+      expect(screen.queryByText("Update the README, then push.")).toBeNull();
+
+      await act(async () => fail(new Error("offline")));
+
+      expect(
+        await screen.findByText("Update the README, then push."),
+      ).toBeTruthy();
+    },
+  );
 
   it("keeps the text and its controls as a shadow after the user clicks in, and Tab inserts it", async () => {
     const { submitDraft } = renderComposer();

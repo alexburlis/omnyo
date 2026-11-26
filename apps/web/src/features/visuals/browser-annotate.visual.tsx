@@ -1,5 +1,3 @@
-import "./browser-annotate.css";
-
 export const label =
   "Annotate elements in Omnyo's browser: with annotating on, you hover the Export CSV button of a local invoices page, click it, write Make this the primary button and choose Add to prompt. The note lands in the chat composer as 1. button.export-csv.";
 

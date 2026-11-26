@@ -13,8 +13,8 @@
     "omnyoPluginSdk": ">=0.6.42 >=0.6.44"
   },
   "omnyo": {
-    "name": "Composer Predictions",
-    "description": "Predict the next message and archive readiness after completed chat turns.",
+    "name": "Composer Predictions [EXPERIMENTAL]",
+    "description": "Predict the next message and archive readiness after completed chat turns. Experimental. We’re unaware of account bans from using this plugin. Provider terms do not clearly address every use of these features. Use at your own risk.",
     "branding": {
       "icon": "MessageSquare"
     },

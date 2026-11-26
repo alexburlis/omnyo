@@ -1,5 +1,3 @@
-import "./keyboard-answer.css";
-
 export const label =
   "An agent's question in an Omnyo chat with three numbered options for the CSV export's date format. Pressing the 2 key picks Keep locale, Submit answer sends it, and the answer appears in the chat as your reply.";
 

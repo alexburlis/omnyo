@@ -82,9 +82,10 @@ export function ThreadGitActionDialogContent({
   return (
     <>
       <DialogHeader className="px-6 pt-5 pb-3">
-        <DialogTitle>Commit changes</DialogTitle>
+        <DialogTitle>Ask chat to commit</DialogTitle>
         <DialogDescription>
-          Create a commit from the current workspace changes.
+          Send a commit request to this chat. If the agent is busy, the request
+          waits in its queue.
         </DialogDescription>
       </DialogHeader>
       <form className="space-y-4 px-6 pt-1 pb-5" onSubmit={handleSubmit}>
@@ -139,7 +140,7 @@ export function ThreadGitActionDialogContent({
         ) : null}
         <DialogFooter className="flex-row flex-wrap items-center justify-end gap-x-2 gap-y-1 sm:space-x-0">
           <Button type="submit" size="sm" className="shrink-0">
-            Commit changes
+            Send commit request
           </Button>
         </DialogFooter>
       </form>

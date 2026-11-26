@@ -38,6 +38,7 @@ export const predictionSchema = z.object({
   archiveReadiness: archiveReadinessSchema.nullable(),
   assessmentVersion: z.number().int().nonnegative().optional(),
   forced: z.boolean().optional(),
+  sameChat: z.literal(true).optional(),
 });
 
 export type PredictionState = z.infer<typeof predictionSchema>;

@@ -1,5 +1,3 @@
-import "./speed.css";
-
 export const label =
   "Four measured times: switching to a recently opened chat in 85 ms or less, a new chat saved in 6 ms, search across 1,000 chats in 3 ms and a 15,000-event chat reopened in 25 ms.";
 

@@ -258,9 +258,23 @@ it("coalesces concurrent reads and makes a forced refresh wait for a fresh colle
     const first = read(false);
     const second = read(false);
     const forced = read(true);
+    const alsoForced = read(true);
     await vi.waitFor(() => expect(collect).toHaveBeenCalledTimes(1));
     finish!();
-    await Promise.all([first, second, forced]);
+    const values = await Promise.all([first, second, forced, alsoForced]);
+    expect(values.map((value) => usageMeasurementSchema.parse(value))).toEqual(
+      Array.from({ length: 4 }, () => ({
+        accountKey: null,
+        observedAt: expect.any(Number),
+        usage: {
+          status: "ok",
+          accountEmail: null,
+          planLabel: null,
+          plan: null,
+          windows: [],
+        },
+      })),
+    );
     expect(collect).toHaveBeenCalledTimes(2);
     expect(collect).toHaveBeenNthCalledWith(
       2,

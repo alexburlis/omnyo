@@ -1,5 +1,3 @@
-import "./goals-and-waits-loop.css";
-
 export const label =
   "A loop in a chat's Glance card re-checks whether the CSV button is live on staging. Quiet checks wait 1, then 2, then 4 minutes before the next one, and the fourth check finds the change and ends the loop.";
 

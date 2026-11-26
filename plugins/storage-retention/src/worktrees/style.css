@@ -311,7 +311,6 @@
 .wt-path,
 .wt-storage,
 .wt-metrics,
-.wt-reason,
 .wt-protection {
   color: var(--muted-foreground);
   font-size: var(--text-xs);
@@ -346,10 +345,6 @@
 .wt-unmerged {
   color: var(--wt-purple);
   background: color-mix(in oklab, var(--wt-purple) 9%, var(--canvas));
-}
-.wt-merged {
-  color: var(--wt-green);
-  background: color-mix(in oklab, var(--wt-green) 10%, var(--canvas));
 }
 .wt-unavailable {
   color: var(--destructive);

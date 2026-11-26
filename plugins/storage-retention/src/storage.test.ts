@@ -11,6 +11,7 @@ import {
 } from "@omnyo/plugin-sdk/testing";
 import { experimental_createHostEntryHarness } from "@omnyo/plugin-sdk/testing/host";
 import { resolveDevInstanceConfig } from "../../../packages/config/src/runtime.js";
+import { makeSystemConfig } from "../../../apps/app/src/test/fixtures/system-config.js";
 import hostEntry from "./host.js";
 import plugin from "./server.js";
 import { ARCHIVED_STORAGE_MIN_AGE_MS, createStorage } from "./storage.js";
@@ -45,6 +46,25 @@ async function directory() {
   return dir;
 }
 
+function createStorageTestHost(
+  options: NonNullable<Parameters<typeof createFakePluginHost>[0]>,
+) {
+  return createFakePluginHost({
+    ...options,
+    sdk: {
+      ...options.sdk,
+      system: {
+        config: async () => makeSystemConfig(),
+        ...options.sdk?.system,
+      },
+    },
+    experimental_callHostRpc: (call) =>
+      call.method === "inventory"
+        ? { entries: [], issues: [], scannedAt: new Date().toISOString() }
+        : options.experimental_callHostRpc?.(call),
+  });
+}
+
 it("queues thread cleanup and bulk maintenance in order and continues after a failure", async () => {
   const threads = ["thr_one", "thr_two"].map((id) =>
     makeThreadResponse({ id, status: "idle", environmentId: "env_test" }),
@@ -57,7 +77,7 @@ it("queues thread cleanup and bulk maintenance in order and continues after a fa
 
   let hold = true;
 
-  const host = createFakePluginHost({
+  const host = createStorageTestHost({
     pluginId: "storage-retention",
     experimental_hostEntry: true,
     experimental_callHostRpc: async (call) => {
@@ -226,7 +246,7 @@ it.each([
 
     let hold = true;
 
-    const host = createFakePluginHost({
+    const host = createStorageTestHost({
       pluginId: "storage-retention",
       experimental_hostEntry: true,
       experimental_callHostRpc: async (call) => {
@@ -444,7 +464,7 @@ it.each([false, true])(
     const worker = experimental_createHostEntryHarness(hostEntry);
     let active = true;
 
-    const host = createFakePluginHost({
+    const host = createStorageTestHost({
       pluginId: "storage-retention",
       experimental_hostEntry: true,
       experimental_callHostRpc: async (call) => {
@@ -683,7 +703,7 @@ it("reads only the threads a report needs: non-empty storage entries by id and t
   const requestedThreadIds = new Set<string>();
   const worker = experimental_createHostEntryHarness(hostEntry);
 
-  const host = createFakePluginHost({
+  const host = createStorageTestHost({
     pluginId: "storage-retention",
     experimental_hostEntry: true,
     experimental_callHostRpc: async (call) => {
@@ -701,8 +721,6 @@ it("reads only the threads a report needs: non-empty storage entries by id and t
           hostStorageContract.capacity.input.parse(call.input),
         );
 
-      if (call.method === "listGitWorktrees")
-        return { repositories: [], failures: [] };
       throw new Error("Unexpected host method");
     },
     sdk: {
@@ -724,6 +742,11 @@ it("reads only the threads a report needs: non-empty storage entries by id and t
       },
       threads: {
         list: async (input) => {
+          if (input?.archived !== undefined)
+            return threads.filter(
+              (thread) => (thread.archivedAt !== null) === input.archived,
+            );
+
           if (
             input?.threadIds === undefined &&
             input?.environmentId === undefined
@@ -827,7 +850,7 @@ it("rescans only the machine that reconnected when development cleanup is on", a
     },
   } satisfies Parameters<typeof createFakePluginHost>[0];
 
-  let host = createFakePluginHost(options);
+  let host = createStorageTestHost(options);
 
   try {
     plugin(host.api);
@@ -897,7 +920,7 @@ it("deletes only large files from archived threads on scanned online machines, k
     makeThreadResponse({ id: "thr_running", status: "active", archivedAt: 1 }),
   ];
 
-  const host = createFakePluginHost({
+  const host = createStorageTestHost({
     pluginId: "storage-retention",
     experimental_hostEntry: true,
     experimental_callHostRpc: async (call) => {
@@ -1215,7 +1238,7 @@ it("keeps cleanup available during a scan and leaves cleared storage out of its 
   let gate: Promise<void> | null = null;
   let release = () => {};
 
-  const host = createFakePluginHost({
+  const host = createStorageTestHost({
     pluginId: "storage-retention",
     experimental_hostEntry: true,
     experimental_callHostRpc: async (call) => {
@@ -1320,7 +1343,7 @@ it("fails a scan visibly so it can be retried", async () => {
     release = resolve;
   });
 
-  const host = createFakePluginHost({
+  const host = createStorageTestHost({
     pluginId: "storage-retention",
     experimental_hostEntry: true,
     experimental_callHostRpc: async (call) => {
@@ -1477,7 +1500,7 @@ it("counts distinct live managed worktrees for machine projects, including empty
     ],
   }));
 
-  const host = createFakePluginHost({
+  const host = createStorageTestHost({
     pluginId: "storage-retention",
     experimental_hostEntry: true,
     experimental_callHostRpc: async (call) => {
@@ -1586,6 +1609,7 @@ it("shares reviewed Git inventory without measuring external folders again and r
             repo: {
               path: source,
               base: "main",
+              baseRef: null,
               branches: [],
               worktrees: [
                 { ...baseWorktree, purgeReady: false, preserveIn: null },
@@ -1627,7 +1651,7 @@ it("shares reviewed Git inventory without measuring external folders again and r
     ),
   };
 
-  const host = createFakePluginHost({
+  const host = createStorageTestHost({
     pluginId: "storage-retention",
     experimental_hostEntry: true,
     experimental_callHostRpc: async (call) => {
@@ -1741,7 +1765,7 @@ it("keeps legacy storage reports readable and requires a new Git review", async 
     removeFolders: vi.fn(async () => ({ removed: [], skipped: [] })),
   };
 
-  const host = createFakePluginHost({
+  const host = createStorageTestHost({
     pluginId: "storage-retention",
     experimental_hostEntry: true,
     sdk: {
@@ -1830,7 +1854,7 @@ it("rechecks external worktree ownership after waiting for storage cleanup", asy
     ),
   };
 
-  const host = createFakePluginHost({
+  const host = createStorageTestHost({
     pluginId: "storage-retention",
     experimental_hostEntry: true,
     sdk: {
@@ -2173,7 +2197,7 @@ it.skipIf(process.platform === "win32")(
     await fs.rm(path.join(fakeHome, "gone"), { recursive: true });
     const worker = experimental_createHostEntryHarness(hostEntry);
 
-    const host = createFakePluginHost({
+    const host = createStorageTestHost({
       pluginId: "storage-retention",
       dataDir: path.join(rootPath, "self"),
       experimental_hostEntry: true,
@@ -2438,7 +2462,7 @@ it("only clears opted-in archives once a day after three hours, retries stopped 
   const worker = experimental_createHostEntryHarness(hostEntry);
   let online = true;
 
-  let host = createFakePluginHost({
+  let host = createStorageTestHost({
     pluginId: "storage-retention",
     experimental_hostEntry: true,
     experimental_callHostRpc: async (call) => {
@@ -2581,7 +2605,7 @@ it("waits for storage inventory for detached archives and retries failed cleanup
     return { removed: [thread.id] };
   });
 
-  let host = createFakePluginHost({
+  let host = createStorageTestHost({
     pluginId: "storage-retention",
     experimental_hostEntry: true,
     experimental_callHostRpc: async (call) => {
@@ -2661,7 +2685,7 @@ it("stops retrying archive storage cleanup once its thread no longer exists", as
 
   let exists = true;
 
-  const host = createFakePluginHost({
+  const host = createStorageTestHost({
     pluginId: "storage-retention",
     experimental_hostEntry: true,
     sdk: {
@@ -2775,7 +2799,7 @@ it("never clears thread storage that holds a workspace an environment still uses
 
   const worker = experimental_createHostEntryHarness(hostEntry);
 
-  const host = createFakePluginHost({
+  const host = createStorageTestHost({
     pluginId: "storage-retention",
     experimental_hostEntry: true,
     experimental_callHostRpc: async (call) => {
@@ -2905,7 +2929,7 @@ it("never clears thread storage that holds a workspace an environment still uses
 it("refreshes the storage page only for host changes it shows", async () => {
   const subscriptions = new Set<Parameters<PluginApi["sdk"]["subscribe"]>[0]>();
 
-  const host = createFakePluginHost({
+  const host = createStorageTestHost({
     pluginId: "storage-retention",
     sdk: {
       subscribe: (subscription) => {
@@ -2991,7 +3015,7 @@ it("automatically removes missing-checkout data only when enabled and online, re
   let removalCompleted = nextRemoval();
   const measuredPaths: string[] = [];
 
-  let host = createFakePluginHost({
+  let host = createStorageTestHost({
     pluginId: "storage-retention",
     experimental_hostEntry: true,
     experimental_callHostRpc: async (call) => {
@@ -3248,7 +3272,7 @@ it.each([
       throw new Error("Must not remove a live checkout");
     });
 
-    const host = createFakePluginHost({
+    const host = createStorageTestHost({
       pluginId: "storage-retention",
       experimental_hostEntry: true,
       experimental_callHostRpc: remove,
@@ -3319,7 +3343,7 @@ it("refuses to clear storage containing a live Windows workspace with different 
     throw new Error("Must not discard a live workspace");
   });
 
-  const host = createFakePluginHost({
+  const host = createStorageTestHost({
     pluginId: "storage-retention",
     experimental_hostEntry: true,
     experimental_callHostRpc: worker,

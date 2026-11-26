@@ -1,5 +1,3 @@
-import "./devices-tech.css";
-
 export const label =
   "The Add a machine dialog in Omnyo. It shows the setup code 7K2M-QW9D and a one-line install command, curl for macOS or Linux and a PowerShell command for Windows. The status changes from Waiting for the machine to connect to linux-box connected, then win-3090 connected.";
 

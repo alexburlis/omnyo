@@ -1,3 +1,4 @@
+import { beginInboxAdmission, endInboxAdmission } from "../inbox/admission.js";
 import { requestThreadStorageDeletion } from "./thread-lifecycle.js";
 import { seedThreadSessionOptionSelections } from "./thread-session-options.js";
 import { assertEnvironmentPathAvailable } from "../environments/path-admission.js";
@@ -732,6 +733,7 @@ async function createPendingThreadAndAttemptFirstDispatch(
     startupContext: JSON.stringify({ kind: "pending", ...startContext }),
   });
 
+  beginInboxAdmission(thread.id);
   let execution: Awaited<ReturnType<typeof buildExecutionOptions>>;
 
   try {
@@ -789,6 +791,7 @@ async function createPendingThreadAndAttemptFirstDispatch(
       trigger: "user",
     });
   } catch (error) {
+    endInboxAdmission(deps.hub, thread.id);
     emitPluginThreadDeleted({
       ...thread,
       deletedAt: Date.now(),
@@ -810,6 +813,7 @@ async function createPendingThreadAndAttemptFirstDispatch(
     throw error;
   }
 
+  endInboxAdmission(deps.hub, thread.id);
   completeThreadHandoff(deps, thread);
 
   rememberProjectExecutionDefaultsForCreate(deps, {

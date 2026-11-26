@@ -1,5 +1,3 @@
-import "./claude-code-gui-picker.css";
-
 export const label =
   "Omnyo's model picker over the composer: typing opus max filters the grid of Claude Code models and reasoning levels to Opus 5.5 at Max, Enter applies it, and the lightning toggle turns on Fast mode.";
 

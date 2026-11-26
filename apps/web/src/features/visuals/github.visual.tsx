@@ -1,5 +1,3 @@
-import "./github.css";
-
 export const label =
   "The GitHub page in Omnyo listing issues across projects. After a refresh, the issue an agent fixed shows as closed. Then Start on another issue hands it to a new agent, and the issue gets an agent badge.";
 

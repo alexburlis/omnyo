@@ -1,5 +1,3 @@
-import "./parallel-agents-setup.css";
-
 export const label =
   "A new worktree being prepared: Omnyo fetches main, creates the worktree, copies .env files listed in .worktreeinclude, streams the output of .omnyo-env-setup.sh, then starts the agent.";
 

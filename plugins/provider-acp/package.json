@@ -15,7 +15,7 @@
   },
   "engines": {
     "omnyo": ">=0.0",
-    "omnyoPluginSdk": ">=0.4.90 >=0.6.44"
+    "omnyoPluginSdk": ">=0.4.90 >=0.6.58"
   },
   "omnyo": {
     "name": "ACP Providers",

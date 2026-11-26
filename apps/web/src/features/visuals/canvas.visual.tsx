@@ -1,5 +1,3 @@
-import "./canvas.css";
-
 export const label =
   "A chat with its Canvas board open beside it. While the agent fixes the date parser, the board updates live: the parser status runs to Done, the failing case turns into a passing one, the European bar on the test chart fills up, and the toolbar counts the updated cards.";
 

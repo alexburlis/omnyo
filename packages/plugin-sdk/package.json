@@ -1,7 +1,7 @@
 {
   "name": "@omnyo/plugin-sdk",
   "private": true,
-  "version": "0.6.57",
+  "version": "0.6.58",
   "homepage": "https://github.com/example/omnyo",
   "bugs": {
     "url": "https://github.com/example/omnyo/issues"

@@ -1,5 +1,3 @@
-import "./canvas-dashboard.css";
-
 export const label =
   "The harbor-ledger project canvas: an Overview section with a weekly signups metric and a pageviews chart fed by PostHog, and a table of top Search Console queries. The PostHog source refreshes, the metric ticks up and the chart gains a new day, while the Release section is locked for agents.";
 

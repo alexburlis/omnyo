@@ -34,7 +34,7 @@ export const page: FeaturePageBody = {
     {
       label: "Predictions",
       value:
-        "Reply suggestions are on by default and use your Codex allowance, so idle chats' context goes to OpenAI.",
+        "Same chat uses a suggestion from the agent’s current turn. Choosing Fixed Codex sends context from completed chats to OpenAI, including Claude chats.",
     },
     {
       label: "Voice",
@@ -74,8 +74,7 @@ export const page: FeaturePageBody = {
     },
     {
       question: "Can I turn off reply suggestions?",
-      answer:
-        "Yes. Switch off the Composer Predictions plugin, and idle chats are no longer sent for suggestions.",
+      answer: "Yes. Turn off Composer predictions in the plugin’s settings.",
     },
   ],
   relatedFeatures: ["open-source", "devices", "usage-tracking"],

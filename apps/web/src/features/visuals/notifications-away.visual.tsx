@@ -1,5 +1,3 @@
-import "./notifications-away.css";
-
 export const label =
   "While the desktop app sees you at your computer, the phone holds its pushes. When the screen locks, the unanswered question reaches the phone, and the finished chat you already read is dropped.";
 

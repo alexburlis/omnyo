@@ -41,6 +41,7 @@ function useIndexMotion(root: RefObject<HTMLDivElement | null>) {
     if (!element) return;
 
     const chapters = [...element.querySelectorAll<HTMLElement>(".fx-chapter")];
+    const progressBar = element.querySelector<HTMLElement>(".fx-rail-progress");
     const inBand = new Set<string>();
 
     const spy = new IntersectionObserver(
@@ -60,31 +61,40 @@ function useIndexMotion(root: RefObject<HTMLDivElement | null>) {
     for (const chapter of chapters) spy.observe(chapter);
 
     let frame = 0;
+    let start = 0;
+    let distance = 1;
 
     const measure = () => {
       frame = 0;
+      const progress = (window.scrollY - start) / distance;
+
+      if (progressBar) {
+        progressBar.style.transform = `scaleX(${Math.min(1, Math.max(0, progress))})`;
+      }
+    };
+
+    const updateBounds = () => {
       const first = chapters[0];
       const last = chapters.at(-1);
 
       if (!first || !last) return;
 
-      const start = first.offsetTop - window.innerHeight * 0.5;
+      start = first.offsetTop - window.innerHeight * 0.5;
       const end = last.offsetTop + last.offsetHeight - window.innerHeight;
-      const progress = (window.scrollY - start) / Math.max(1, end - start);
+      distance = Math.max(1, end - start);
 
-      element.style.setProperty(
-        "--fx-progress",
-        String(Math.min(1, Math.max(0, progress))),
-      );
+      onScroll();
     };
 
     const onScroll = () => {
       if (!frame) frame = requestAnimationFrame(measure);
     };
 
-    measure();
+    updateBounds();
+    const resize = new ResizeObserver(updateBounds);
+    resize.observe(element);
     window.addEventListener("scroll", onScroll, { passive: true });
-    window.addEventListener("resize", onScroll);
+    window.addEventListener("resize", updateBounds);
 
     const reduced = window.matchMedia(
       "(prefers-reduced-motion: reduce)",
@@ -123,8 +133,9 @@ function useIndexMotion(root: RefObject<HTMLDivElement | null>) {
     return () => {
       spy.disconnect();
       reveal?.disconnect();
+      resize.disconnect();
       window.removeEventListener("scroll", onScroll);
-      window.removeEventListener("resize", onScroll);
+      window.removeEventListener("resize", updateBounds);
 
       if (frame) cancelAnimationFrame(frame);
       delete element.dataset.reveal;

@@ -13,8 +13,8 @@
     "omnyoPluginSdk": ">=0.6.42 >=0.6.44"
   },
   "omnyo": {
-    "name": "Account Usage",
-    "description": "Show pooled Claude and Codex usage and selected-account reset credits.",
+    "name": "Account Usage [EXPERIMENTAL]",
+    "description": "Show pooled Claude and Codex usage and selected-account reset credits. Experimental. We’re unaware of account bans from using this plugin. Provider terms do not clearly address every use of these features. Use at your own risk.",
     "branding": {
       "icon": "ChartColumn"
     },

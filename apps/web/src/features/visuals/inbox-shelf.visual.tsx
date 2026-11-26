@@ -1,5 +1,3 @@
-import "./inbox-shelf.css";
-
 export const label =
   "Shift+E in the Inbox opens Archive 3 chats, listing the finished chats with their results. Archive clears them in one go, an Undo toast appears, and the folded Shelf keeps its two parked chats.";
 

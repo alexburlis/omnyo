@@ -1,5 +1,3 @@
-import "./dev-servers-phone.css";
-
 export const label =
   "Opening a dev server on the phone: in the Omnyo iPhone app, the chat header shows a server button with 2 servers. Tapping it opens the Dev servers sheet, and tapping Open on localhost:5174 shows the page inside the app, served from studio-mac through a private preview link on your Omnyo server.";
 

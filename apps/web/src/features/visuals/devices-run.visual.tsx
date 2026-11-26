@@ -1,5 +1,3 @@
-import "./devices-tech.css";
-
 export const label =
   "A new chat in Omnyo with the machine menu open. macbook, mac-mini and win-3090 are ready, linux-box is not set up for this project, and the pick moves from macbook to win-3090 for a GPU job. Host limits show one chat per processor on each machine, and waiting chats can start on a free machine.";
 

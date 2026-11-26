@@ -1,5 +1,3 @@
-import "./glance-details.css";
-
 export const label =
   "A finished chat's Glance card with Details opened: three pieces of evidence marked Reproduced, Inspected and Hypothesis. The reproduced claim expands to the linked test command, its exit code and output.";
 

@@ -1,5 +1,3 @@
-import "./performance-reopen.css";
-
 export const label =
   "Reopening a saved 116 MB chat with 15,543 events, timed at the server in real time: before the change the read takes about 1.8 seconds and its bar crawls across, now it takes about 25 ms and finishes at once. Below, a new chat saves in about 6 ms and a search across 1,000 chats takes about 3 ms.";
 

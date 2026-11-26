@@ -1,5 +1,3 @@
-import "./notifications-levels.css";
-
 export const label =
   "A chat's menu opens to Notifications, with Default, All activity, Needs input only and Muted. Muted is chosen, and the muted bell appears on the parent chat and on both sub-chats below it.";
 

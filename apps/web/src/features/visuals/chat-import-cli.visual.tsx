@@ -1,5 +1,3 @@
-import "./chat-import-cli.css";
-
 export const label =
   "A terminal running omnyo chat-import scan, which lists five recent chats with their status, age, project and title, then omnyo chat-import run, which imports the three ready chats.";
 

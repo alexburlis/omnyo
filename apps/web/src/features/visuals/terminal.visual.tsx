@@ -1,5 +1,3 @@
-import "./terminal-demo.css";
-
 import { useId, useRef, useState, type FormEvent } from "react";
 
 const WORKSPACE = "/Users/demo/worktrees/export-csv";

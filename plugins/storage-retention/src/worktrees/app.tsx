@@ -63,20 +63,24 @@ function divergence(ahead: number | null, behind: number | null) {
   return ahead === null || behind === null ? null : ahead + behind;
 }
 
-function stateOf(w: Worktree) {
-  return w.error
-    ? "Unavailable"
-    : w.dirty
-      ? "Dirty"
-      : w.purgeReady
-        ? "Merged"
-        : (w.ahead ?? 0) > 0
-          ? "Unmerged"
-          : w.ahead === null || w.behind === null
-            ? "Unknown"
-            : w.behind > 0
-              ? "Behind"
-              : "Clean";
+function comparisonState(ahead: number | null, behind: number | null) {
+  if (ahead === null || behind === null) return "Unknown";
+
+  if (ahead > 0) return behind > 0 ? "Diverged" : "Ahead";
+
+  return behind > 0 ? "Behind" : "Up to date";
+}
+
+function ComparisonBadge({ ahead, behind }: Pick<Branch, "ahead" | "behind">) {
+  const state = comparisonState(ahead, behind);
+
+  return (
+    <span
+      className={`wt-badge ${state === "Ahead" || state === "Diverged" ? "wt-unmerged" : ""}`}
+    >
+      {state}
+    </span>
+  );
 }
 
 function matches(
@@ -92,7 +96,7 @@ function matches(
   return (
     filter === "All" ||
     (filter === "Changes" && (dirty || (commits ?? 0) > 0)) ||
-    (filter === "Diverged" && (commits ?? 0) > 0) ||
+    (filter === "Diverged" && comparisonState(ahead, behind) === "Diverged") ||
     (filter === "Safe cleanup" && ready) ||
     (filter === "Clean" && !unavailable && !dirty && commits === 0)
   );
@@ -167,13 +171,19 @@ function spaceSummary(items: CleanupItem[]) {
     : `${bytesLabel(bytes)} estimated folder space${unknown ? ` · ${plural(unknown, "folder size", "folder sizes")} unknown` : ""}`;
 }
 
+function refLabel(ref: string) {
+  return ref.replace(/^refs\/(?:heads|remotes)\//, "");
+}
+
 function commitsLabel(
   ahead: number | null,
   behind: number | null,
   base: string | null,
 ) {
   return ahead === null || behind === null
-    ? `Divergence unknown vs ${base ?? "unknown base"}`
+    ? base
+      ? `Comparison unavailable vs ${base}`
+      : "Comparison unavailable"
     : `${ahead} ahead · ${behind} behind vs ${base}`;
 }
 
@@ -573,8 +583,9 @@ export function WorktreesSection({
     Changes:
       worktrees.filter((w) => w.dirty || changes(w)).length +
       looseBranches.filter(changes).length,
-    Diverged:
-      worktrees.filter(changes).length + looseBranches.filter(changes).length,
+    Diverged: [...worktrees, ...looseBranches].filter(
+      ({ ahead, behind }) => comparisonState(ahead, behind) === "Diverged",
+    ).length,
     "Safe cleanup":
       worktrees.filter((w) => w.purgeReady).length +
       looseBranches.filter((b) => b.deleteReady).length,
@@ -658,6 +669,9 @@ export function WorktreesSection({
     ...entries.flatMap((e) => (e.error ? [`${e.path}: ${e.error}`] : [])),
   ];
 
+  const missingInactiveEnvironments =
+    scanState?.snapshot?.missingInactiveEnvironments ?? [];
+
   const summary = loadError
     ? "Worktree scan unavailable"
     : scanState?.snapshot
@@ -679,13 +693,18 @@ export function WorktreesSection({
     trigger: HTMLButtonElement,
   ) {
     if (!entry.repo?.base) return;
+    const { base, baseRef, branches } = entry.repo;
     inspectorTrigger.current = trigger;
     setSelection({
       projectId: entry.projectId,
       repo: entry.path,
       target,
       mode,
-      base: entry.repo.base,
+      base:
+        baseRef ??
+        (branches.some(({ name }) => name === base)
+          ? `refs/heads/${base}`
+          : `refs/remotes/${base}`),
     });
   }
 
@@ -928,6 +947,25 @@ export function WorktreesSection({
           </summary>
           {allIssues.map((issue, index) => (
             <p key={`${index}-${issue}`}>{issue}</p>
+          ))}
+        </details>
+      )}
+      {missingInactiveEnvironments.length > 0 && (
+        <details className="wt-issues">
+          <summary className="wt-disclosure">
+            <Icon
+              name="ChevronRight"
+              aria-hidden="true"
+              className="wt-disclosure-chevron"
+            />
+            {plural(
+              missingInactiveEnvironments.length,
+              "missing inactive workspace",
+              "missing inactive workspaces",
+            )}
+          </summary>
+          {missingInactiveEnvironments.map(({ projectId, path }) => (
+            <p key={JSON.stringify([projectId, path])}>{path}</p>
           ))}
         </details>
       )}
@@ -1282,7 +1320,6 @@ export function WorktreesSection({
                       {trees.map((w) => (
                         <div
                           key={w.path}
-                          data-state={stateOf(w)}
                           className={`wt-row ${selection?.target === w.path ? "wt-selected" : ""}`}
                         >
                           <button
@@ -1321,11 +1358,19 @@ export function WorktreesSection({
                               </span>
                             </span>
                             <span className="wt-condition">
-                              <span
-                                className={`wt-badge wt-${stateOf(w).toLowerCase().replaceAll(" ", "-")}`}
-                              >
-                                {w.dirty ? "Uncommitted edits" : stateOf(w)}
-                              </span>
+                              <ComparisonBadge
+                                ahead={w.ahead}
+                                behind={w.behind}
+                              />
+                              {w.error ? (
+                                <span className="wt-badge wt-unavailable">
+                                  Unavailable
+                                </span>
+                              ) : w.dirty ? (
+                                <span className="wt-badge wt-dirty">
+                                  Uncommitted edits
+                                </span>
+                              ) : null}
                               <span className="wt-metrics">
                                 {w.error
                                   ? "Changed files unknown"
@@ -1337,31 +1382,18 @@ export function WorktreesSection({
                                   repo?.base ?? null,
                                 )}
                               </span>
-                              <span className="wt-reason">
+                              <span className="wt-protection">
                                 {w.purgeReady
-                                  ? `Merged into local ${w.preserveIn} · branch will be kept`
-                                  : w.ahead
-                                    ? `${w.ahead} unmerged into ${repo?.base}`
-                                    : w.ahead === null
-                                      ? "Merge status unknown"
-                                      : `Merged into ${repo?.base}`}
+                                  ? `Safe to remove folder · Commits kept in local ${w.preserveIn}`
+                                  : `Keep folder · ${w.reasons
+                                      .map((reason) =>
+                                        reason ===
+                                        "Used by Omnyo environment or project source"
+                                          ? "Used by Omnyo"
+                                          : reason,
+                                      )
+                                      .join(" · ")}`}
                               </span>
-                              {!w.purgeReady && (
-                                <span className="wt-protection">
-                                  Keep folder ·{" "}
-                                  {w.reasons
-                                    .filter(
-                                      (r) => !r.endsWith("unmerged commits"),
-                                    )
-                                    .map((r) =>
-                                      r ===
-                                      "Used by Omnyo environment or project source"
-                                        ? "Used by Omnyo"
-                                        : r,
-                                    )
-                                    .join(" · ") || "Unmerged work"}
-                                </span>
-                              )}
                             </span>
                           </button>
                           {w.purgeReady && (
@@ -1414,21 +1446,7 @@ export function WorktreesSection({
                             <span>Not checked out · no uncommitted files</span>
                           </div>
                           {branches.map((b) => (
-                            <div
-                              key={b.name}
-                              className="wt-row wt-branch-row"
-                              data-state={
-                                b.deleteReady
-                                  ? "Merged"
-                                  : b.ahead
-                                    ? "Unmerged"
-                                    : b.ahead === null || b.behind === null
-                                      ? "Unknown"
-                                      : b.behind
-                                        ? "Behind"
-                                        : "Clean"
-                              }
-                            >
+                            <div key={b.name} className="wt-row wt-branch-row">
                               <button
                                 className="wt-open"
                                 title={`View changes on ${b.name}`}
@@ -1456,19 +1474,10 @@ export function WorktreesSection({
                                   </span>
                                 </span>
                                 <span className="wt-condition">
-                                  <span
-                                    className={`wt-badge ${b.deleteReady ? "wt-merged" : b.ahead ? "wt-unmerged" : b.ahead === null || b.behind === null ? "wt-unknown" : b.behind ? "wt-behind" : "wt-clean"}`}
-                                  >
-                                    {b.deleteReady
-                                      ? "Safe to delete"
-                                      : b.ahead
-                                        ? "Unmerged"
-                                        : b.ahead === null || b.behind === null
-                                          ? "Unknown"
-                                          : b.behind
-                                            ? "Behind"
-                                            : "Merged"}
-                                  </span>
+                                  <ComparisonBadge
+                                    ahead={b.ahead}
+                                    behind={b.behind}
+                                  />
                                   <span className="wt-metrics">
                                     {commitsLabel(
                                       b.ahead,
@@ -1476,18 +1485,11 @@ export function WorktreesSection({
                                       repo?.base ?? null,
                                     )}
                                   </span>
-                                  <span className="wt-reason">
+                                  <span className="wt-protection">
                                     {b.deleteReady
-                                      ? `Commits kept in local ${b.deleteBase}`
-                                      : b.ahead
-                                        ? `${b.ahead} unmerged into ${repo?.base}`
-                                        : `Compared with ${repo?.base ?? "unknown base"}`}
+                                      ? `Safe to delete branch · Commits kept in local ${b.deleteBase}`
+                                      : `Keep branch · ${b.reasons.join(" · ")}`}
                                   </span>
-                                  {!b.deleteReady && (
-                                    <span className="wt-protection">
-                                      Keep branch · {b.reasons.join(" · ")}
-                                    </span>
-                                  )}
                                 </span>
                               </button>
                               {b.deleteReady && (
@@ -1594,7 +1596,7 @@ export function WorktreesSection({
                   {selection.mode === "working"
                     ? "Working files"
                     : "Committed changes"}{" "}
-                  <span>vs {selection.base}</span>
+                  <span>vs {refLabel(selection.base)}</span>
                 </p>
                 <p className="wt-detail-storage">
                   {selectedTree
@@ -1611,12 +1613,14 @@ export function WorktreesSection({
             </header>
             <div className="wt-diff-tools">
               <details>
-                <summary>Compare with {selection.base}</summary>
+                <summary>Compare with {refLabel(selection.base)}</summary>
                 <div className="wt-base-list">
                   {[
                     ...new Set([
                       selection.base,
-                      ...(selectedRepo?.branches.map((b) => b.name) ?? []),
+                      ...(selectedRepo?.branches.map(
+                        (b) => `refs/heads/${b.name}`,
+                      ) ?? []),
                     ]),
                   ].map((base) => (
                     <button
@@ -1624,7 +1628,7 @@ export function WorktreesSection({
                       aria-pressed={selection.base === base}
                       onClick={() => setSelection({ ...selection, base })}
                     >
-                      {base}
+                      {refLabel(base)}
                     </button>
                   ))}
                 </div>
@@ -1641,7 +1645,9 @@ export function WorktreesSection({
             {files === null && !diffError ? (
               <p className="wt-empty">Loading changed files…</p>
             ) : files?.length === 0 ? (
-              <p className="wt-empty">No changes against {selection.base}.</p>
+              <p className="wt-empty">
+                No changes against {refLabel(selection.base)}.
+              </p>
             ) : (
               <>
                 <nav className="wt-files" aria-label="Changed files">

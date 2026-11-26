@@ -14,9 +14,11 @@ import {
   deleteBranch,
   inspectCleanupRepo,
   inspectRepo,
+  inspectSidebarRepo,
   isPathWithin,
   purgeWorktree,
 } from "../git.js";
+import { createWorktreeService } from "../host-service.js";
 import storageHost from "../../host.js";
 
 it("composes the Worktrees host into Storage without legacy removal RPCs", () => {
@@ -37,6 +39,229 @@ it("keeps native path ownership boundaries after normalization", () => {
   expect(isPathWithin(root, join(root, "..", "project-other"))).toBe(false);
   expect(isPathWithin(root, join(root, ".."))).toBe(false);
 });
+
+it("distinguishes inactive missing workspaces from missing sources and broken Git links", async () => {
+  const root = await realpath(
+    await mkdtemp(join(tmpdir(), "worktrees-discovery-")),
+  );
+
+  const umbrella = join(root, "project");
+  const child = join(umbrella, "repo");
+  const broken = join(umbrella, "broken");
+  const missingSource = join(root, "missing-project");
+  const inactive = join(root, "inactive");
+  const protectedPath = join(root, "protected");
+  const orphanScaffold = join(root, "scaffold-without-repositories");
+  const hostId = "machine";
+  const projectId = "project";
+
+  try {
+    await Promise.all([
+      mkdir(join(umbrella, ".git", "worktrees"), { recursive: true }),
+      mkdir(join(orphanScaffold, ".git"), { recursive: true }),
+      mkdir(child, { recursive: true }),
+      mkdir(broken, { recursive: true }),
+    ]);
+    await writeFile(join(broken, ".git"), "gitdir: ../missing-metadata\n");
+    execFileSync("git", ["-C", child, "init", "-b", "main"], {
+      stdio: "ignore",
+    });
+    execFileSync(
+      "git",
+      [
+        "-C",
+        child,
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "fixture",
+      ],
+      { stdio: "ignore" },
+    );
+
+    const service = createWorktreeService(
+      async () => ({
+        hostId,
+        projects: [
+          {
+            id: projectId,
+            name: "Project",
+            sources: [umbrella, missingSource, orphanScaffold].map((path) => ({
+              hostId,
+              path,
+            })),
+          },
+        ],
+        environments: [inactive, protectedPath, missingSource].map((path) => ({
+          projectId,
+          path,
+          isGitRepo: true,
+          status: "ready",
+        })),
+        chatTargets: [protectedPath],
+      }),
+      () => {},
+    );
+
+    const inventory = await service.inventory(null);
+    expect(inventory.entries.map(({ path }) => path)).toEqual([child]);
+    expect(inventory.missingInactiveEnvironments).toEqual([
+      { projectId, path: inactive },
+    ]);
+    expect(inventory.issues).toHaveLength(4);
+
+    for (const path of [missingSource, protectedPath, orphanScaffold, broken])
+      expect(
+        inventory.issues.some((issue) => issue.startsWith(`${path}: `)),
+      ).toBe(true);
+    expect(inventory.issues).toContain(
+      `${broken}: Git metadata directory is missing at ${join(umbrella, "missing-metadata")}`,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}, 15_000);
+
+it("recognizes equivalent amended and rebased recovery changes without releasing the hold", async () => {
+  const repo = await realpath(
+    await mkdtemp(join(tmpdir(), "worktrees-rewrites-")),
+  );
+
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", repo, ...args], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+
+  const commit = async (file: string, contents: string) => {
+    await writeFile(join(repo, file), contents);
+    git("add", file);
+    git("commit", "-m", file);
+  };
+
+  try {
+    git("init", "-b", "main");
+    git("config", "user.name", "Fixture");
+    git("config", "user.email", "fixture@example.invalid");
+    git("config", "commit.gpgsign", "false");
+    git("commit", "--allow-empty", "-m", "base");
+    git("switch", "-c", "amended");
+    await commit("notch", "notch content\n");
+    git("commit", "--amend", "-m", "same tree");
+    git("switch", "main");
+    git("merge", "--ff-only", "amended");
+
+    git("switch", "-c", "rebased");
+    await commit("overlay", "overlay content\n");
+    git("switch", "main");
+    await commit("other-file", "unrelated change\n");
+    git("rebase", "main", "rebased");
+    git("switch", "main");
+    git("merge", "--ff-only", "rebased");
+
+    git("switch", "-c", "different");
+    await commit("do-not-match", "preserve these spaces\n");
+    await writeFile(join(repo, "do-not-match"), "preserve  these spaces\n");
+    git("add", "do-not-match");
+    git("commit", "--amend", "--no-edit");
+    git("switch", "main");
+    git("merge", "--ff-only", "different");
+
+    const [inventory, cleanup] = await Promise.all([
+      inspectRepo(repo, [], false),
+      inspectCleanupRepo(repo, []),
+    ]);
+
+    for (const name of ["amended", "rebased", "different"]) {
+      expect(inventory.branches.find((row) => row.name === name)).toMatchObject(
+        {
+          deleteReady: false,
+          reasons: [
+            name === "different"
+              ? "Unique commits in branch history"
+              : "Recovery changes match retained commits · Original commit IDs kept",
+          ],
+        },
+      );
+      expect(
+        cleanup.branches.find((row) => row.name === name)?.deleteReady,
+      ).toBe(false);
+      expect(git("branch", "--list", name)).toBe(name);
+    }
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+}, 15_000);
+
+it("compares against the primary checkout's upstream independently of cleanup", async () => {
+  const repo = await realpath(await mkdtemp(join(tmpdir(), "worktrees-base-")));
+
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", repo, ...args], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+
+  try {
+    git("init", "-b", "production");
+    git("config", "user.name", "Fixture");
+    git("config", "user.email", "fixture@example.invalid");
+    git("config", "commit.gpgsign", "false");
+    git("commit", "--allow-empty", "-m", "production");
+    git("remote", "add", "origin", ".");
+    git("update-ref", "refs/remotes/origin/production", "production");
+    git(
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      "refs/remotes/origin/production",
+    );
+
+    git("switch", "-c", "integration");
+    git("commit", "--allow-empty", "-m", "integrated change");
+    git("branch", "finished");
+    git("commit", "--allow-empty", "-m", "next integrated change");
+    git("update-ref", "refs/remotes/origin/integration", "integration");
+    git("branch", "--set-upstream-to=origin/integration", "integration");
+
+    const [inventory, sidebar, cleanup] = await Promise.all([
+      inspectRepo(repo, [], false, new Set(["finished"])),
+      inspectSidebarRepo(repo),
+      inspectCleanupRepo(repo, [], new Set(["finished"])),
+    ]);
+
+    const branch = inventory.branches.find((row) => row.name === "finished");
+    expect(inventory.base).toBe("origin/integration");
+    expect(inventory.baseRef).toBe("refs/remotes/origin/integration");
+    expect(branch).toMatchObject({ ahead: 0, behind: 1, deleteReady: false });
+    expect(branch?.reasons).toContain("Used by an open or protected chat");
+    expect(
+      inventory.branches.find((row) => row.name === "production")?.deleteReady,
+    ).toBe(false);
+    expect(sidebar.base).toBe(inventory.base);
+    expect(sidebar.branches.find((row) => row.name === "finished")?.ahead).toBe(
+      0,
+    );
+    expect(
+      cleanup.branches.find((row) => row.name === "finished"),
+    ).toMatchObject({
+      deleteReady: branch?.deleteReady,
+      deleteBase: branch?.deleteBase,
+      reasons: branch?.reasons,
+    });
+    expect(git("branch", "--list", "finished")).toBe("finished");
+
+    git("switch", "--detach", "integration");
+    expect((await inspectRepo(repo, [], false)).base).toBe("origin/production");
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+}, 15_000);
 
 it("rechecks ignored work and protected paths while preserving branch history", async () => {
   const root = await realpath(
