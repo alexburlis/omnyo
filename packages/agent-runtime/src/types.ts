@@ -207,6 +207,7 @@ export interface RunTurnArgs {
 export type RunTurnResult = { status: "started" } | { status: "unconfirmed" };
 
 export interface SteerTurnArgs {
+  steerSource?: "user" | "non-user";
   threadId: string;
   expectedTurnId: string;
   input: PromptInput[];

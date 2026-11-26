@@ -11,6 +11,8 @@ Prompt directives:
 - `delay:<ms>` holds the turn open before it settles.
 - `approve:<command|file_change|permission_grant|plan>` raises an approval
   on `interaction/request`; a denied approval answers `Denied`.
+- `approve_after_steer:<command|file_change|permission_grant|plan>` waits for
+  a steer before raising an approval, so tests can check the running turn's policy.
 - `ask_user` raises a user question and echoes the answer.
 - `call_tool:<name>` / `call_tool_unresolved:<name>` calls a dynamic tool
   with a resolved or an unresolved turn id and answers `Tool called: <name>`.

@@ -306,7 +306,7 @@ export function installForeignDomMutationGuard(): void {
   >(this: Node, node: T, child: Node | null): T {
     if (refusePluginReparent(node, this)) return node;
 
-    if (child !== null && child.parentNode !== this) {
+    if (child != null && child.parentNode !== this) {
       recordSuppression("insertBefore", child, this);
 
       try {

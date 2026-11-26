@@ -784,6 +784,48 @@ function main() {
       }
     }
 
+    if (
+      args.dialect === "json-rpc" &&
+      live.classified.kind === "request" &&
+      (message.method === "configRequirements/read" ||
+        (message.method === "config/read" &&
+          typeof message.params?.cwd === "string"))
+    ) {
+      let recordedInSetup = false;
+
+      for (let index = position; index < script.length; index += 1) {
+        const step = script[index];
+
+        if (step.dir !== "bridge→provider") continue;
+
+        if (SESSION_DEFINING_KEY.test(step.classified.key)) break;
+
+        if (
+          step.classified.kind === "request" &&
+          step.classified.key === live.classified.key
+        ) {
+          recordedInSetup = true;
+          break;
+        }
+      }
+
+      if (!recordedInSetup) {
+        log(
+          `synthesizing unrecorded Codex sandbox setup response for ${live.classified.key}`,
+        );
+        emit({
+          jsonrpc: "2.0",
+          id: live.classified.id,
+          result:
+            message.method === "configRequirements/read"
+              ? { requirements: null }
+              : { config: {}, origins: {} },
+        });
+
+        return;
+      }
+    }
+
     if (position >= script.length) {
       answerGenerically(live, "past end of segment");
 
