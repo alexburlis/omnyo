@@ -238,3 +238,117 @@ it.each([
     }
   },
 );
+
+it.each([false, true])(
+  "preserves recorded Codex sandbox setup, synthesizing only missing reads (recorded=%s)",
+  async (recorded) => {
+    const dir = mkdtempSync(join(tmpdir(), "omnyo-replay-codex-sandbox-"));
+
+    const sandboxConfig = recorded
+      ? { config: { default_permissions: ":read-only" }, origins: {} }
+      : { config: {}, origins: {} };
+
+    const sandboxRequirements = recorded
+      ? { requirements: { allowedSandboxModes: ["read-only"] } }
+      : { requirements: null };
+
+    const exchanges = [
+      { method: "initialize", result: {} },
+      ...(recorded
+        ? [
+            { method: "configRequirements/read", result: sandboxRequirements },
+            { method: "config/read", result: sandboxConfig },
+          ]
+        : []),
+      { method: "thread/start", result: { marker: "thread" } },
+      {
+        method: "config/read",
+        result: { config: { model: "recorded-model" } },
+      },
+    ];
+
+    for (const direction of ["bridge→provider", "provider→bridge"] as const) {
+      writeFileSync(
+        join(dir, `${direction}.ndjson`),
+        exchanges
+          .map((exchange, index) => {
+            const seq = index * 2 + (direction === "bridge→provider" ? 1 : 2);
+
+            const message =
+              direction === "bridge→provider"
+                ? { jsonrpc: "2.0", id: index + 1, method: exchange.method }
+                : { jsonrpc: "2.0", id: index + 1, result: exchange.result };
+
+            return JSON.stringify({
+              ts: seq,
+              run: 1,
+              seq,
+              dir: direction,
+              line: JSON.stringify(message),
+            });
+          })
+          .join("\n") + "\n",
+      );
+    }
+
+    writeFileSync(join(dir, "cursor"), "end");
+
+    const child = spawn(
+      process.execPath,
+      [
+        fileURLToPath(new URL("./replay-provider-child.mjs", import.meta.url)),
+        "--recording",
+        dir,
+        "--dialect",
+        "json-rpc",
+        "--state",
+        dir,
+      ],
+      { stdio: ["pipe", "pipe", "pipe"] },
+    );
+
+    const closed = once(child, "close");
+    let output = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+      output += chunk;
+    });
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+
+    const send = (id: string, method: string, params?: object) =>
+      child.stdin.write(
+        `${JSON.stringify({ jsonrpc: "2.0", id, method, ...(params === undefined ? {} : { params }) })}\n`,
+      );
+
+    const expectResponse = async (id: string, result: object) => {
+      await expect
+        .poll(() => output)
+        .toContain(JSON.stringify({ jsonrpc: "2.0", id, result }));
+    };
+
+    try {
+      send("init", "initialize");
+      await expectResponse("init", {});
+      send("sandbox-config", "config/read", { cwd: dir });
+      send("sandbox-requirements", "configRequirements/read");
+      await expectResponse("sandbox-config", sandboxConfig);
+      await expectResponse("sandbox-requirements", sandboxRequirements);
+      send("start", "thread/start");
+      await expectResponse("start", { marker: "thread" });
+      send("model-config", "config/read", {});
+      await expectResponse("model-config", {
+        config: { model: "recorded-model" },
+      });
+      expect(
+        stderr.includes("synthesizing unrecorded Codex sandbox setup response"),
+      ).toBe(!recorded);
+    } finally {
+      child.kill();
+      await closed;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+  15_000,
+);

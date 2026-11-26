@@ -84,6 +84,7 @@ export interface ThreadStartCommandArgs {
 }
 
 interface PreparedTurnSubmitCommandBuildArgs {
+  steerSource?: "user" | "non-user";
   deps: Pick<
     AppDeps,
     "config" | "db" | "providerRegistry" | "pluginHostArtifacts"
@@ -101,6 +102,7 @@ interface PreparedTurnSubmitCommandBuildArgs {
 }
 
 interface PrepareTurnSubmitCommandPayloadArgs {
+  steerSource?: "user" | "non-user";
   environment: ThreadRuntimeCommandEnvironment;
   execution: ResolvedThreadExecutionOptions;
   permissionEscalation: PermissionEscalation;
@@ -348,6 +350,9 @@ function buildPreparedTurnSubmitCommandPayload(
 
   return {
     type: "turn.submit",
+    ...(args.steerSource === undefined
+      ? {}
+      : { steerSource: args.steerSource }),
     environmentId: args.environmentId,
     threadId: args.threadId,
     bridgeLaunch,
@@ -411,6 +416,7 @@ export async function prepareTurnSubmitCommandPayload(
 
   return buildPreparedTurnSubmitCommandPayload({
     deps,
+    steerSource: args.steerSource,
     environmentId: args.environment.id,
     hostId: args.environment.hostId,
     execution: args.execution,

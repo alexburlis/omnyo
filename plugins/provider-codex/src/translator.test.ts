@@ -157,7 +157,47 @@ function dedupeRoots(roots: readonly string[]): string[] {
   return [...new Set(roots)];
 }
 
+const SANDBOX_CONTROL = {
+  kind: "sandbox",
+  workspaceNetworkAccess: true,
+} as const;
+
 describe("codex workspace-write git-root staging", () => {
+  it("preserves the selected Codex permission profile without overriding its filesystem", () => {
+    const fixture = createLinkedWorktreeFixture();
+    const translator = createTranslator();
+
+    try {
+      const prepared = translator.prepareWorkspaceWriteGitRoots({
+        supportsAgentsEnabled: true,
+        sandboxControl: {
+          kind: "profile",
+          workspaceProfile: "sandboxed",
+          workspaceAllowed: true,
+          fullAccessAllowed: false,
+        },
+        command: {
+          threadId: "omnyo-thread-1",
+          cwd: fixture.workspacePath,
+          options: WORKSPACE_ASK_OPTIONS,
+        },
+      });
+
+      expect(prepared.permissionSettings).toMatchObject({
+        permissions: "sandboxed",
+      });
+      expect(prepared.permissionSettings).not.toHaveProperty("sandbox");
+      expect(prepared.config).not.toHaveProperty(
+        "permissions.sandboxed.filesystem",
+      );
+      expect(prepared.config).not.toHaveProperty(
+        "sandbox_workspace_write.writable_roots",
+      );
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
   it("hands staged roots to the thread only once the construction is accepted", () => {
     const fixture = createLinkedWorktreeFixture();
     const translator = createTranslator();
@@ -165,6 +205,7 @@ describe("codex workspace-write git-root staging", () => {
     try {
       const prepared = translator.prepareWorkspaceWriteGitRoots({
         supportsAgentsEnabled: true,
+        sandboxControl: SANDBOX_CONTROL,
         command: {
           threadId: "omnyo-thread-1",
           cwd: fixture.workspacePath,
@@ -209,6 +250,7 @@ describe("codex workspace-write git-root staging", () => {
     try {
       const prepared = translator.prepareWorkspaceWriteGitRoots({
         supportsAgentsEnabled: true,
+        sandboxControl: SANDBOX_CONTROL,
         command: {
           threadId: "omnyo-thread-1",
           cwd: fixture.workspacePath,
@@ -248,6 +290,7 @@ describe("codex workspace-write git-root staging", () => {
       ] as const) {
         translator.prepareWorkspaceWriteGitRoots({
           supportsAgentsEnabled: true,
+          sandboxControl: SANDBOX_CONTROL,
           command: {
             threadId,
             cwd: fixture.workspacePath,

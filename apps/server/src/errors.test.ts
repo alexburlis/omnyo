@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { QueuedMessageThreadUnavailableError } from "@omnyo/db";
 import { once } from "node:events";
 import { request, Server } from "node:http";
 import { createDeferredPromise } from "@omnyo/test-helpers";
@@ -161,6 +162,24 @@ it("reports whether a correlated asset request closed before sending headers", a
 });
 
 describe("createServerErrorHandler", () => {
+  it.each(["archived", "deleted"] as const)(
+    "returns a quiet conflict for a %s queue target",
+    async (reason) => {
+      const error = new QueuedMessageThreadUnavailableError("thread-1", reason);
+      const { app, logger } = createApp(error);
+
+      const response = await app.request("/api/v1/threads/thread-1/messages", {
+        method: "POST",
+      });
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({
+        code: "thread_not_writable",
+        message: error.message,
+      });
+      expect(logger.error).not.toHaveBeenCalled();
+    },
+  );
   it("does not report a client disconnect while reading its request body", async () => {
     const entered = createDeferredPromise<void>();
     const handled = createDeferredPromise<void>();

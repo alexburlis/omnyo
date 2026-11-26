@@ -19,7 +19,7 @@ describe("resolveShellIncomingLink", () => {
     ["omnyo://settings/notifications", "/settings/notifications"],
     ["omnyo://settings/general", "/webview?path=%2Fsettings%2Fgeneral"],
     ["omnyo://connections", "/webview?path=%2Fconnections"],
-    ["omnyo://", "/webview"],
+    ["omnyo://", "/webview?path=%2F"],
     ["omnyo://threads/thr_1", "/webview?path=%2Fthreads%2Fthr_1"],
     ["omnyo://connect?code=ABCD-EFGH", "/connect?code=ABCD-EFGH"],
     ["omnyo://settings/servers", "/settings/servers"],
@@ -76,14 +76,24 @@ describe("resolveShellIncomingLink", () => {
     });
   });
 
-  it("names only the profile when a link switches servers at the root", () => {
+  it("keeps an explicit root path when a link switches servers", () => {
     expect(resolveShellIncomingLink("http://10.0.0.7:38886/", context)).toEqual(
       {
         kind: "navigate",
-        path: "/webview?profileId=p_lan",
+        path: "/webview?profileId=p_lan&path=%2F",
         profileId: "p_lan",
       },
     );
+  });
+
+  it("keeps an explicit root path when a warm web link stays on the current server", () => {
+    expect(
+      resolveShellIncomingLink("https://bee.example.test/", context),
+    ).toEqual({
+      kind: "navigate",
+      path: "/webview?path=%2F",
+      profileId: null,
+    });
   });
 
   it("strips a profile's mount prefix from the page path", () => {

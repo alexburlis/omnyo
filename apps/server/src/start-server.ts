@@ -104,6 +104,7 @@ import {
   setPluginToolCallRegistry,
 } from "./services/plugins/plugin-tool-calls.js";
 import { startHttpListener } from "./http-listener.js";
+import { lockServerDataDir } from "./services/system/data-dir-lock.js";
 
 export interface StartServerPluginsArgs {
   dataDir: string;
@@ -132,8 +133,34 @@ export function getRuntimeBuildIdentity() {
   return { hostDaemonProtocolVersion: HOST_DAEMON_PROTOCOL_VERSION };
 }
 
+interface ServerStartupResources {
+  database: ReturnType<typeof initDb> | null;
+  releaseDataDir: () => Promise<void>;
+}
+
 export async function runServer(serverConfig: ServerConfig): Promise<void> {
   await admitConfiguredOmnyoStateWrites(serverConfig.OMNYO_DATA_DIR);
+
+  const resources: ServerStartupResources = {
+    database: null,
+    releaseDataDir: await lockServerDataDir({
+      dataDir: serverConfig.OMNYO_DATA_DIR,
+    }),
+  };
+
+  try {
+    await runServerWithDataDirLock(serverConfig, resources);
+  } catch (error) {
+    resources.database?.$client.close();
+    await resources.releaseDataDir();
+    throw error;
+  }
+}
+
+async function runServerWithDataDirLock(
+  serverConfig: ServerConfig,
+  resources: ServerStartupResources,
+): Promise<void> {
   const bootMaintenanceHold = await ensureStartupHold(serverConfig);
   const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
   const packaged = existsSync(join(packageRoot, "dist", "omnyo-app.js"));
@@ -198,6 +225,8 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
     dataDir: serverConfig.OMNYO_DATA_DIR,
     logger,
   });
+
+  resources.database = db;
 
   const crashReportsEnabled = getAppSettings(db).crashReportsEnabled;
   setProcessErrorReportingEnabled(
@@ -817,6 +846,8 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
       await closeWebSockets();
       await closeThreadTimelinePageBuilders(db);
       await closeServer;
+      db.$client.close();
+      await resources.releaseDataDir();
     })();
 
     return shutdownPromise;

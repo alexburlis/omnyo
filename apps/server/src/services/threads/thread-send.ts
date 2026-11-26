@@ -53,7 +53,10 @@ import {
   dispatchTurnDuringReprovision,
   requireReadyThreadEnvironment,
 } from "./thread-turn-dispatch.js";
-import { resolveDispatchAuthor } from "./dispatch-author.js";
+import {
+  resolveDispatchAuthor,
+  type DispatchAuthor,
+} from "./dispatch-author.js";
 import { resolvePermissionEscalation } from "./thread-runtime-config.js";
 import {
   buildThreadStatusChangeMetadata,
@@ -112,6 +115,7 @@ type SendThreadMessagePayload = SendMessageRequest & {
 
 interface SendThreadMessageArgs {
   preparation?: {
+    author?: DispatchAuthor;
     execution: ResolvedThreadExecutionOptions;
     attachmentInputs: ReadonlySet<PromptInput>;
   };
@@ -669,15 +673,17 @@ async function sendThreadMessageWithoutContextClear(
     group.map((item) => resolvedByInput.get(item) ?? item),
   );
 
-  const { initiator } = resolveDispatchAuthor({
-    ...(args.maintenance !== undefined
-      ? { maintenance: args.maintenance }
-      : {}),
-    retrying: args.retryOf !== undefined || args.systemContinuation === true,
-    systemNotice: args.systemNotice !== undefined,
-    senderThreadId,
-    startedOnBehalfOf: null,
-  });
+  const { initiator } =
+    args.preparation?.author ??
+    resolveDispatchAuthor({
+      ...(args.maintenance !== undefined
+        ? { maintenance: args.maintenance }
+        : {}),
+      retrying: args.retryOf !== undefined || args.systemContinuation === true,
+      systemNotice: args.systemNotice !== undefined,
+      senderThreadId,
+      startedOnBehalfOf: null,
+    });
 
   const messageNotice = messageSourceNotice(
     payload.messageSource,
@@ -914,6 +920,7 @@ async function sendThreadMessageWithoutContextClear(
 
   const preparedCommand = await prepareTurnSubmitCommandPayload(deps, {
     thread,
+    steerSource: initiator === "user" ? "user" : "non-user",
     input,
     ...(inputGroups !== undefined ? { inputGroups } : {}),
     execution,
