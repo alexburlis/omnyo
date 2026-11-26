@@ -1,0 +1,20 @@
+ARG NODE_IMAGE=docker.io/library/node@sha256:0efee1e068d21f6edcab7fa8c962fc4ecd50d4e28727bc23963379b63ee318ab
+FROM ${NODE_IMAGE} AS build
+WORKDIR /repo
+# Runtime-only sources are copied into the final image below.
+COPY --exclude=apps/demo-server/server.mjs --exclude=apps/demo-server/fixtures.mjs --exclude=apps/demo-server/test.mjs . .
+RUN corepack enable && pnpm install --store-dir=/tmp/omnyo-pnpm-store --network-concurrency=4 --fetch-retries=3 --frozen-lockfile --ignore-scripts --filter omnyo --filter '@omnyo/app...' --filter 'omnyo-plugin-thread-list...' && \
+    NODE_OPTIONS=--max-old-space-size=1408 pnpm exec turbo run @omnyo/app#build @omnyo/plugin-build#generate @omnyo/plugin-sdk#build --concurrency=1 --env-mode=loose && pnpm exec tsx apps/demo-server/build-thread-list.mjs && \
+    find /repo -type d -name node_modules -prune -exec rm -rf -- {} + && \
+    rm -rf /tmp/omnyo-pnpm-store /repo/.turbo
+
+FROM ${NODE_IMAGE}
+RUN rm -rf /usr/local/lib/node_modules /opt/yarn-v* /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg
+WORKDIR /app
+COPY --from=build /repo/apps/app/dist ./public
+COPY --from=build /repo/plugins/thread-list/dist/app.js /repo/plugins/thread-list/dist/app.css /repo/plugins/thread-list/dist/app.meta.json ./public/demo-plugins/thread-list/
+COPY apps/demo-server/server.mjs apps/demo-server/fixtures.mjs apps/demo-server/test.mjs ./
+RUN printf '#!/bin/sh\nexec node /app/test.mjs\n' > /app/test && chmod 0555 /app/test
+USER 65532:65532
+EXPOSE 8080
+CMD ["node", "server.mjs"]
