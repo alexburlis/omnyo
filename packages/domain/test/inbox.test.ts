@@ -121,6 +121,30 @@ const failure = {
 };
 
 describe("inbox projection", () => {
+  it.each([
+    ["check", "check"],
+    ["join", "chat"],
+    ["chat", "chat"],
+    ["date", "scheduled"],
+    ["send-later", "scheduled"],
+    ["event", "event"],
+  ] as const)("labels a %s wait as a %s kind of wait", (kind, expected) => {
+    const projected = projectInboxFamily(
+      family({
+        waits: [
+          wait({
+            kind,
+            ...(kind === "send-later"
+              ? { createdBy: "owner" as const, ownerAccepted: true }
+              : {}),
+          }),
+        ],
+      }),
+    );
+
+    expect(projected.waiting?.kind).toBe(expected);
+  });
+
   it("puts an archived chat in Archive whatever else it holds", () => {
     const view = projectInboxFamily(
       family({ archivedAt: 5, receipts: [receipt("r1", 1)] }),

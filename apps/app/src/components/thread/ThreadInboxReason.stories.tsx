@@ -191,6 +191,7 @@ export function Overview() {
             },
             waiting: {
               group: "comes-back",
+              kind: "check",
               reason: "Chief release version and updater offer",
               waitId: "release",
               returnAt: now + 3 * 60 * MINUTE,

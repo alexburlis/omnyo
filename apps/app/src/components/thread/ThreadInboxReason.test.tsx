@@ -300,6 +300,7 @@ describe("ThreadInboxReason", () => {
         reason: { kind: "wait", text: "Build finishes", threadId: "root" },
         waiting: {
           group: "comes-back",
+          kind: "chat",
           reason: "Build finishes",
           waitId: "build",
           waitThreadId: "child",
@@ -465,6 +466,7 @@ describe("ThreadInboxReason", () => {
         },
         waiting: {
           group: "comes-back",
+          kind: "check",
           reason: "Apple's review response",
           waitId: "review",
           returnAt: null,
