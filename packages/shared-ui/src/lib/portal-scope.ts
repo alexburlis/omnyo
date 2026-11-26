@@ -63,8 +63,12 @@ export function usePortalScopeProps(ownerPluginId?: string): {
   const visibility =
     host.__omnyoPluginRuntime?.pluginPortalVisibility ?? pluginPortalVisibility;
 
-  const visible = useSyncExternalStore(visibility.subscribe, () =>
-    visibility.isVisible(scopes),
+  const getVisible = () => visibility.isVisible(scopes);
+
+  const visible = useSyncExternalStore(
+    visibility.subscribe,
+    getVisible,
+    getVisible,
   );
 
   const pluginId =
