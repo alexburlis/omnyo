@@ -4,7 +4,7 @@ WORKDIR /repo
 # Runtime-only sources are copied into the final image below.
 COPY --exclude=apps/demo-server/server.mjs --exclude=apps/demo-server/fixtures.mjs --exclude=apps/demo-server/test.mjs . .
 RUN corepack enable && pnpm install --store-dir=/tmp/omnyo-pnpm-store --network-concurrency=4 --fetch-retries=3 --frozen-lockfile --ignore-scripts --filter omnyo --filter '@omnyo/app...' --filter 'omnyo-plugin-thread-list...' && \
-    NODE_OPTIONS=--max-old-space-size=1408 pnpm exec turbo run @omnyo/app#build @omnyo/plugin-build#generate @omnyo/plugin-sdk#build --concurrency=1 --env-mode=loose && pnpm exec tsx apps/demo-server/build-thread-list.mjs && \
+    OMNYO_WEB_SOURCE_REVISION="$(cat apps/demo-server/source-revision)" NODE_OPTIONS=--max-old-space-size=1408 pnpm exec turbo run @omnyo/app#build @omnyo/plugin-build#generate @omnyo/plugin-sdk#build --concurrency=1 --env-mode=loose && pnpm exec tsx apps/demo-server/build-thread-list.mjs && \
     find /repo -type d -name node_modules -prune -exec rm -rf -- {} + && \
     rm -rf /tmp/omnyo-pnpm-store /repo/.turbo
 
