@@ -1149,7 +1149,7 @@ function DefaultFollowUpComposer({
             data-promptbox-shell=""
             className={cn(
               "flex flex-col gap-2",
-              statusTray === null ? "md:gap-0" : "relative",
+              statusTray === null ? "md:gap-0" : "relative gap-1.5",
             )}
           >
             {statusTray === null ? (
