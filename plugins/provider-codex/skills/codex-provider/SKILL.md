@@ -10,6 +10,18 @@ The provider requires Codex CLI 0.136.0 or newer. On Codex 0.145.0 and newer,
 `agents.enabled` and overrides `features.multi_agent_v2` to false for Omnyo
 sessions. Older versions retain the legacy subagent settings.
 
+Omnyo passes contributed environment variables to the Codex process. Only its
+`OMNYO_PROJECT_ID`, `OMNYO_ENVIRONMENT_ID`, `OMNYO_THREAD_STORAGE`, `OMNYO_CLI`,
+`OMNYO_SERVER_URL`, `OMNYO_HOST_DAEMON_PORT`, and authoritative `OMNYO_THREAD_ID`
+context values enter `shell_environment_policy.set`. Codex applies its shell
+environment policy to the remaining values.
+
+Workspace turns honor explicit Codex network settings and managed permission
+requirements. A configured named profile, including `:read-only`, remains
+authoritative for filesystem rules, including writable roots. A full-access machine default uses `:workspace` for workspace
+threads, subject to Codex requirements. Full-access requests fail when policy
+disallows them. Unreadable configuration or an unavailable profile fails visibly.
+
 Codex supports structured plan requests, editing and rerunning eligible messages,
 and compaction through the corresponding core `omnyo thread` commands.
 `omnyo thread clear-goal <id>` clears its durable active Goal and waits for provider

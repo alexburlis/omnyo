@@ -313,6 +313,13 @@ if (script?.launchLogPath) {
       pid: process.pid,
       args: process.argv.slice(2),
       codexHome: process.env.CODEX_HOME ?? null,
+      ...(script.captureTestEnvironment === true
+        ? {
+            testEnvironment: {
+              OMNYO_TEST_ENV_VALUE: process.env.OMNYO_TEST_ENV_VALUE ?? null,
+            },
+          }
+        : {}),
     }) + "\n",
   );
 }
@@ -636,13 +643,24 @@ async function handleRequest(message) {
       if (script?.configReadError) {
         respondError(id, -32601, "Configuration read unavailable");
       } else {
-        respond(id, script?.configRead ?? { config: { model: null } });
+        respond(id, {
+          origins: {},
+          ...(script?.configRead ?? { config: { model: null } }),
+        });
       }
-
+      return;
+    case "configRequirements/read":
+      respond(id, script?.configRequirementsRead ?? { requirements: null });
+      return;
+    case "permissionProfile/list":
+      respond(
+        id,
+        script?.permissionProfileListPages?.[params?.cursor ?? "first"] ??
+          script?.permissionProfileList ?? { data: [] },
+      );
       return;
     case "skills/list":
       respond(id, script?.skillsList ?? { data: [] });
-
       return;
     case "skills/extraRoots/set":
       respond(id, {});

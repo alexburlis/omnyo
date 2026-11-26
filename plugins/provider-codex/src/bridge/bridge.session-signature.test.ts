@@ -92,6 +92,69 @@ it("keeps the constructed session for a turn whose options carry no envVars", as
   ).toEqual([]);
 }, 30_000);
 
+it("passes contributed environment to Codex children without overriding their shell environment policy", async () => {
+  const launchLogPath = join(workspaceDir, "launches.jsonl");
+  writeFileSync(
+    scriptPath,
+    JSON.stringify({
+      requestLogPath,
+      launchLogPath,
+      captureTestEnvironment: true,
+    }),
+  );
+  harness.sendRequest(1, "thread/start", {
+    threadId: THREAD_ID,
+    cwd: workspaceDir,
+    instructionMode: "append",
+    options: {
+      ...FULL_ACCESS_SESSION_OPTIONS,
+      envVars: { OMNYO_TEST_ENV_VALUE: "first" },
+    },
+  });
+  const response = await harness.waitForResponse(1);
+  expect(response.error).toBeUndefined();
+
+  const { providerThreadId } = z
+    .object({ providerThreadId: z.string() })
+    .parse(response.result);
+
+  harness.sendRequest(2, "turn/start", {
+    threadId: THREAD_ID,
+    providerThreadId,
+    clientRequestId: "creq_envlaunch1",
+    input: [{ type: "text", text: "Continue", mentions: [] }],
+    options: {
+      ...FULL_ACCESS_SESSION_OPTIONS,
+      envVars: { OMNYO_TEST_ENV_VALUE: "second" },
+    },
+  });
+  expect((await harness.waitForResponse(2)).error).toBeUndefined();
+
+  const launches = readFileSync(launchLogPath, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) =>
+      z
+        .object({
+          testEnvironment: z.object({ OMNYO_TEST_ENV_VALUE: z.string() }),
+        })
+        .parse(JSON.parse(line)),
+    );
+
+  expect(
+    launches.map((launch) => launch.testEnvironment.OMNYO_TEST_ENV_VALUE),
+  ).toEqual(["first", "second"]);
+
+  for (const request of recordedRequests().filter(
+    (entry) =>
+      entry.method === "thread/start" || entry.method === "thread/resume",
+  )) {
+    expect(request.params.config).not.toHaveProperty(
+      "shell_environment_policy.set.OMNYO_TEST_ENV_VALUE",
+    );
+  }
+}, 30_000);
+
 it("rebuilds the session only when a turn changes or removes an env var", async () => {
   const original = {
     OMNYO_TEST_SECRET: "original",
@@ -153,13 +216,7 @@ it("rebuilds the session only when a turn changes or removes an env var", async 
       ),
     );
 
-  expect(resumeConfigs).toEqual([
-    {
-      "shell_environment_policy.set.OMNYO_TEST_SECRET": "rotated",
-      "shell_environment_policy.set.OMNYO_TEST_REMOVED": "gone",
-    },
-    { "shell_environment_policy.set.OMNYO_TEST_SECRET": "rotated" },
-  ]);
+  expect(resumeConfigs).toEqual([{}, {}]);
 }, 30_000);
 
 it("keeps an auto-reviewed session when only escalation intent changes", async () => {
@@ -542,6 +599,271 @@ it.each([
       );
   },
 );
+
+const workspaceNetworkCases = [
+  { name: "unset Codex network config", script: {}, networkAccess: true },
+  {
+    name: "Codex config turning network off",
+    script: {
+      configRead: {
+        config: { sandbox_workspace_write: { network_access: false } },
+        origins: {
+          "sandbox_workspace_write.network_access": {
+            name: { type: "user", file: "/home/user/.codex/config.toml" },
+          },
+        },
+      },
+    },
+    networkAccess: false,
+  },
+  {
+    name: "admin requirements managing only the network",
+    script: {
+      configRequirementsRead: { requirements: { network: { enabled: false } } },
+    },
+    networkAccess: false,
+  },
+];
+
+it.each(workspaceNetworkCases)(
+  "sends workspace turns the network access resolved from $name",
+  async ({ script, networkAccess }) => {
+    writeFileSync(scriptPath, JSON.stringify({ requestLogPath, ...script }));
+    harness.sendRequest(1, "thread/start", {
+      threadId: THREAD_ID,
+      cwd: workspaceDir,
+      instructionMode: "append",
+      options: autoAskSessionOptions,
+    });
+    const started = await harness.waitForResponse(1);
+    expect(started.error).toBeUndefined();
+
+    const { providerThreadId } = z
+      .object({ providerThreadId: z.string() })
+      .parse(started.result);
+
+    harness.sendRequest(2, "turn/start", {
+      threadId: THREAD_ID,
+      providerThreadId,
+      clientRequestId: "creq_netwrkaccs",
+      input: [{ type: "text", text: "say hello", mentions: [] }],
+      options: autoAskSessionOptions,
+    });
+    expect((await harness.waitForResponse(2)).error).toBeUndefined();
+
+    const requests = recordedRequests();
+    expect(
+      requests.find((entry) => entry.method === "config/read")?.params,
+    ).toEqual({ cwd: workspaceDir });
+    expect(
+      requests.filter((entry) => entry.method === "turn/start").at(-1)?.params,
+    ).toMatchObject({
+      sandboxPolicy: { type: "workspaceWrite", networkAccess },
+    });
+  },
+  30_000,
+);
+
+it("fails visibly when Codex sandbox configuration cannot be read", async () => {
+  writeFileSync(
+    scriptPath,
+    JSON.stringify({ requestLogPath, configReadError: true }),
+  );
+  harness.sendRequest(1, "thread/start", {
+    threadId: THREAD_ID,
+    cwd: workspaceDir,
+    instructionMode: "append",
+    options: autoAskSessionOptions,
+  });
+  expect((await harness.waitForResponse(1)).error?.message).toContain(
+    "Configuration read unavailable",
+  );
+  expect(
+    recordedRequests().some((entry) => entry.method === "thread/start"),
+  ).toBe(false);
+});
+
+it.each(["thread/start", "thread/resume", "thread/fork"] as const)(
+  "preserves a read-only named profile through %s and turn/start",
+  async (method) => {
+    writeFileSync(
+      scriptPath,
+      JSON.stringify({
+        requestLogPath,
+        configRead: { config: { default_permissions: ":read-only" } },
+        permissionProfileListPages: {
+          first: {
+            data: [{ id: ":danger-full-access", allowed: false }],
+            nextCursor: "second",
+          },
+          second: {
+            data: [{ id: ":read-only", allowed: true }],
+            nextCursor: null,
+          },
+        },
+      }),
+    );
+    harness.sendRequest(1, method, {
+      threadId: THREAD_ID,
+      cwd: workspaceDir,
+      instructionMode: "append",
+      options: autoAskSessionOptions,
+      ...(method === "thread/resume"
+        ? { providerThreadId: "native-profile" }
+        : {}),
+      ...(method === "thread/fork"
+        ? { sourceProviderThreadId: "native-profile" }
+        : {}),
+    });
+    const response = await harness.waitForResponse(1);
+    expect(response.error).toBeUndefined();
+
+    const { providerThreadId } = z
+      .object({ providerThreadId: z.string() })
+      .parse(response.result);
+
+    harness.sendRequest(2, "turn/start", {
+      threadId: THREAD_ID,
+      providerThreadId,
+      clientRequestId: "creq_readonly12",
+      input: [{ type: "text", text: "Inspect files", mentions: [] }],
+      options: autoAskSessionOptions,
+    });
+    expect((await harness.waitForResponse(2)).error).toBeUndefined();
+
+    for (const request of recordedRequests().filter(
+      (entry) => entry.method === method || entry.method === "turn/start",
+    )) {
+      expect(request.params).toMatchObject({ permissions: ":read-only" });
+      expect(request.params).not.toHaveProperty("sandbox");
+      expect(request.params).not.toHaveProperty("sandboxPolicy");
+    }
+
+    expect(
+      recordedRequests()
+        .filter((entry) => entry.method === "permissionProfile/list")
+        .map((entry) => entry.params),
+    ).toEqual([{ cwd: workspaceDir }, { cwd: workspaceDir, cursor: "second" }]);
+  },
+);
+
+it("allows explicitly requested full access when only the full profile is permitted", async () => {
+  writeFileSync(
+    scriptPath,
+    JSON.stringify({
+      requestLogPath,
+      configRequirementsRead: {
+        requirements: {
+          defaultPermissions: ":danger-full-access",
+          allowedPermissionProfiles: {
+            ":workspace": false,
+            ":danger-full-access": true,
+          },
+        },
+      },
+      permissionProfileList: {
+        data: [
+          { id: ":workspace", allowed: false },
+          { id: ":danger-full-access", allowed: true },
+        ],
+      },
+    }),
+  );
+  harness.sendRequest(1, "thread/start", {
+    threadId: THREAD_ID,
+    cwd: workspaceDir,
+    instructionMode: "append",
+    options: FULL_ACCESS_SESSION_OPTIONS,
+  });
+  expect((await harness.waitForResponse(1)).error).toBeUndefined();
+  expect(
+    recordedRequests().find((entry) => entry.method === "thread/start")?.params,
+  ).toMatchObject({ permissions: ":danger-full-access" });
+});
+
+function writeProfileScript(fullAccessAllowed: boolean): void {
+  writeFileSync(
+    scriptPath,
+    JSON.stringify({
+      requestLogPath,
+      configRequirementsRead: {
+        requirements: {
+          defaultPermissions: "sandboxed",
+          allowedPermissionProfiles: {
+            sandboxed: true,
+            ":danger-full-access": fullAccessAllowed,
+          },
+        },
+      },
+      permissionProfileList: {
+        data: [
+          { id: ":workspace", allowed: false },
+          { id: ":danger-full-access", allowed: fullAccessAllowed },
+          { id: "sandboxed", allowed: true },
+        ],
+      },
+    }),
+  );
+}
+
+it("runs workspace and full-access turns under Codex permission profiles required by the admin", async () => {
+  writeProfileScript(true);
+  harness.sendRequest(1, "thread/start", {
+    threadId: THREAD_ID,
+    cwd: workspaceDir,
+    instructionMode: "append",
+    options: autoAskSessionOptions,
+  });
+  const started = await harness.waitForResponse(1);
+  expect(started.error).toBeUndefined();
+
+  const { providerThreadId } = z
+    .object({ providerThreadId: z.string() })
+    .parse(started.result);
+
+  for (const [id, options] of [
+    [2, autoAskSessionOptions],
+    [3, FULL_ACCESS_SESSION_OPTIONS],
+  ] as const) {
+    harness.sendRequest(id, "turn/start", {
+      threadId: THREAD_ID,
+      providerThreadId,
+      clientRequestId: `creq_prfwrkxxx${id}`,
+      input: [{ type: "text", text: "say hello", mentions: [] }],
+      options,
+    });
+    expect((await harness.waitForResponse(id)).error).toBeUndefined();
+  }
+
+  const requests = recordedRequests();
+  const threadStart = requests.find((entry) => entry.method === "thread/start");
+  expect(threadStart?.params).toMatchObject({ permissions: "sandboxed" });
+  expect(threadStart?.params).not.toHaveProperty("sandbox");
+  const turns = requests.filter((entry) => entry.method === "turn/start");
+  expect(turns.map((entry) => entry.params.permissions)).toEqual([
+    "sandboxed",
+    ":danger-full-access",
+  ]);
+  expect(turns.some((entry) => "sandboxPolicy" in entry.params)).toBe(false);
+}, 30_000);
+
+it("rejects a full-access thread when Codex requirements disallow full access", async () => {
+  writeProfileScript(false);
+  harness.sendRequest(1, "thread/start", {
+    threadId: THREAD_ID,
+    cwd: workspaceDir,
+    instructionMode: "append",
+    options: FULL_ACCESS_SESSION_OPTIONS,
+  });
+  const started = await harness.waitForResponse(1);
+
+  expect(started.error?.message).toContain(
+    "Codex requirements on this machine do not allow full access",
+  );
+  expect(
+    recordedRequests().filter((entry) => entry.method === "thread/start"),
+  ).toEqual([]);
+}, 30_000);
 
 const SAVED_NATIVE_ID = "00000000-0000-4000-8000-000000000041";
 
