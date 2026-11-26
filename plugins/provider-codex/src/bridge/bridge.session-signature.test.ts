@@ -93,6 +93,29 @@ it("keeps the constructed session for a turn whose options carry no envVars", as
 }, 30_000);
 
 it("passes contributed environment to Codex children without overriding their shell environment policy", async () => {
+  vi.stubEnv("PATH", "/synthetic/trusted/bin");
+  vi.stubEnv("HOME", "/synthetic/trusted/home");
+  vi.stubEnv("NODE_OPTIONS", "--no-warnings");
+  vi.stubEnv("OPENAI_API_KEY", "inherited");
+  vi.stubEnv("OPENAI_BASE_URL", "http://127.0.0.1:1/trusted");
+
+  vi.stubEnv("CODEX_TEST_CONTROL", "inherited");
+  vi.stubEnv("HTTPS_PROXY", "http://127.0.0.1:2/trusted");
+  vi.stubEnv("SSL_CERT_FILE", "/synthetic/trusted/certificate.pem");
+
+  const processControls = {
+    CODEX_TEST_CONTROL: "project",
+    HTTPS_PROXY: "http://127.0.0.1:2/project",
+    SSL_CERT_FILE: "/project/certificate.pem",
+    PATH: "/project/bin",
+    HOME: "/project/home",
+    NODE_OPTIONS: "--invalid-project-loader",
+    OPENAI_API_KEY: "project",
+    OPENAI_BASE_URL: "http://127.0.0.1:1/project",
+    OMNYO_CODEX_BRIDGE_APP_SERVER_COMMAND: "project-command",
+    OMNYO_CODEX_BRIDGE_APP_SERVER_ARGS: "invalid-project-args",
+  };
+
   const launchLogPath = join(workspaceDir, "launches.jsonl");
   writeFileSync(
     scriptPath,
@@ -108,7 +131,7 @@ it("passes contributed environment to Codex children without overriding their sh
     instructionMode: "append",
     options: {
       ...FULL_ACCESS_SESSION_OPTIONS,
-      envVars: { OMNYO_TEST_ENV_VALUE: "first" },
+      envVars: { ...processControls, PROJECT_FIXTURE_VALUE: "first" },
     },
   });
   const response = await harness.waitForResponse(1);
@@ -125,7 +148,7 @@ it("passes contributed environment to Codex children without overriding their sh
     input: [{ type: "text", text: "Continue", mentions: [] }],
     options: {
       ...FULL_ACCESS_SESSION_OPTIONS,
-      envVars: { OMNYO_TEST_ENV_VALUE: "second" },
+      envVars: { ...processControls, PROJECT_FIXTURE_VALUE: "second" },
     },
   });
   expect((await harness.waitForResponse(2)).error).toBeUndefined();
@@ -136,21 +159,37 @@ it("passes contributed environment to Codex children without overriding their sh
     .map((line) =>
       z
         .object({
-          testEnvironment: z.object({ OMNYO_TEST_ENV_VALUE: z.string() }),
+          testEnvironment: z.object({
+            PROJECT_FIXTURE_VALUE: z.string(),
+            trustedProcessControls: z.record(z.string(), z.boolean()),
+          }),
         })
         .parse(JSON.parse(line)),
     );
 
   expect(
-    launches.map((launch) => launch.testEnvironment.OMNYO_TEST_ENV_VALUE),
+    launches.map((launch) => launch.testEnvironment.PROJECT_FIXTURE_VALUE),
   ).toEqual(["first", "second"]);
+
+  for (const launch of launches)
+    expect(launch.testEnvironment.trustedProcessControls).toEqual({
+      path: true,
+      home: true,
+      loader: true,
+      providerIdentity: true,
+      providerEndpoint: true,
+      providerNamespace: true,
+      proxy: true,
+      tls: true,
+      launchOverrideAbsent: true,
+    });
 
   for (const request of recordedRequests().filter(
     (entry) =>
       entry.method === "thread/start" || entry.method === "thread/resume",
   )) {
     expect(request.params.config).not.toHaveProperty(
-      "shell_environment_policy.set.OMNYO_TEST_ENV_VALUE",
+      "shell_environment_policy.set.PROJECT_FIXTURE_VALUE",
     );
   }
 }, 30_000);
