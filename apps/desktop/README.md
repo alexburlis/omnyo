@@ -550,11 +550,10 @@ the selected provider; optional integrations have their own network behavior.
 No Omnyo account is required to complete setup or use the local server.
 
 The public app bypasses private update configuration and uses only the pinned macOS feed
-`https://github.com/alexburlis/omnyo-releases/releases/download/macos/`
-with `public-beta-mac.yml`. The first public build, 0.46.317, was published on
-11 November 2026 under the `public-beta` tag as `Omnyo Beta`; installs of it follow
-that tag's feed and keep their data in the `Omnyo Beta` profile, which builds from
-this source do not read. The fixed `macos` tag must
+`https://github.com/alexburlis/omnyo/releases/download/macos/`
+with `public-beta-mac.yml`. Apps pinned to the deleted release repository need
+a fresh download to move to the new feed. The first public build, 0.46.317,
+used a separate `Omnyo Beta` profile. The fixed `macos` tag must
 remain mutable; retain uniquely named old ZIPs and upload metadata last. The pin
 covers requested URLs; the existing executor follows CDN redirects. Existing digest,
 signature, team, exact runtime/inventory, idle and ownership checks still admit the
@@ -579,11 +578,11 @@ runs steps 1 to 5 and saves a verified archive, feed and `prepared-release.json`
 Once the exact build and download channel are approved, `--promote` publishes
 that output directory from the same clean release checkout. It verifies public
 main, the notarization receipt and both file hashes before the first upload.
-With no mode the command prepares and publishes in one run. An untagged
-`1.x` version publishes only after the public feed already carries a tagged `1.x`
-bridge build, because installed public apps older than 1.0.0 reject untagged updates
-(`public_feed_not_bridge_capable`). The steps stop at
-the first failure:
+With no mode the command prepares and publishes in one run. The first `1.x`
+release can initialize the feed in `alexburlis/omnyo`. An existing feed must
+carry a `1.x` runtime before the publisher serves an untagged update. Apps older
+than 1.0.0 reject untagged updates (`public_feed_not_bridge_capable`). The steps
+stop at the first failure:
 
 1. Build and sign the runtime. The publisher verifies its source, protocol and
    file inventory, copies it to `runtime/` and writes `runtime-prepared.json`.

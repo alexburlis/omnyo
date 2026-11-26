@@ -5,14 +5,16 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import test from "node:test";
 import {
-  ALIAS_ASSET_NAME,
-  FEED_NAME,
   createRealEffects,
   feedRuntimeVersion,
   parseArguments,
   requireBridgePublicFeed,
   runRelease,
 } from "./public-mac-release.mjs";
+import {
+  ALIAS_ASSET_NAME,
+  FEED_NAME,
+} from "../packages/config/src/public-mac-release.mjs";
 
 const root = "/repo";
 
@@ -208,6 +210,40 @@ test("plan reads an untagged release identity without publishing", async () => {
   assert.deepEqual(
     effects.calls.filter(([kind]) => kind !== "git"),
     [],
+  );
+});
+
+test("defaults to the public source repository for macOS releases", async () => {
+  const effects = createEffects();
+
+  await runRelease({
+    root,
+    argv: ["--plan", "--credential-overlay", "/overlay.env"],
+    effects,
+    home,
+  });
+
+  assert.match(
+    effects.logs.join("\n"),
+    /Publish to alexburlis\/omnyo release macos/u,
+  );
+});
+
+test("an absent feed allows the first 1.x release at the new public destination", async () => {
+  const effects = createEffects({ feed: null });
+
+  await requireBridgePublicFeed({
+    effects,
+    repository: "alexburlis/omnyo",
+    version: "1.0.185",
+  });
+  await assert.rejects(
+    requireBridgePublicFeed({
+      effects,
+      repository: "owner/releases",
+      version: "1.0.185",
+    }),
+    /public_feed_not_bridge_capable/u,
   );
 });
 
@@ -582,9 +618,12 @@ test("creates the release only when it is absent", async () => {
 
   absent.releaseMissing = true;
   await run([], absent);
-  assert.equal(
-    absent.calls.some((call) => call.includes("create")),
-    true,
+  assert.ok(
+    absent.calls.some(
+      (call) =>
+        call.includes("create") &&
+        call[call.indexOf("--target") + 1] === commit,
+    ),
   );
 });
 

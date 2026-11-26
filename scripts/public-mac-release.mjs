@@ -15,20 +15,18 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  ALIAS_ASSET_NAME,
+  FEED_NAME,
+  RELEASE_TAG,
+  RELEASES_REPOSITORY,
+} from "../packages/config/src/public-mac-release.mjs";
+import {
   compareReleaseNumbers,
   parseReleaseVersion,
 } from "../packages/config/src/release-version.mjs";
 import { preparePublicRuntime } from "./public-runtime-checkpoint.mjs";
 
-const PUBLIC_SOURCE_ORIGIN = "https://github.com/alexburlis/omnyo.git";
-
-export const RELEASES_REPOSITORY = "alexburlis/omnyo-releases";
-
-export const RELEASE_TAG = "macos";
-
-export const ALIAS_ASSET_NAME = "Omnyo-macOS.zip";
-
-export const FEED_NAME = "public-beta-mac.yml";
+const PUBLIC_SOURCE_ORIGIN = `https://github.com/${RELEASES_REPOSITORY}.git`;
 
 export const SIGNING_TEAM = "Z7T4C33A35";
 
@@ -173,7 +171,16 @@ export async function requireBridgePublicFeed({
   if (parseReleaseVersion(version)?.revision !== null) return;
 
   const url = `https://github.com/${repository}/releases/download/${RELEASE_TAG}/${FEED_NAME}`;
-  const published = feedRuntimeVersion(await effects.downloadText(url));
+  const feed = await effects.downloadText(url);
+
+  if (
+    feed === null &&
+    repository === RELEASES_REPOSITORY &&
+    compareReleaseNumbers(version, "1.0.0") >= 0
+  )
+    return;
+
+  const published = feed === null ? null : feedRuntimeVersion(feed);
 
   if (
     parseReleaseVersion(published) === null ||
@@ -611,6 +618,8 @@ export function buildSteps({ root, outputDirectory, identity, repository }) {
                   "create",
                   RELEASE_TAG,
                   ...releaseArguments,
+                  "--target",
+                  identity.sourceCommit,
                   "--title",
                   "Omnyo for macOS",
                   "--notes",
@@ -917,6 +926,8 @@ export function createRealEffects({ root, home }) {
     sha256: hashFile,
     downloadText: async (url) => {
       const response = await fetch(url, { redirect: "follow" });
+
+      if (response.status === 404) return null;
 
       if (!response.ok)
         throw new Error(`Download of ${url} failed with ${response.status}`);

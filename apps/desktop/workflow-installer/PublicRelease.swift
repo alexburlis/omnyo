@@ -6,6 +6,9 @@ struct InstallError: LocalizedError {
 }
 
 struct PublicRelease {
+  static let assetBase = URL(string: "https://github.com/alexburlis/omnyo/releases/download/macos/")!
+  static let feed = assetBase.appendingPathComponent("public-beta-mac.yml")
+
   let version: String
   let download: URL
   let digest: Data
@@ -33,14 +36,12 @@ struct PublicRelease {
       source.substring(with: match.range(at: 5)) == version,
       let digest = Data(base64Encoded: source.substring(with: match.range(at: 3))),
       digest.count == 64,
-      let size = Int(source.substring(with: match.range(at: 4))), size <= 2_000_000_000,
-      let download = URL(
-        string: "https://github.com/alexburlis/omnyo-releases/releases/download/macos/" + filename)
+      let size = Int(source.substring(with: match.range(at: 4))), size <= 2_000_000_000
     else {
       throw InstallError("The Mac release does not match this installer. Try again later.")
     }
     self.version = version
-    self.download = download
+    self.download = Self.assetBase.appendingPathComponent(filename)
     self.digest = digest
     self.size = size
   }

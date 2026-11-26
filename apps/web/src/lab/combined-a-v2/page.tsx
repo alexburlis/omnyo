@@ -12,7 +12,7 @@ import {
 
 import { DownloadButton, DownloadPanel } from "../../landing/download";
 import { GitHubButton } from "../../landing/github";
-import type { PublicMacDownload } from "../../landing/site";
+import { REPO_URL, type PublicMacDownload } from "../../landing/site";
 import { SiteNav } from "../../landing/site-chrome";
 import { AppMock, PhoneMock } from "../app-mock/app-mock";
 import { PLATFORM_LINE } from "../open-5/content";
@@ -60,7 +60,7 @@ function Hero({ macDownload }: LandingPageProps) {
         </p>
         <div className="hero-actions hero-in" style={order(4)}>
           <DownloadButton macDownload={macDownload} />
-          <GitHubButton label="Star on GitHub" short="GitHub" />
+          <GitHubButton href={REPO_URL} label="Star on GitHub" short="GitHub" />
         </div>
         <p className="hero-meta hero-in" style={order(5)}>
           {macDownload && (

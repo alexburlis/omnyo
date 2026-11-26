@@ -335,8 +335,18 @@ try {
   assert.match(html, /<link rel="canonical" href="https:\/\/omnyohq\.com\/"/);
   assert.match(
     html,
-    /href="https:\/\/github\.com\/alexburlis\/omnyo-releases\/releases\/download\/macos\/Omnyo-macOS\.zip"/,
+    /href="https:\/\/github\.com\/alexburlis\/omnyo\/releases\/download\/macos\/Omnyo-macOS\.zip"/,
     "home must link the macOS download",
+  );
+  assert.match(
+    html,
+    /href="https:\/\/github\.com\/alexburlis\/omnyo\/releases"/,
+    "home must link GitHub Releases",
+  );
+  assert.match(
+    html,
+    /href="https:\/\/github\.com\/alexburlis\/omnyo"/,
+    "home must link the source repository",
   );
   assert.match(
     html,
