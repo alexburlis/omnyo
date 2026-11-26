@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
+import { NativeShellNavigator } from "./NativeShellNavigator";
 import {
   getNativeShell,
   shellReportPath,
@@ -43,5 +44,5 @@ export function NativeShellReporter() {
     shellReportPath(document.title, path);
   }, [path, shell]);
 
-  return null;
+  return <NativeShellNavigator />;
 }

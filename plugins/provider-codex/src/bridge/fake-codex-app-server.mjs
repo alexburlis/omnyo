@@ -313,6 +313,30 @@ if (script?.launchLogPath) {
       pid: process.pid,
       args: process.argv.slice(2),
       codexHome: process.env.CODEX_HOME ?? null,
+      ...(script.captureTestEnvironment === true
+        ? {
+            testEnvironment: {
+              PROJECT_FIXTURE_VALUE: process.env.PROJECT_FIXTURE_VALUE ?? null,
+              trustedProcessControls: {
+                path: process.env.PATH === "/synthetic/trusted/bin",
+                home: process.env.HOME === "/synthetic/trusted/home",
+                loader: process.env.NODE_OPTIONS === "--no-warnings",
+                providerIdentity: process.env.OPENAI_API_KEY === "inherited",
+                providerEndpoint:
+                  process.env.OPENAI_BASE_URL === "http://127.0.0.1:1/trusted",
+                providerNamespace:
+                  process.env.CODEX_TEST_CONTROL === "inherited",
+                proxy: process.env.HTTPS_PROXY === "http://127.0.0.1:2/trusted",
+                tls:
+                  process.env.SSL_CERT_FILE ===
+                  "/synthetic/trusted/certificate.pem",
+                launchOverrideAbsent:
+                  process.env.OMNYO_CODEX_BRIDGE_APP_SERVER_COMMAND ===
+                  undefined,
+              },
+            },
+          }
+        : {}),
     }) + "\n",
   );
 }
@@ -636,8 +660,23 @@ async function handleRequest(message) {
       if (script?.configReadError) {
         respondError(id, -32601, "Configuration read unavailable");
       } else {
-        respond(id, script?.configRead ?? { config: { model: null } });
+        respond(id, {
+          origins: {},
+          ...(script?.configRead ?? { config: { model: null } }),
+        });
       }
+
+      return;
+    case "configRequirements/read":
+      respond(id, script?.configRequirementsRead ?? { requirements: null });
+
+      return;
+    case "permissionProfile/list":
+      respond(
+        id,
+        script?.permissionProfileListPages?.[params?.cursor ?? "first"] ??
+          script?.permissionProfileList ?? { data: [] },
+      );
 
       return;
     case "skills/list":

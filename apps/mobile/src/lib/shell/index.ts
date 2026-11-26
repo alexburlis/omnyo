@@ -11,10 +11,12 @@ export { clearWebsiteData } from "./clear-website-data";
 
 export {
   resolveShellLoadPath,
+  resolveShellOpen,
   resolveShellScreenState,
   revealsShellFailure,
   shouldReloadForSession,
   type ShellLoadPhase,
+  type ShellPath,
 } from "./shell-state";
 
 export { buildBridgeSharePayload } from "./shell-share";

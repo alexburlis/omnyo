@@ -43,6 +43,7 @@ import type {
 } from "@omnyo/provider-bridge-protocol/bridge-kit";
 import {
   assertProviderSupportsExecutionOptions,
+  keepRunningTurnApprovals,
   toProviderExecutionContext,
 } from "./execution-options.js";
 import {
@@ -1595,6 +1596,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
         getThreadExecutionOptions: (threadId) =>
           threadRuntimeConfigs.get(threadId)?.options,
         onInteractiveRequest: options.onInteractiveRequest,
+        onStderr: options.onStderr,
         onToolCall: options.onToolCall,
         toolCalls,
         parsedId: parsedLine.parsedId,
@@ -2488,7 +2490,8 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       expectedTurnId,
       input,
       clientRequestId,
-      options: execOpts,
+      options: requestedOptions,
+      steerSource,
       contributedEnv,
       instructions,
     }) {
@@ -2497,12 +2500,6 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
         work: async () => {
           const pid = threadIdentityRegistry.resolveProviderForThread(threadId);
           const currentProc = requireProviderProcessForThread(threadId);
-          assertProviderSupportsExecutionOptions({
-            adapter: currentProc.adapter,
-            options: execOpts,
-            providerId: pid,
-          });
-
           const activeTurnId = turnState.getActiveTurnId(threadId);
 
           if (activeTurnId !== expectedTurnId) {
@@ -2516,17 +2513,29 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
             };
           }
 
+          const currentConfig = threadRuntimeConfigs.get(threadId);
+
+          if (!currentConfig) {
+            throw new Error(`No runtime configuration for thread ${threadId}`);
+          }
+
+          const execOpts = keepRunningTurnApprovals({
+            requested: requestedOptions,
+            running: currentConfig.options,
+            steerSource,
+          });
+
+          assertProviderSupportsExecutionOptions({
+            adapter: currentProc.adapter,
+            options: execOpts,
+            providerId: pid,
+          });
           await restartThreadBridgeIfRecommended({
             threadId,
             options: execOpts,
             instructions,
           });
           const proc = requireProviderProcessForThread(threadId);
-          const currentConfig = threadRuntimeConfigs.get(threadId);
-
-          if (!currentConfig) {
-            throw new Error(`No runtime configuration for thread ${threadId}`);
-          }
 
           const resolvedContributedEnv =
             contributedEnv ?? currentConfig.contributedEnv;

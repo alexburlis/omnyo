@@ -1,6 +1,7 @@
 import {
   MOBILE_BRIDGE_VERSION,
   buildBridgeInjectionScript,
+  parseAppPath,
   type NativeShellHandshake,
 } from "@omnyo/mobile-bridge";
 import Constants from "expo-constants";
@@ -15,6 +16,7 @@ import {
 import {
   useCallback,
   useEffect,
+  useEffectEvent,
   useMemo,
   useRef,
   useState,
@@ -32,6 +34,7 @@ import {
   clearWebsiteData,
   decideShellNavigation,
   resolveShellLoadPath,
+  resolveShellOpen,
   resolveShellScreenState,
   revealsShellFailure,
   SHELL_ORIGIN_WHITELIST,
@@ -39,6 +42,7 @@ import {
   shouldReloadForSession,
   subscribeToShellCommands,
   type ShellLoadPhase,
+  type ShellPath,
 } from "@/lib/shell";
 import type { ShellScreenState } from "@/lib/shell/shell-state";
 import {
@@ -81,42 +85,22 @@ export function ProfileWebViewScreen() {
   const requestedProfileId = firstParam(params.profileId);
   const requestedPath = firstParam(params.path);
 
-  const appliedProfileRequest = useRef<string | null>(null);
-  useEffect(() => {
-    if (requestedProfileId === undefined) {
-      appliedProfileRequest.current = null;
-
-      return;
-    }
-
-    if (appliedProfileRequest.current === requestedProfileId) return;
-
-    if (!profiles.some((profile) => profile.id === requestedProfileId)) return;
-    appliedProfileRequest.current = requestedProfileId;
-
-    if (activeProfile?.id !== requestedProfileId) {
-      void setActiveProfile(requestedProfileId);
-    }
-  }, [activeProfile?.id, profiles, requestedProfileId, setActiveProfile]);
-
   const profile = activeProfile;
 
   const unavailable = connection?.client === null ? connection.session : null;
   const session = connection?.client ? connection.session : IDLE_SESSION;
   const webViewRef = useRef<WebView>(null);
   const canGoBack = useRef(false);
+  const pageNavigates = useRef(false);
   const [load, setLoad] = useState<ShellLoadPhase>({ kind: "loading" });
   const [reloadKey, setReloadKey] = useState(0);
 
-  const [visited, setVisited] = useState<{
-    scope: string;
-    path: string;
-  } | null>(null);
+  const [openPath, setOpenPath] = useState<ShellPath | null>(null);
+
+  const [visited, setVisited] = useState<ShellPath | null>(null);
 
   const loadScope =
-    profile === null
-      ? null
-      : `${profile.id}#${profile.serverUrl}#${requestedPath ?? ""}`;
+    profile === null ? null : `${profile.id}#${profile.serverUrl}`;
 
   useEffect(() => {
     setLoad({ kind: "loading" });
@@ -124,6 +108,7 @@ export function ProfileWebViewScreen() {
 
   useEffect(() => {
     canGoBack.current = false;
+    pageNavigates.current = false;
   }, [loadScope, reloadKey]);
 
   useFocusEffect(
@@ -148,13 +133,13 @@ export function ProfileWebViewScreen() {
     if (profile === null) return null;
 
     const path = resolveShellLoadPath({
-      visitedPath:
-        visited !== null && visited.scope === loadScope ? visited.path : null,
-      requestedPath,
+      scope: loadScope,
+      openPath,
+      visitedPath: visited,
     });
 
     return buildShellUrl(profile.serverUrl, path);
-  }, [loadScope, profile, requestedPath, visited]);
+  }, [loadScope, openPath, profile, visited]);
 
   const rememberPath = useCallback(
     (path: string) => {
@@ -177,14 +162,65 @@ export function ProfileWebViewScreen() {
   const bridge = useShellBridge(webViewRef, {
     onReady: (path) => {
       setLoad({ kind: "ready" });
+      setOpenPath((previous) =>
+        previous?.scope === loadScope ? null : previous,
+      );
       revealApp();
       rememberPath(path);
     },
     onPath: rememberPath,
+    onCapabilities: (capabilities) => {
+      pageNavigates.current = capabilities.includes("navigate");
+    },
     onOpenNative: (screen) => {
       if (screen === "device-settings") openServers();
     },
   });
+
+  const openRequest = useEffectEvent(
+    (profileId: string | undefined, path: string | undefined) => {
+      const target = profiles.find(
+        (candidate) => candidate.id === (profileId ?? activeProfile?.id),
+      );
+
+      if (target === undefined) return;
+      const switchingProfile = target.id !== activeProfile?.id;
+
+      if (switchingProfile) void setActiveProfile(target.id);
+
+      if (path === undefined || path.length === 0) return;
+      const appPath = parseAppPath(path);
+
+      if (appPath === null) return;
+
+      const action = resolveShellOpen({
+        switchingProfile,
+        load,
+        pageNavigates: pageNavigates.current && webViewRef.current !== null,
+      });
+
+      if (action === "navigate") {
+        bridge.send({ type: "navigate", path: appPath });
+        rememberPath(appPath);
+
+        return;
+      }
+
+      setOpenPath({ scope: `${target.id}#${target.serverUrl}`, path: appPath });
+
+      if (switchingProfile) return;
+      setLoad({ kind: "loading" });
+      setReloadKey((value) => value + 1);
+    },
+  );
+
+  useEffect(() => {
+    if (status !== "ready") return;
+
+    if (requestedProfileId === undefined && requestedPath === undefined) return;
+    router.setParams({ profileId: undefined, path: undefined });
+    openRequest(requestedProfileId, requestedPath);
+  }, [requestedPath, requestedProfileId, router, status]);
 
   const connectProfileId = profile?.mode === "connect" ? profile.id : null;
   useEffect(
@@ -461,6 +497,9 @@ export function ProfileWebViewScreen() {
           const path = shellPathFromUrl(state.url, profile.serverUrl);
 
           if (path !== null) rememberPath(path);
+        }}
+        onLoadStart={() => {
+          pageNavigates.current = false;
         }}
         onLoadEnd={() =>
           setLoad((previous) =>

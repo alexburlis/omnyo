@@ -183,7 +183,10 @@ export function registerAsyncQuestions(api: PluginApi): void {
   async function readNewQuestions(
     threadId: string,
   ): Promise<CodexAsyncQuestionState[]> {
-    let cursor = (await api.storage.kv.get<number>(cursorKey(threadId))) ?? 0;
+    const storedCursor =
+      (await api.storage.kv.get<number>(cursorKey(threadId))) ?? 0;
+
+    let cursor = storedCursor;
     const questions: CodexAsyncQuestionState[] = [];
 
     for (;;) {
@@ -211,7 +214,8 @@ export function registerAsyncQuestions(api: PluginApi): void {
       if (page.length < EVENT_PAGE_SIZE) break;
     }
 
-    await api.storage.kv.set(cursorKey(threadId), cursor);
+    if (cursor > storedCursor)
+      await api.storage.kv.set(cursorKey(threadId), cursor);
 
     return questions;
   }

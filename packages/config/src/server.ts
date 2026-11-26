@@ -50,6 +50,8 @@ import { assignIfDefined } from "./objects.js";
 import { loadHostDaemonPortValue } from "./ports.js";
 import { loadServerPortConfig, type ServerPortConfig } from "./server-port.js";
 
+export const SERVER_DATA_DIR_LOCK_FILE_NAME = "server.lock";
+
 export interface ServerConfig
   extends CommonConfig, DatabaseConfig, ServerPortConfig {
   OMNYO_APP_INSTALL_KIND?: AppInstallKind;

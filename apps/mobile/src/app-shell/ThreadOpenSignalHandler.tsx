@@ -8,14 +8,17 @@ export function ThreadOpenSignalHandler() {
   const router = useRouter();
   const pathname = usePathname();
   const realtime = connection?.client?.realtime ?? null;
+  const profileId = connection?.profile.id;
   useEffect(() => {
-    if (!realtime) return;
+    if (!realtime || profileId === undefined || pathname === "/webview") return;
 
     return realtime.onThreadOpen((signal) => {
       if (pathnameIsThread(pathname, signal.threadId)) return;
-      router.push(webViewShellHref({ path: `/threads/${signal.threadId}` }));
+      router.push(
+        webViewShellHref({ profileId, path: `/threads/${signal.threadId}` }),
+      );
     });
-  }, [realtime, router, pathname]);
+  }, [realtime, router, pathname, profileId]);
 
   return null;
 }

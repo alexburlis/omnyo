@@ -425,6 +425,7 @@ async function steerSubmittedTurn(
 
   for (let attempt = 0; attempt < TURN_SUBMIT_STEER_ATTEMPTS; attempt += 1) {
     const result = await entry.runtime.steerTurn({
+      steerSource: command.steerSource,
       threadId: command.threadId,
       expectedTurnId: targetTurnId,
       input: command.input,

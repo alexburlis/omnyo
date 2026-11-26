@@ -8,6 +8,7 @@ import {
   type NativeScreen,
   type NativeCapability,
   type NativeShellHandshake,
+  type PageCapability,
   type PageToShellMessage,
   type SafeAreaInsets,
   type ShellToPageEvent,
@@ -197,6 +198,12 @@ export function nativeShellServerSummary(): NativeShellServerSummary | null {
 
 export function shellReportReady(path: string): void {
   getNativeShell()?.post({ type: "ready", path });
+}
+
+export function shellReportCapabilities(
+  capabilities: readonly PageCapability[],
+): void {
+  getNativeShell()?.post({ type: "capabilities", capabilities });
 }
 
 export function shellReportPath(title: string, path: string): void {

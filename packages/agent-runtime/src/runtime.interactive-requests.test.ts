@@ -340,6 +340,89 @@ describe("createAgentRuntime interactive requests", () => {
     await runtime.shutdown();
   });
 
+  it.each([
+    { source: "non-user", running: "ask", requested: "deny", asks: true },
+    { source: "non-user", running: "deny", requested: "ask", asks: false },
+    { source: "user", running: "ask", requested: "deny", asks: false },
+    { source: "user", running: "deny", requested: "ask", asks: true },
+  ] as const)(
+    "honors $source steer from $running to $requested",
+    async ({ source, running, requested, asks }) => {
+      const requests: string[] = [];
+      const stderr: string[] = [];
+      const events: ThreadEvent[] = [];
+
+      const runningOptions = {
+        ...deniedEscalationOptions,
+        permissionEscalation: running,
+      };
+
+      const runtime = createScriptedEchoRuntime({
+        runtime: {
+          workspacePath: tmpDir,
+          onEvent: (event) => events.push(event),
+          onStderr: (line) => stderr.push(line),
+          onInteractiveRequest: async (request) => {
+            requests.push(request.providerRequestId);
+
+            return { decision: "allow_once", grantedPermissions: null };
+          },
+        },
+      });
+
+      try {
+        await runtime.startThread({
+          environmentId: "env-1",
+          threadId: "t1",
+          projectId: "p1",
+          providerId: "fake",
+          options: runningOptions,
+        });
+        await runtime.runTurn({
+          clientRequestId: "creq_222222225a",
+          threadId: "t1",
+          input: [promptTextInput({ text: "approve_after_steer:command" })],
+          options: runningOptions,
+        });
+
+        const { turnId } = await waitForThreadTurnStarted({
+          events,
+          providerId: "fake",
+          runtime,
+          threadId: "t1",
+        });
+
+        await expect(
+          runtime.steerTurn({
+            steerSource: source,
+            threadId: "t1",
+            expectedTurnId: turnId,
+            clientRequestId: "creq_222222225b",
+            input: [promptTextInput({ text: "Build finished" })],
+            options: { ...runningOptions, permissionEscalation: requested },
+          }),
+        ).resolves.toEqual({ status: "steered" });
+        await waitForThreadAgentMessageText({
+          events,
+          providerId: "fake",
+          runtime,
+          text: asks ? "Response to: approve_after_steer:command" : "Denied",
+          threadId: "t1",
+        });
+        expect(requests).toHaveLength(asks ? 1 : 0);
+
+        if (!asks)
+          expect(stderr).toContainEqual(
+            expect.stringContaining(
+              'the turn runs with permission escalation "deny"',
+            ),
+          );
+      } finally {
+        await runtime.shutdown();
+      }
+    },
+  );
+
   it("does not reclassify provider-filtered approvals against mutable thread settings", async () => {
     const onInteractiveRequest = vi.fn(
       async (): Promise<PendingInteractionResolution> => ({
