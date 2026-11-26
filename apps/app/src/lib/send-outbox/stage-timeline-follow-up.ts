@@ -5,11 +5,6 @@ import {
   type PromptDraftAttachment,
 } from "@omnyo/client-core";
 import type { prepareComposerAttachmentSubmission } from "../composer-attachment-submission";
-import { buildOptimisticUserMessageRow } from "@/hooks/cache-owners/optimistic-user-message";
-import {
-  addPendingSentMessage,
-  removePendingSentMessage,
-} from "@/hooks/cache-owners/pending-sent-messages";
 import { createSubmissionId } from "./send-outbox-entry";
 import {
   buildOutboxMessageInput,
@@ -17,6 +12,10 @@ import {
   stageThreadMessageInOutbox,
   trackOutboxThreadMessage,
 } from "./send-outbox";
+import {
+  addStagingFollowUp,
+  removeStagingFollowUp,
+} from "./staging-follow-ups";
 
 export async function stageTimelineFollowUp({
   queryClient,
@@ -25,7 +24,6 @@ export async function stageTimelineFollowUp({
   submission,
   execution,
   sourceOf,
-  showsInChat,
 }: {
   queryClient: QueryClient;
   threadId: string;
@@ -36,21 +34,15 @@ export async function stageTimelineFollowUp({
   >;
   execution: FollowUpExecutionSelection;
   sourceOf: (attachment: PromptDraftAttachment) => File | null;
-  showsInChat: boolean;
 }): Promise<boolean> {
   const submissionId = createSubmissionId();
 
-  const row = buildOptimisticUserMessageRow({
+  addStagingFollowUp({
     submissionId,
-    createdAt: Date.now(),
-    clientRequestId: null,
-    input: submission.input,
-    mode: "queue-if-active",
     threadId,
-    threadStatus: null,
+    input: submission.input,
+    createdAt: Date.now(),
   });
-
-  if (showsInChat) addPendingSentMessage(queryClient, threadId, row);
 
   const prediction = trackOutboxThreadMessage({
     queryClient,
@@ -96,6 +88,6 @@ export async function stageTimelineFollowUp({
     return stagedInOutbox;
   } finally {
     if (!stagedInOutbox) prediction.discard();
-    removePendingSentMessage(queryClient, threadId, row.id);
+    removeStagingFollowUp(submissionId);
   }
 }

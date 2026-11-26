@@ -1,12 +1,10 @@
 import { QueryClient } from "@tanstack/react-query";
 import { afterEach, expect, it, vi } from "vitest";
-import {
-  getPendingSentMessages,
-  withPendingSentMessages,
-} from "@/hooks/cache-owners/pending-sent-messages";
+import { withPendingSentMessages } from "@/hooks/cache-owners/pending-sent-messages";
 import { stageTimelineFollowUp } from "./stage-timeline-follow-up";
+import { readStagingFollowUps } from "./staging-follow-ups";
 import {
-  followUpShowsInChat,
+  pendingQueueFollowUps,
   pendingTimelineSubmissions,
 } from "./timeline-submissions";
 import * as outbox from "./send-outbox";
@@ -79,7 +77,6 @@ it("renders identical sends immediately and replaces only the confirmed submissi
       projectId: "project",
       execution: null,
       sourceOf: () => null,
-      showsInChat: true,
       submission: {
         input: [{ type: "text", text: "same words", mentions: [] }],
         prepareInput: undefined,
@@ -90,7 +87,14 @@ it("renders identical sends immediately and replaces only the confirmed submissi
   const first = send(),
     second = send();
 
-  const immediate = getPendingSentMessages(queryClient, threadId);
+  const immediate = pendingTimelineSubmissions(
+    threadId,
+    "idle",
+    readStagingFollowUps(),
+    [],
+    [],
+  );
+
   expect(immediate.map((item) => item.row.text)).toEqual([
     "same words",
     "same words",
@@ -98,7 +102,8 @@ it("renders identical sends immediately and replaces only the confirmed submissi
   expect(entries).toHaveLength(0);
   resume(true);
   expect(await Promise.all([first, second])).toEqual([true, true]);
-  const staged = pendingTimelineSubmissions(threadId, "idle", entries, []);
+  expect(readStagingFollowUps()).toEqual([]);
+  const staged = pendingTimelineSubmissions(threadId, "idle", [], entries, []);
   expect(staged.map((item) => item.row.id)).toEqual(
     immediate.map((item) => item.row.id),
   );
@@ -115,6 +120,7 @@ it("renders identical sends immediately and replaces only the confirmed submissi
     pendingTimelineSubmissions(
       threadId,
       "idle",
+      [],
       [
         {
           ...entries[0]!,
@@ -127,11 +133,11 @@ it("renders identical sends immediately and replaces only the confirmed submissi
 });
 
 it.each([
-  ["idle", 1],
-  ["active", 0],
+  ["idle", 1, 0],
+  ["active", 0, 1],
 ] as const)(
-  "adds an optimistic chat row for a follow-up to an %s thread only when it will run at once",
-  async (status, chatRows) => {
+  "shows a follow-up to an %s thread in exactly one place from the click until it is staged",
+  async (status, chatRows, queueRows) => {
     vi.mocked(outbox.isSendOutboxAvailable).mockResolvedValue(true);
     vi.mocked(outbox.stageThreadMessageInOutbox).mockResolvedValue("staged");
     const queryClient = new QueryClient();
@@ -143,7 +149,6 @@ it.each([
       projectId: "project",
       execution: null,
       sourceOf: () => null,
-      showsInChat: followUpShowsInChat(status),
       submission: {
         input: [{ type: "text", text: "Queue me", mentions: [] }],
         prepareInput: undefined,
@@ -151,10 +156,18 @@ it.each([
       },
     });
 
-    expect(getPendingSentMessages(queryClient, threadId)).toHaveLength(
-      chatRows,
-    );
+    const staging = readStagingFollowUps();
+    expect(
+      pendingTimelineSubmissions(threadId, status, staging, [], []),
+    ).toHaveLength(chatRows);
+    expect(
+      pendingQueueFollowUps(threadId, status, staging, [], []).map(
+        (message) =>
+          message.content[0]?.type === "text" && message.content[0].text,
+      ),
+    ).toEqual(queueRows ? ["Queue me"] : []);
     expect(await send).toBe(true);
+    expect(readStagingFollowUps()).toEqual([]);
     queryClient.clear();
   },
 );
@@ -176,7 +189,6 @@ it.each(["unavailable", "failure"] as const)(
       projectId: "proj_a",
       execution: null,
       sourceOf: () => null,
-      showsInChat: true,
       submission: {
         input: [{ type: "text", text: "Send", mentions: [] }],
         prepareInput: undefined,
@@ -194,7 +206,7 @@ it.each(["unavailable", "failure"] as const)(
     if (outcome === "failure") await expect(send).rejects.toThrow("Disk full");
     else expect(await send).toBe(false);
     expect(discard).toHaveBeenCalledOnce();
-    expect(getPendingSentMessages(queryClient, "thr_failed")).toEqual([]);
+    expect(readStagingFollowUps()).toEqual([]);
     queryClient.clear();
   },
 );

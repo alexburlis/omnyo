@@ -21,11 +21,18 @@ import type {
   ThreadRuntimeDisplayStatus,
 } from "@omnyo/domain";
 import type { ThreadResponse } from "@omnyo/server-contract";
-import { pendingTimelineSubmissions } from "@/lib/send-outbox/timeline-submissions";
+import {
+  pendingTimelineSubmissions,
+  queuedSubmissionIds,
+} from "@/lib/send-outbox/timeline-submissions";
 import {
   readSendOutboxSnapshot,
   subscribeSendOutbox,
 } from "@/lib/send-outbox/send-outbox";
+import {
+  readStagingFollowUps,
+  subscribeStagingFollowUps,
+} from "@/lib/send-outbox/staging-follow-ups";
 
 export function usePendingTimelineMessages(threadId: string) {
   const queryClient = useQueryClient();
@@ -59,8 +66,19 @@ export function usePendingTimelineMessages(threadId: string) {
     select: (thread) => thread.runtime.displayStatus,
   });
 
+  const staging = useSyncExternalStore(
+    subscribeStagingFollowUps,
+    readStagingFollowUps,
+  );
+
+  const stagingRows = useMemo(
+    () => pendingTimelineSubmissions(threadId, status, staging, [], []),
+    [threadId, status, staging],
+  );
+
   const submissions = useMemo(
-    () => pendingTimelineSubmissions(threadId, status, entries, queue ?? []),
+    () =>
+      pendingTimelineSubmissions(threadId, status, [], entries, queue ?? []),
     [threadId, status, entries, queue],
   );
 
@@ -104,13 +122,27 @@ export function usePendingTimelineMessages(threadId: string) {
     };
   }, [queryClient, retained, submissions, threadId]);
 
+  const inQueue = useMemo(
+    () => queuedSubmissionIds(threadId, status, staging, entries, queue ?? []),
+    [threadId, status, staging, entries, queue],
+  );
+
   return useMemo(() => {
-    if (!retained.length && !submissions.length) return pendingSentMessages;
+    if (!retained.length && !submissions.length && !stagingRows.length)
+      return pendingSentMessages;
     const rows = new Map<string, PendingSentMessage>();
 
-    for (const item of [...retained, ...pendingSentMessages, ...submissions]) {
+    for (const item of [
+      ...retained,
+      ...pendingSentMessages,
+      ...stagingRows,
+      ...submissions,
+    ]) {
+      const { submissionId } = item.row.turnRequest;
+
       if (
         item.row.threadId === threadId &&
+        (submissionId == null || !inQueue.has(submissionId)) &&
         !entries.some(
           (entry) =>
             entry.submissionId === item.row.turnRequest.submissionId &&
@@ -121,5 +153,13 @@ export function usePendingTimelineMessages(threadId: string) {
     }
 
     return [...rows.values()].sort((a, b) => a.row.createdAt - b.row.createdAt);
-  }, [entries, pendingSentMessages, retained, submissions, threadId]);
+  }, [
+    entries,
+    inQueue,
+    pendingSentMessages,
+    retained,
+    stagingRows,
+    submissions,
+    threadId,
+  ]);
 }
