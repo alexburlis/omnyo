@@ -18,7 +18,7 @@ import { AppMock, PhoneMock } from "../app-mock/app-mock";
 import { PLATFORM_LINE } from "../open-5/content";
 import { KineticShell, Mark, Terminal, at } from "../open-5/page";
 import { type BeatStepper, startBeatStepper } from "./beat-stepper";
-import { ACT_LABELS, BEATS, STORY_LINES, WINDOWS } from "./content";
+import { BEATS, STORY_LINES, WINDOWS } from "./content";
 import { Devices } from "./devices";
 import { Bento, Questions, Speed } from "./sections";
 import { Switch } from "./switch";
@@ -297,7 +297,6 @@ export default function Page({ macDownload }: LandingPageProps) {
     <KineticShell
       className="lab-combined-kinetic lab-combined-a-v2"
       header={<SiteNav path="/" macDownload={macDownload} />}
-      labels={ACT_LABELS}
       productStage
       productMorph
       themed

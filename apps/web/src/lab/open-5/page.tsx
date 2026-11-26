@@ -7,6 +7,7 @@ import "./chrome-extras.css";
 import {
   type CSSProperties,
   type ReactNode,
+  type RefObject,
   useEffect,
   useRef,
   useSyncExternalStore,
@@ -141,9 +142,15 @@ export function Terminal({
   );
 }
 
-function Nav({ themed }: { themed: boolean }) {
+function Nav({
+  themed,
+  navRef,
+}: {
+  themed: boolean;
+  navRef: RefObject<HTMLElement | null>;
+}) {
   return (
-    <header className="nav">
+    <header className="nav" ref={navRef}>
       <span className="nav-shade" data-nav-shade aria-hidden="true">
         <span className="veil-disc veil-disc--nav" data-nav-disc="hero" />
         <span className="veil-disc veil-disc--nav" data-nav-disc="story" />
@@ -789,6 +796,8 @@ export function KineticShell({
   className?: string;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const navRef = useRef<HTMLElement>(null);
+  const usesPreviewNav = header === null || header === undefined;
 
   const reduced = useSyncExternalStore(
     watchReducedMotion,
@@ -802,13 +811,22 @@ export function KineticShell({
     if (!root) return;
 
     return startStory(root, reduced, {
+      previewNav: usesPreviewNav ? navRef.current : null,
       labels,
       onProductProgress,
       productStage,
       productMorph,
       themed,
     });
-  }, [reduced, labels, onProductProgress, productStage, productMorph, themed]);
+  }, [
+    reduced,
+    usesPreviewNav,
+    labels,
+    onProductProgress,
+    productStage,
+    productMorph,
+    themed,
+  ]);
 
   return (
     <div
@@ -819,7 +837,7 @@ export function KineticShell({
       {reduced ? null : (
         <canvas className="particles" data-particles aria-hidden="true" />
       )}
-      {header ?? <Nav themed={themed} />}
+      {header ?? <Nav themed={themed} navRef={navRef} />}
       <main>{children}</main>
       <Footer />
     </div>

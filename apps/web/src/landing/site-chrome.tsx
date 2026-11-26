@@ -408,7 +408,6 @@ export function SiteNav({
   const header = useRef<HTMLElement>(null);
 
   useEffect(() => {
-    const root = document.documentElement;
     let last = scrollY;
 
     const update = () => {
@@ -425,11 +424,6 @@ export function SiteNav({
           node.querySelector("details[open]") === null;
 
         node.toggleAttribute("data-hidden", hide);
-        const visibility = hide ? "hidden" : "shown";
-
-        if (root.dataset.siteNav !== visibility) {
-          root.dataset.siteNav = visibility;
-        }
 
         last = y;
       }
@@ -442,7 +436,6 @@ export function SiteNav({
 
     return () => {
       removeEventListener("scroll", update);
-      delete root.dataset.siteNav;
     };
   }, []);
 

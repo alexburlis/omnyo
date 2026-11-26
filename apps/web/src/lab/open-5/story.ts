@@ -126,18 +126,20 @@ export function startStory(
   root: HTMLElement,
   reduced: boolean,
   {
+    previewNav: nav,
     labels = ACTS,
     onProductProgress,
     productStage = false,
     productMorph = false,
     themed = false,
   }: {
+    previewNav: HTMLElement | null;
     labels?: readonly string[];
     onProductProgress?: (progress: number) => void;
     productStage?: boolean;
     productMorph?: boolean;
     themed?: boolean;
-  } = {},
+  },
 ) {
   let tones: Tones = themed ? readTones(getComputedStyle(root)) : FIXED_TONES;
 
@@ -203,10 +205,12 @@ export function startStory(
   const winLayer = root.querySelector<HTMLElement>("[data-win-layer]");
   const windows = [...root.querySelectorAll<HTMLElement>("[data-win]")];
   const lines = [...root.querySelectorAll<HTMLElement>("[data-line]")];
-  const navLabel = root.querySelector<HTMLElement>("[data-act-label]");
-  const progressBar = root.querySelector<HTMLElement>("[data-nav-progress]");
-  const nav = root.querySelector<HTMLElement>(".nav");
-  const navShade = root.querySelector<HTMLElement>("[data-nav-shade]");
+  const navLabel = nav?.querySelector<HTMLElement>("[data-act-label]") ?? null;
+
+  const progressBar =
+    nav?.querySelector<HTMLElement>("[data-nav-progress]") ?? null;
+
+  const navShade = nav?.querySelector<HTMLElement>("[data-nav-shade]") ?? null;
   const storyPin = scenes.story?.querySelector<HTMLElement>(".story-pin");
 
   const storyTitle =
@@ -833,15 +837,16 @@ export function startStory(
       if (entry) sceneProgress.push([element, entry]);
     });
 
-    const navTone = phone
-      ? sceneProgress.find(
-          ([element, entry]) =>
-            element?.dataset.tone !== undefined &&
-            entry.rect !== null &&
-            entry.rect.top <= navHeight &&
-            navHeight < entry.rect.bottom,
-        )?.[0]?.dataset.tone
-      : undefined;
+    const navTone =
+      phone && nav
+        ? sceneProgress.find(
+            ([element, entry]) =>
+              element?.dataset.tone !== undefined &&
+              entry.rect !== null &&
+              entry.rect.top <= navHeight &&
+              navHeight < entry.rect.bottom,
+          )?.[0]?.dataset.tone
+        : undefined;
 
     const navStage = navTone === undefined ? null : navTone === "stage" ? 1 : 0;
 
@@ -1139,41 +1144,6 @@ export function startStory(
       flag(storyPin, "sub", titled && shown(STORY_VH.sub) ? "" : null);
     }
 
-    const center = vh / 2;
-    let act = 0;
-    let flowLabel: string | undefined;
-
-    const ordered: [number, { rect: DOMRect | null }, HTMLElement | null][] = [
-      [0, hero, scenes.hero],
-      [1, story, scenes.story],
-      [3, app, scenes.app],
-      [4, review, scenes.review],
-      [5, more, scenes.more],
-      [6, yours, scenes.yours],
-      [7, cta, scenes.cta],
-      [7, footer, scenes.footer],
-    ];
-
-    flows.forEach((element, index) => {
-      const entry = flowed[index];
-
-      if (entry) ordered.push([-1, entry, element]);
-    });
-
-    let top = Number.NEGATIVE_INFINITY;
-
-    for (const [index, entry, element] of ordered) {
-      if (!entry.rect || entry.rect.top > center || entry.rect.top < top) {
-        continue;
-      }
-
-      top = entry.rect.top;
-      act = index;
-      flowLabel = index < 0 ? (element?.dataset.act ?? "") : undefined;
-    }
-
-    if (act === 1 && storyY > STORY_VH.act) act = 2;
-
     if (scenes.review) {
       setNumber(
         scenes.review,
@@ -1183,6 +1153,42 @@ export function startStory(
     }
 
     if (navLabel) {
+      const center = vh / 2;
+      let act = 0;
+      let flowLabel: string | undefined;
+
+      const ordered: [number, { rect: DOMRect | null }, HTMLElement | null][] =
+        [
+          [0, hero, scenes.hero],
+          [1, story, scenes.story],
+          [3, app, scenes.app],
+          [4, review, scenes.review],
+          [5, more, scenes.more],
+          [6, yours, scenes.yours],
+          [7, cta, scenes.cta],
+          [7, footer, scenes.footer],
+        ];
+
+      flows.forEach((element, index) => {
+        const entry = flowed[index];
+
+        if (entry) ordered.push([-1, entry, element]);
+      });
+
+      let top = Number.NEGATIVE_INFINITY;
+
+      for (const [index, entry, element] of ordered) {
+        if (!entry.rect || entry.rect.top > center || entry.rect.top < top) {
+          continue;
+        }
+
+        top = entry.rect.top;
+        act = index;
+        flowLabel = index < 0 ? (element?.dataset.act ?? "") : undefined;
+      }
+
+      if (act === 1 && storyY > STORY_VH.act) act = 2;
+
       const label = flowLabel ?? labels[act] ?? "";
 
       if (navLabel.textContent !== label) navLabel.textContent = label;

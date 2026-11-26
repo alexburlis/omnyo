@@ -17,7 +17,7 @@
   scroll-padding-top: 88px;
 }
 
-:root:has(.site-nav)[data-site-nav="hidden"]:not(:has(.site-nav:focus-within)) {
+:root:has(.site-nav[data-hidden]:not(:focus-within)) {
   --site-nav-clearance: 0px;
 }
 
