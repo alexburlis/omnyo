@@ -1,5 +1,6 @@
 import {
   getQueuedThreadMessage,
+  createQueuedThreadMessage,
   listEvents,
   listQueuedThreadMessages,
   setQueuedThreadMessageGroupBoundary,
@@ -206,6 +207,46 @@ describe("first message of a pending thread", () => {
 });
 
 describe("queued delivery mode", () => {
+  it("preserves a queued row's persisted system author without a system notice", async () => {
+    await withTestHarness(async (harness) => {
+      const { thread } = seedRunnableThread(harness, {
+        hostId: "host-persisted-system-author",
+        status: "active",
+      });
+
+      const queued = createQueuedThreadMessage(harness.db, harness.deps.hub, {
+        threadId: thread.id,
+        content: textInput("Scheduled background result"),
+        requestedBy: { initiator: "system", senderThreadId: null },
+        model: "gpt-5",
+        reasoningLevel: "medium",
+        permissionMode: "accept-edits",
+        serviceTier: "default",
+        waitingOn: null,
+        sendAt: null,
+        payload: { kind: "inline" },
+        systemNotice: null,
+        deliveryMode: "steer",
+      });
+
+      await sendQueuedMessageNow(harness.deps, {
+        overrideFailures: true,
+        threadId: thread.id,
+        queuedMessageId: queued.id,
+        mode: "steer",
+      });
+      expect(
+        listQueuedThreadCommands(harness, "turn.submit", thread.id)[0],
+      ).toMatchObject({
+        steerSource: "non-user",
+        options: { permissionEscalation: "deny" },
+      });
+      expect(turnRequests(harness, thread.id).at(-1)).toMatchObject({
+        initiator: "system",
+      });
+    });
+  });
+
   it.each([
     { mode: "queue-if-active", steers: false },
     { mode: "steer", steers: true },
@@ -238,6 +279,13 @@ describe("queued delivery mode", () => {
         expect(
           listQueuedThreadCommands(harness, "turn.submit", thread.id),
         ).toHaveLength(steers ? 1 : 0);
+
+        if (steers)
+          expect(
+            listQueuedThreadCommands(harness, "turn.submit", thread.id)[0],
+          ).toMatchObject({
+            steerSource: "user",
+          });
         expect(queuedRows(harness, thread.id)).toEqual(
           steers
             ? []
