@@ -118,6 +118,80 @@ async function run() {
 
   assert.equal(sidebar.body.projects[0].threads.length, 3);
 
+  assert.deepEqual(
+    config.body.generalSettings.modelPermissionModes,
+    {},
+    "generalSettings.modelPermissionModes",
+  );
+
+  const boot = await json(origin, "/api/v1/boot");
+
+  assert.equal(boot.status, 200);
+  assert.equal(boot.body.version, 1);
+  assert.equal(Object.keys(boot.body.parts).length, 14);
+
+  for (const [name, part] of Object.entries(boot.body.parts))
+    assert.equal(part.status, 200, `boot part ${name}`);
+
+  assert.equal(boot.body.parts.sidebarBootstrap.body.projects.length, 1);
+
+  const bootParts = await json(
+    origin,
+    "/api/v1/boot?parts=systemConfig,hosts,shelvedThreads",
+  );
+
+  assert.deepEqual(Object.keys(bootParts.body.parts), [
+    "systemConfig",
+    "hosts",
+    "shelvedThreads",
+  ]);
+  assert.equal(bootParts.body.parts.systemConfig.body.serverUrl, origin);
+
+  assert.equal(
+    (await json(origin, "/api/v1/boot?parts=systemConfig,unknown")).status,
+    400,
+  );
+
+  const reads = {
+    "/api/v1/preferences/ui": (body) =>
+      body.preferences["sidebar.organizationMode"].revision === 0,
+    "/api/v1/system/usage": (body) => body.count.effective === false,
+    "/api/v1/submissions/contract": (body) => body.version === 1,
+    "/api/v1/server/move": (body) => body.move === null,
+    "/api/v1/server/runtime": (body) => body.runtimeId.startsWith("demo-"),
+    "/api/v1/system/app-update": (body) => body.support.kind === "unsupported",
+    "/api/v1/system/version": (body) => body.updateAvailable === false,
+    "/api/v1/system/providers": (body) => body.length === 0,
+    "/api/v1/system/providers/catalog": (body) => body.length === 0,
+    "/api/v1/system/providers/state": (body) => body.providers.length === 0,
+    "/api/v1/system/environment-providers?projectId=proj_personal": (body) =>
+      body.providers.length === 0,
+    "/api/v1/system/machine-providers": (body) => body.providers.length === 0,
+    "/api/v1/hosts?includeCreating=false": (body) => body.length === 0,
+    "/api/v1/plugins/install-jobs": (body) => body.jobs.length === 0,
+    "/api/v1/plugins/update-jobs": (body) => body.jobs.length === 0,
+    "/api/v1/plugins/safe-mode": (body) => body.enabled === false,
+    "/api/v1/plugins/contributions": (body) => body.cliCommands.length === 0,
+    "/api/v1/inbox": (body) => body.counts.inbox === 0,
+    "/api/v1/projects/proj_personal/prompt-history": (body) =>
+      body.length === 0,
+    [`/api/v1/threads/${THREAD}/default-execution-options`]: (body) =>
+      body === null,
+    [`/api/v1/threads/${THREAD}/conversation-outline?role=user`]: (body) =>
+      body.items.length === 1 && body.items[0].role === "user",
+    [`/api/v1/threads/${THREAD}/waits`]: (body) => body.waits.length === 0,
+    [`/api/v1/threads/${THREAD}/interactions`]: (body) => body.length === 0,
+    [`/api/v1/threads/${THREAD}/queued-messages`]: (body) => body.length === 0,
+    [`/api/v1/threads/${THREAD}/prompt-history`]: (body) => body.length === 0,
+  };
+
+  for (const [path, check] of Object.entries(reads)) {
+    const response = await json(origin, path);
+
+    assert.equal(response.status, 200, path);
+    assert.ok(check(response.body), path);
+  }
+
   const timeline = await json(origin, `/api/v1/threads/${THREAD}/timeline`);
 
   assert.ok(timeline.body.rows.length > 0);
@@ -149,6 +223,19 @@ async function run() {
 
   assert.equal(tabs.status, 501);
   assert.equal(tabs.body.error.message, READ_ONLY_MESSAGE);
+
+  const preference = await json(
+    origin,
+    "/api/v1/preferences/ui/sidebar.organizationMode",
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ expectedRevision: 0, value: "projects" }),
+    },
+  );
+
+  assert.equal(preference.status, 501);
+  assert.equal(preference.body.error.message, READ_ONLY_MESSAGE);
 
   const search = await json(origin, "/api/v1/threads/search?query=dark");
 

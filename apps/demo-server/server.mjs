@@ -4,16 +4,9 @@ import { createServer } from "node:http";
 import { extname, join } from "node:path";
 import { pipeline } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { api } from "./fixtures.mjs";
+import { api, READ_ONLY_ERROR } from "./fixtures.mjs";
 
 const PUBLIC_DIR = fileURLToPath(new URL("./public/", import.meta.url));
-
-const READ_ONLY_ERROR = {
-  error: {
-    code: "read_only_demo",
-    message: "This is a read-only demo server, so it cannot do that.",
-  },
-};
 
 const WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
@@ -114,10 +107,14 @@ function publicOrigin(req) {
 
 async function handle(req, res) {
   let path;
+  let query;
   let serverUrl;
 
   try {
-    path = decodeURIComponent(new URL(req.url, "http://demo").pathname);
+    const url = new URL(req.url, "http://demo");
+
+    path = decodeURIComponent(url.pathname);
+    query = url.searchParams;
     serverUrl = publicOrigin(req);
   } catch {
     sendJson(res, 400, {
@@ -129,7 +126,10 @@ async function handle(req, res) {
 
   const read = req.method === "GET" || req.method === "HEAD";
   const isApi = path === "/health" || path.startsWith("/api/");
-  const result = isApi ? api({ method: req.method, path, serverUrl }) : null;
+
+  const result = isApi
+    ? api({ method: req.method, path, query, serverUrl })
+    : null;
 
   if (result) {
     sendJson(res, result.status, result.body);
