@@ -175,7 +175,7 @@ export function signInPage(next: string, message: string | null): string {
 <p class="lede">Open your Omnyo from anywhere.</p>
 ${notice(message)}
 <form method="post" action="/sign-in">${hidden("next", next)}<button class="github" type="submit">${GITHUB_MARK}<span>Continue with GitHub</span></button></form>
-<p class="fine">Omnyo never sees your repositories or code.</p>
+<p class="fine">Signing in never gives Omnyo access to your repositories.</p>
 <p class="muted terms">By signing in you accept the <a href="${LEGAL_SITE_ORIGIN}/terms">Terms</a>. See <a href="${LEGAL_SITE_ORIGIN}/privacy">Privacy</a>.</p></div>`,
     "auth",
   );
