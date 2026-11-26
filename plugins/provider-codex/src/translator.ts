@@ -31,6 +31,7 @@ import {
   gitWritableRootsForWorkspace,
   shouldCaptureWorkspaceWriteGitRoots,
   toCodexThreadPermissionSettings,
+  type CodexSandboxControl,
   type CodexSessionOptions,
   type CodexThreadPermissionSettings,
 } from "./session-params.js";
@@ -403,6 +404,7 @@ interface PreparedWorkspaceWriteGitRoots {
 
 interface PrepareWorkspaceWriteGitRootsArgs {
   supportsAgentsEnabled: boolean;
+  sandboxControl: CodexSandboxControl;
   command: CodexSessionConstructionInput;
 }
 
@@ -500,7 +502,10 @@ export function createCodexEventTranslator(
     pendingWorkspaceWriteGitWritableRootsByThreadId.delete(args.threadId);
     workspaceWriteGitWritableRootsByThreadId.delete(args.threadId);
 
-    for (const [providerThreadId, threadId] of omnyoThreadIdByProviderThreadId) {
+    for (const [
+      providerThreadId,
+      threadId,
+    ] of omnyoThreadIdByProviderThreadId) {
       if (threadId === args.threadId) {
         omnyoThreadIdByProviderThreadId.delete(providerThreadId);
       }
@@ -545,12 +550,16 @@ export function createCodexEventTranslator(
     return {
       config: buildCodexConfig({
         supportsAgentsEnabled: args.supportsAgentsEnabled,
+        sandboxControl: args.sandboxControl,
         additionalWorkspaceWriteRoots,
         gitWritableRoots: writableRoots,
         options: command.options,
         threadId: command.threadId,
       }),
-      permissionSettings: toCodexThreadPermissionSettings(command.options),
+      permissionSettings: toCodexThreadPermissionSettings(
+        command.options,
+        args.sandboxControl,
+      ),
     };
   }
 

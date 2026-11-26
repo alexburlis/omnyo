@@ -81,6 +81,12 @@ import {
 } from "../schemas.js";
 import {
   codexSupportsAgentsEnabled,
+  codexWorkspaceProfile,
+  codexPermissionProfileListSchema,
+  codexSandboxConfigSchema,
+  codexSandboxRequirementsSchema,
+  resolveCodexSandboxControl,
+  type CodexSandboxControl,
   resolveCodexInstructionOverrides,
   toCodexDynamicTools,
   toCodexPermissionSettings,
@@ -121,7 +127,10 @@ import {
   SubAgentUnloader,
 } from "./subagent-unload.js";
 
-type OmnyoThreadResumeParams = ThreadResumeParams & { excludeTurns: boolean };
+type OmnyoThreadResumeParams = ThreadResumeParams & {
+  excludeTurns: boolean;
+  permissions?: string | null;
+};
 
 const codexBridgeCommandSchema = z.discriminatedUnion("method", [
   z.object({
@@ -583,6 +592,7 @@ interface CodexBridgeSession {
   environmentHash: string;
   legacyPoolProviderAdmissionV1: LegacyPoolProviderAdmissionV1 | null;
   turnPermissionSettings: ReturnType<typeof toCodexPermissionSettings>;
+  sandboxControl: CodexSandboxControl;
   openCodexTurnIds: Set<string>;
   codexThreadIdsByTurnId: Map<string, string>;
   responseOpenedTurns: Map<string, ResponseOpenedTurn>;
@@ -1380,6 +1390,58 @@ async function initializeChild(
   };
 }
 
+const UNREAD_SANDBOX_CONTROL: CodexSandboxControl = {
+  kind: "sandbox",
+  workspaceNetworkAccess: false,
+};
+
+async function readCodexSandboxControl(
+  connection: CodexAppServerConnection,
+  cwd: string,
+): Promise<CodexSandboxControl> {
+  const [config, requirements] = await Promise.all([
+    connection.request({
+      method: "config/read",
+      params: { cwd },
+      resultSchema: codexSandboxConfigSchema,
+      timeoutMs: CHILD_REQUEST_TIMEOUT_MS,
+    }),
+    connection.request({
+      method: "configRequirements/read",
+      resultSchema: codexSandboxRequirementsSchema,
+      timeoutMs: CHILD_REQUEST_TIMEOUT_MS,
+    }),
+  ]);
+
+  let profiles: z.infer<typeof codexPermissionProfileListSchema> | null = null;
+
+  if (codexWorkspaceProfile({ config, requirements }) !== null) {
+    profiles = { data: [] };
+    const cursors = new Set<string>();
+    let cursor: string | undefined;
+
+    for (;;) {
+      const page = await connection.request({
+        method: "permissionProfile/list",
+        params: { cwd, ...(cursor === undefined ? {} : { cursor }) },
+        resultSchema: codexPermissionProfileListSchema,
+        timeoutMs: CHILD_REQUEST_TIMEOUT_MS,
+      });
+
+      profiles.data.push(...page.data);
+
+      if (page.nextCursor == null) break;
+
+      if (cursors.has(page.nextCursor))
+        throw new Error("Codex permission profile pagination did not advance.");
+      cursors.add(page.nextCursor);
+      cursor = page.nextCursor;
+    }
+  }
+
+  return resolveCodexSandboxControl({ config, requirements, profiles });
+}
+
 const codexThreadIdentityResultSchema = z
   .object({
     thread: z
@@ -1753,7 +1815,9 @@ async function constructThreadSession(
       additionalWorkspaceWriteRoots: decoded.additionalWorkspaceWriteRoots,
       gitWritableRoots: [],
       options: decoded.sessionOptions,
+      sandboxControl: UNREAD_SANDBOX_CONTROL,
     }),
+    sandboxControl: UNREAD_SANDBOX_CONTROL,
     openCodexTurnIds: new Set(),
     codexThreadIdsByTurnId: new Map(),
     responseOpenedTurns: new Map(),
@@ -1930,8 +1994,14 @@ async function constructThreadSession(
       );
     }
 
+    session.sandboxControl = await readCodexSandboxControl(
+      connection,
+      args.cwd,
+    );
+
     const preparedGitRoots = translator.prepareWorkspaceWriteGitRoots({
       supportsAgentsEnabled,
+      sandboxControl: session.sandboxControl,
       command: {
         threadId: args.threadId,
         cwd: args.cwd,
@@ -1953,9 +2023,7 @@ async function constructThreadSession(
       );
 
     const sharedConstructionParams = {
-      approvalPolicy: preparedGitRoots.permissionSettings.approvalPolicy,
-      approvalsReviewer: preparedGitRoots.permissionSettings.approvalsReviewer,
-      sandbox: preparedGitRoots.permissionSettings.sandbox,
+      ...preparedGitRoots.permissionSettings,
       cwd: args.cwd,
       ...instructionOverrides,
       model: decoded.sessionOptions.model ?? undefined,
@@ -2055,6 +2123,7 @@ async function constructThreadSession(
       additionalWorkspaceWriteRoots: decoded.additionalWorkspaceWriteRoots,
       gitWritableRoots: translator.getThreadGitWritableRoots(args.threadId),
       options: decoded.sessionOptions,
+      sandboxControl: session.sandboxControl,
     });
     announceSessionIdentity(session, codexThreadId);
     session.daybreakEnabled = result.thread.daybreakEnabled ?? null;
@@ -2125,6 +2194,7 @@ function registerResumableSession(session: CodexBridgeSession): void {
     environmentHash: session.environmentHash,
     legacyPoolProviderAdmissionV1: session.legacyPoolProviderAdmissionV1,
     turnPermissionSettings: session.turnPermissionSettings,
+    sandboxControl: session.sandboxControl,
     openCodexTurnIds: new Set(),
     codexThreadIdsByTurnId: new Map(),
     responseOpenedTurns: new Map(),
@@ -2894,6 +2964,7 @@ async function handleTurnStart(
             params.threadId,
           ),
           options: decoded.sessionOptions,
+          sandboxControl: session.sandboxControl,
         });
 
         const cyberAccessProgram = await resolveTurnCyberAccessProgram(
@@ -2911,9 +2982,7 @@ async function handleTurnStart(
             params: {
               threadId: codexThreadId,
               input: await resolveCodexSkillInput(session, input),
-              approvalPolicy: permissionSettings.approvalPolicy,
-              approvalsReviewer: permissionSettings.approvalsReviewer,
-              sandboxPolicy: permissionSettings.sandboxPolicy,
+              ...permissionSettings,
               model: decoded.sessionOptions.model ?? undefined,
               serviceTier: toCodexServiceTier(
                 decoded.sessionOptions.serviceTier,
@@ -2990,6 +3059,7 @@ async function handleTurnSteer(
         params.threadId,
       ),
       options: decoded.sessionOptions,
+      sandboxControl: session.sandboxControl,
     });
 
     if (

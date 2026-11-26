@@ -20,6 +20,10 @@ import {
   resolveCodexInstructionOverrides,
   toCodexDynamicTools,
   toCodexPermissionSettings,
+  codexPermissionProfileListSchema,
+  codexSandboxConfigSchema,
+  codexSandboxRequirementsSchema,
+  resolveCodexSandboxControl,
   toCodexServiceTier,
   toCodexThreadPermissionSettings,
   toCodexUserInput,
@@ -171,11 +175,24 @@ function createLinkedWorktreeFixture(): LinkedWorktreeFixture {
   };
 }
 
+const SANDBOX_CONTROL = {
+  kind: "sandbox",
+  workspaceNetworkAccess: true,
+} as const;
+
+const PROFILE_CONTROL = {
+  kind: "profile",
+  workspaceProfile: "sandboxed",
+  workspaceAllowed: true,
+  fullAccessAllowed: true,
+} as const;
+
 function workspaceConfigForCwd(args: {
   cwd: string;
 }): ReturnType<typeof buildCodexConfig> {
   return buildCodexConfig({
     supportsAgentsEnabled: true,
+    sandboxControl: SANDBOX_CONTROL,
     threadId: "omnyo-thread-1",
     additionalWorkspaceWriteRoots: [],
     gitWritableRoots: gitWritableRootsForWorkspace(args.cwd),
@@ -465,6 +482,7 @@ function permissionSettings(
     additionalWorkspaceWriteRoots,
     gitWritableRoots: [],
     options,
+    sandboxControl: SANDBOX_CONTROL,
   });
 }
 
@@ -473,7 +491,6 @@ describe("codex permission settings", () => {
     expect(permissionSettings(FULL_OPTIONS)).toEqual({
       approvalPolicy: "never",
       approvalsReviewer: "user",
-      sandbox: "danger-full-access",
       sandboxPolicy: { type: "dangerFullAccess" },
     });
     expect(
@@ -493,7 +510,7 @@ describe("codex permission settings", () => {
 
   it("maps deny escalation to no approval prompts while staying workspace-write", () => {
     expect(
-      toCodexThreadPermissionSettings(WORKSPACE_DENY_OPTIONS),
+      toCodexThreadPermissionSettings(WORKSPACE_DENY_OPTIONS, SANDBOX_CONTROL),
     ).toMatchObject({
       approvalPolicy: "never",
       sandbox: "workspace-write",
@@ -504,7 +521,6 @@ describe("codex permission settings", () => {
     expect(permissionSettings(WORKSPACE_ASK_OPTIONS)).toEqual({
       approvalPolicy: "on-request",
       approvalsReviewer: "user",
-      sandbox: "workspace-write",
       sandboxPolicy: {
         type: "workspaceWrite",
         writableRoots: [],
@@ -518,20 +534,76 @@ describe("codex permission settings", () => {
   it("passes additional workspace-write roots through in order", () => {
     expect(
       permissionSettings(WORKSPACE_ASK_OPTIONS, [
-        "/repo/.git/worktrees/bb13",
+        "/repo/.git/worktrees/omnyo13",
         "/repo/.git/objects",
         "/repo/.git/refs",
         "/repo/.git/logs",
-      ]).sandboxPolicy,
+      ]),
     ).toMatchObject({
-      type: "workspaceWrite",
-      writableRoots: [
-        "/repo/.git/worktrees/bb13",
-        "/repo/.git/objects",
-        "/repo/.git/refs",
-        "/repo/.git/logs",
-      ],
+      sandboxPolicy: {
+        type: "workspaceWrite",
+        writableRoots: [
+          "/repo/.git/worktrees/omnyo13",
+          "/repo/.git/objects",
+          "/repo/.git/refs",
+          "/repo/.git/logs",
+        ],
+      },
     });
+  });
+
+  it("carries the resolved workspace network access into the sandbox policy", () => {
+    expect(
+      toCodexPermissionSettings({
+        additionalWorkspaceWriteRoots: [],
+        gitWritableRoots: [],
+        options: WORKSPACE_ASK_OPTIONS,
+        sandboxControl: { kind: "sandbox", workspaceNetworkAccess: false },
+      }),
+    ).toMatchObject({
+      sandboxPolicy: { type: "workspaceWrite", networkAccess: false },
+    });
+  });
+
+  it("selects the workspace permission profile instead of a sandbox policy", () => {
+    const settings = toCodexPermissionSettings({
+      additionalWorkspaceWriteRoots: ["/repo/.git/objects"],
+      gitWritableRoots: [],
+      options: WORKSPACE_ASK_OPTIONS,
+      sandboxControl: PROFILE_CONTROL,
+    });
+
+    expect(settings).toEqual({
+      approvalPolicy: "on-request",
+      approvalsReviewer: "user",
+      permissions: "sandboxed",
+    });
+    expect(
+      toCodexThreadPermissionSettings(WORKSPACE_ASK_OPTIONS, PROFILE_CONTROL),
+    ).toEqual({
+      approvalPolicy: "on-request",
+      approvalsReviewer: "user",
+      permissions: "sandboxed",
+    });
+  });
+
+  it("selects Codex's full-access profile when its requirements allow it", () => {
+    expect(
+      toCodexThreadPermissionSettings(FULL_OPTIONS, PROFILE_CONTROL),
+    ).toMatchObject({ permissions: ":danger-full-access" });
+  });
+
+  it("refuses full access when Codex requirements do not allow it", () => {
+    expect(() =>
+      toCodexPermissionSettings({
+        additionalWorkspaceWriteRoots: [],
+        gitWritableRoots: [],
+        options: FULL_OPTIONS,
+        sandboxControl: { ...PROFILE_CONTROL, fullAccessAllowed: false },
+      }),
+    ).toThrow(
+      "Codex requirements on this machine do not allow full access (:danger-full-access).",
+    );
   });
 
   it("maps auto to automatic workspace review", () => {
@@ -549,6 +621,7 @@ describe("codex permission settings", () => {
 function configFor(options: CodexSessionOptions, supportsAgentsEnabled = true) {
   return buildCodexConfig({
     supportsAgentsEnabled,
+    sandboxControl: SANDBOX_CONTROL,
     threadId: "omnyo-thread-1",
     additionalWorkspaceWriteRoots: [],
     gitWritableRoots: [],
@@ -612,25 +685,48 @@ describe("buildCodexConfig", () => {
     },
   );
 
-  it("injects contributed environment into session params and drops invalid keys", () => {
+  it("forces only Omnyo's context variables past Codex's shell_environment_policy", () => {
     const config = configFor({
       ...FULL_OPTIONS,
       envVars: {
-        "BAD.KEY": "ignored",
+        OMNYO_THREAD_ID: "spoofed-thread",
+        OMNYO_PROJECT_ID: "proj_1",
+        OMNYO_ENVIRONMENT_ID: "env_1",
+        OMNYO_THREAD_STORAGE: "/data/thread-storage/omnyo-thread-1",
+        OMNYO_CLI: "/data/bin/bb",
+        OMNYO_SERVER_URL: "http://127.0.0.1:3334",
+        OMNYO_HOST_DAEMON_PORT: "3335",
+        QA_PROJECT_VAR: "project-value",
+        CODEX_OPENAI_BASE_URL: "http://127.0.0.1:3334/pool/v1",
+        CODEX_POOL_AUTH_TOKEN: "pool-hub-token",
+        OMNYO_ACCOUNT_POOL_PARENT_TOKEN: "pool-hub-token",
+        GH_TOKEN: "gh-token",
         PLUGIN_API_URL: "http://127.0.0.1:3334/plugins/example/auth",
-        TEST_VAR: "123",
       },
     });
 
-    expect(config).toMatchObject({
-      "shell_environment_policy.set.OMNYO_THREAD_ID": "omnyo-thread-1",
-      "shell_environment_policy.set.PLUGIN_API_URL":
-        "http://127.0.0.1:3334/plugins/example/auth",
-      "shell_environment_policy.set.TEST_VAR": "123",
-    });
-    expect(config).not.toMatchObject({
-      "shell_environment_policy.set.BAD.KEY": "ignored",
-    });
+    expect(
+      Object.entries(config ?? {}).filter(([key]) =>
+        key.startsWith("shell_environment_policy."),
+      ),
+    ).toEqual([
+      ["shell_environment_policy.set.OMNYO_PROJECT_ID", "proj_1"],
+      ["shell_environment_policy.set.OMNYO_ENVIRONMENT_ID", "env_1"],
+      [
+        "shell_environment_policy.set.OMNYO_THREAD_STORAGE",
+        "/data/thread-storage/omnyo-thread-1",
+      ],
+      ["shell_environment_policy.set.OMNYO_CLI", "/data/bin/bb"],
+      [
+        "shell_environment_policy.set.OMNYO_SERVER_URL",
+        "http://127.0.0.1:3334",
+      ],
+      ["shell_environment_policy.set.OMNYO_HOST_DAEMON_PORT", "3335"],
+      ["shell_environment_policy.set.OMNYO_THREAD_ID", "omnyo-thread-1"],
+    ]);
+    expect(JSON.stringify(config)).not.toContain("pool-hub-token");
+    expect(JSON.stringify(config)).not.toContain("gh-token");
+    expect(JSON.stringify(config)).not.toContain("project-value");
   });
 
   it("maps the reasoning level onto model_reasoning_effort", () => {
@@ -653,10 +749,25 @@ describe("buildCodexConfig", () => {
     ).toMatchObject({ model_reasoning_effort: "none" });
   });
 
+  it("preserves a named permission profile filesystem without adding implicit write roots", () => {
+    const config = buildCodexConfig({
+      supportsAgentsEnabled: true,
+      sandboxControl: PROFILE_CONTROL,
+      threadId: "omnyo-thread-1",
+      additionalWorkspaceWriteRoots: ["/repo/.git/objects"],
+      gitWritableRoots: ["/repo/.git/worktrees/omnyo13"],
+      options: WORKSPACE_ASK_OPTIONS,
+    });
+
+    expect(config).not.toHaveProperty("permissions.sandboxed.filesystem");
+    expectWorkspaceWriteWritableRootsConfigAbsent(config);
+  });
+
   it("omits the writable-roots key for a full-access session", () => {
     expectWorkspaceWriteWritableRootsConfigAbsent(
       buildCodexConfig({
         supportsAgentsEnabled: true,
+        sandboxControl: SANDBOX_CONTROL,
         threadId: "omnyo-thread-1",
         additionalWorkspaceWriteRoots: ["/repo/.git/objects"],
         gitWritableRoots: [],
@@ -679,6 +790,233 @@ describe("codexSupportsAgentsEnabled", () => {
     { userAgent: undefined, modern: false },
   ])("maps $userAgent to $modern", ({ userAgent, modern }) => {
     expect(codexSupportsAgentsEnabled(userAgent)).toBe(modern);
+  });
+});
+
+const userNetworkOrigin = {
+  "sandbox_workspace_write.network_access": {
+    name: { type: "user", file: "/home/user/.codex/config.toml" },
+  },
+};
+
+const BUILT_IN_PROFILES = {
+  data: [
+    { id: ":read-only", allowed: true },
+    { id: ":workspace", allowed: true },
+    { id: ":danger-full-access", allowed: false },
+    { id: "sandboxed", allowed: true },
+  ],
+};
+
+describe("resolveCodexSandboxControl", () => {
+  it("does not grant full access to a workspace turn when full access is the machine default", () => {
+    const control = resolveCodexSandboxControl({
+      config: {
+        config: { default_permissions: ":danger-full-access" },
+        origins: {},
+      },
+      requirements: { requirements: null },
+      profiles: {
+        data: [
+          { id: ":workspace", allowed: true },
+          { id: ":danger-full-access", allowed: true },
+        ],
+      },
+    });
+
+    expect(
+      toCodexThreadPermissionSettings(WORKSPACE_ASK_OPTIONS, control),
+    ).toMatchObject({ permissions: ":workspace" });
+  });
+  it("honors Codex 0.136 allowedPermissions when profile summaries omit allowed", () => {
+    const control = resolveCodexSandboxControl({
+      config: { config: { default_permissions: "sandboxed" }, origins: {} },
+      requirements: codexSandboxRequirementsSchema.parse({
+        requirements: { allowedPermissions: ["sandboxed"] },
+      }),
+      profiles: codexPermissionProfileListSchema.parse({
+        data: [{ id: "sandboxed" }, { id: ":danger-full-access" }],
+      }),
+    });
+
+    expect(control).toEqual({
+      kind: "profile",
+      workspaceProfile: "sandboxed",
+      workspaceAllowed: true,
+      fullAccessAllowed: false,
+    });
+    expect(() =>
+      toCodexThreadPermissionSettings(FULL_OPTIONS, control),
+    ).toThrow("do not allow full access");
+  });
+
+  it.each([":read-only", ":workspace"])(
+    "preserves the configured built-in profile %s",
+    (profile) => {
+      expect(
+        resolveCodexSandboxControl({
+          config: { config: { default_permissions: profile }, origins: {} },
+          requirements: { requirements: null },
+          profiles: {
+            data: [
+              { id: profile, allowed: true },
+              { id: ":danger-full-access", allowed: false },
+            ],
+          },
+        }),
+      ).toEqual({
+        kind: "profile",
+        workspaceProfile: profile,
+        workspaceAllowed: true,
+        fullAccessAllowed: false,
+      });
+    },
+  );
+  it("fails visibly if a configured profile cannot be read or is denied", () => {
+    const args = {
+      config: { config: { default_permissions: ":read-only" }, origins: {} },
+      requirements: { requirements: null },
+    };
+
+    for (const profiles of [
+      null,
+      { data: [{ id: ":read-only", allowed: false }] },
+    ]) {
+      const control = resolveCodexSandboxControl({ ...args, profiles });
+      expect(() =>
+        toCodexThreadPermissionSettings(WORKSPACE_ASK_OPTIONS, control),
+      ).toThrow("unavailable or denied");
+    }
+  });
+  it("preserves an explicit managed denial of full access", () => {
+    const control = resolveCodexSandboxControl({
+      config: { config: {}, origins: {} },
+      requirements: {
+        requirements: { allowedSandboxModes: ["workspace-write"] },
+      },
+      profiles: null,
+    });
+
+    expect(() =>
+      toCodexPermissionSettings({
+        additionalWorkspaceWriteRoots: [],
+        gitWritableRoots: [],
+        options: FULL_OPTIONS,
+        sandboxControl: control,
+      }),
+    ).toThrow('do not allow the requested sandbox mode "danger-full-access"');
+    expect(() =>
+      toCodexThreadPermissionSettings(FULL_OPTIONS, control),
+    ).toThrow('do not allow the requested sandbox mode "danger-full-access"');
+  });
+
+  it.each([
+    {
+      name: "defaults to network access when Codex config leaves it unset",
+      config: { config: {}, origins: {} },
+      requirements: { requirements: null },
+      expected: { kind: "sandbox", workspaceNetworkAccess: true },
+    },
+    {
+      name: "keeps network off when Codex config turns it off",
+      config: {
+        config: { sandbox_workspace_write: { network_access: false } },
+        origins: userNetworkOrigin,
+      },
+      requirements: { requirements: null },
+      expected: { kind: "sandbox", workspaceNetworkAccess: false },
+    },
+    {
+      name: "keeps network on when Codex config turns it on",
+      config: {
+        config: { sandbox_workspace_write: { network_access: true } },
+        origins: userNetworkOrigin,
+      },
+      requirements: { requirements: null },
+      expected: { kind: "sandbox", workspaceNetworkAccess: true },
+    },
+    {
+      name: "uses Codex's default when requirements manage only the network",
+      config: { config: {}, origins: {} },
+      requirements: { requirements: { network: { enabled: false } } },
+      expected: { kind: "sandbox", workspaceNetworkAccess: false },
+    },
+    {
+      name: "retains managed sandbox restrictions",
+      config: { config: {}, origins: {} },
+      requirements: {
+        requirements: { allowedSandboxModes: ["workspace-write"] },
+      },
+      expected: {
+        kind: "sandbox",
+        workspaceNetworkAccess: true,
+        allowedSandboxModes: ["workspace-write"],
+      },
+    },
+  ])("$name", ({ config, requirements, expected }) => {
+    expect(
+      resolveCodexSandboxControl({
+        config: codexSandboxConfigSchema.parse(config),
+        requirements: codexSandboxRequirementsSchema.parse(requirements),
+        profiles: null,
+      }),
+    ).toEqual(expected);
+  });
+
+  it.each([
+    {
+      name: "the admin's required profile",
+      config: { config: { default_permissions: "personal" }, origins: {} },
+      requirements: { requirements: { defaultPermissions: "sandboxed" } },
+    },
+    {
+      name: "the user's configured profile",
+      config: { config: { default_permissions: "sandboxed" }, origins: {} },
+      requirements: { requirements: null },
+    },
+  ])("selects $name and reads whether full access is allowed", (scenario) => {
+    expect(
+      resolveCodexSandboxControl({
+        config: codexSandboxConfigSchema.parse(scenario.config),
+        requirements: codexSandboxRequirementsSchema.parse(
+          scenario.requirements,
+        ),
+        profiles: codexPermissionProfileListSchema.parse(BUILT_IN_PROFILES),
+      }),
+    ).toEqual({
+      kind: "profile",
+      workspaceProfile: "sandboxed",
+      workspaceAllowed: true,
+      fullAccessAllowed: false,
+    });
+  });
+
+  it("leaves full access to Codex when its profile list predates allowed (Codex 0.136-0.141)", () => {
+    expect(
+      resolveCodexSandboxControl({
+        config: codexSandboxConfigSchema.parse({
+          config: { default_permissions: "sandboxed" },
+          origins: {},
+        }),
+        requirements: codexSandboxRequirementsSchema.parse({
+          requirements: null,
+        }),
+        profiles: codexPermissionProfileListSchema.parse({
+          data: [
+            { id: ":read-only", description: null },
+            { id: ":workspace", description: null },
+            { id: ":danger-full-access", description: null },
+            { id: "sandboxed", description: null },
+          ],
+          nextCursor: null,
+        }),
+      }),
+    ).toEqual({
+      kind: "profile",
+      workspaceProfile: "sandboxed",
+      workspaceAllowed: true,
+      fullAccessAllowed: true,
+    });
   });
 });
 
