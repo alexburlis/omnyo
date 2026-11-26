@@ -58,8 +58,8 @@ export function messageFor(key: string | null | undefined): string | null {
 }
 
 const STYLE = `
-:root { color-scheme: light dark; --ink: #1d1d1f; --canvas: #fbfbfd; --line: #d9d9de; --muted: #6e6e73; --accent: #2f5bea; }
-@media (prefers-color-scheme: dark) { :root { --ink: #f2f2f5; --canvas: #141416; --line: #34343a; --muted: #a1a1a8; --accent: #7c9bff; } }
+:root { color-scheme: light dark; --ink: #1d1d1f; --canvas: #fbfbfd; --surface: #ffffff; --line: #d9d9de; --muted: #6e6e73; --accent: #2f5bea; --danger: #c4321b; --focus: #2f5bea; }
+@media (prefers-color-scheme: dark) { :root { --ink: #f2f2f5; --canvas: #141416; --surface: #1c1c1f; --line: #34343a; --muted: #a1a1a8; --accent: #7c9bff; --danger: #ff7a66; --focus: #7c9bff; } }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--canvas); color: var(--ink); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
 main { max-width: 640px; margin: 0 auto; padding: 32px 16px 64px; }
@@ -79,6 +79,26 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
 footer.legal { margin-top: 48px; font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 16px; }
 footer.legal a, p.terms a { color: inherit; }
+body.auth { min-height: 100vh; min-height: 100dvh; display: flex; background: radial-gradient(120% 70% at 50% -10%, color-mix(in srgb, #ff4f17 7%, transparent), transparent 60%), var(--canvas); -webkit-font-smoothing: antialiased; }
+body.auth main { width: 100%; max-width: 400px; margin: auto; padding: 48px 20px 32px; display: flex; flex-direction: column; align-items: center; }
+.auth-card { width: 100%; padding: 40px 32px 28px; border: 1px solid var(--line); border-radius: 20px; background: var(--surface); box-shadow: 0 1px 2px rgb(0 0 0 / 4%), 0 12px 32px -12px rgb(0 0 0 / 14%); text-align: center; }
+.brand-mark { display: block; width: 52px; height: 50px; margin: 0 auto 24px; color: var(--ink); }
+.auth-card h1 { font-size: 22px; line-height: 1.25; font-weight: 650; letter-spacing: -0.01em; margin: 0 0 6px; }
+.auth-card .lede { margin: 0 0 28px; color: var(--muted); font-size: 15px; }
+.auth-card .notice { margin: 0 0 20px; padding: 10px 12px; font-size: 14px; text-align: left; color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); border-color: color-mix(in srgb, var(--danger) 28%, transparent); border-radius: 10px; }
+button.github { display: flex; width: 100%; align-items: center; justify-content: center; gap: 10px; padding: 12px 16px; font-size: 15px; font-weight: 600; line-height: 20px; border-radius: 10px; border: 1px solid #1f2328; background: #1f2328; color: #fff; transition: background-color 150ms cubic-bezier(0.25, 0.1, 0.25, 1), transform 150ms cubic-bezier(0.25, 0.1, 0.25, 1); }
+button.github:hover { background: #32383f; border-color: #32383f; }
+button.github:active { transform: scale(0.98); }
+button.github:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+button.github svg { width: 20px; height: 20px; flex: none; fill: currentColor; }
+.auth-card .fine { margin: 16px 0 0; font-size: 13px; line-height: 1.45; color: var(--muted); }
+.auth-card .terms { margin: 20px 0 0; padding-top: 18px; border-top: 1px solid var(--line); font-size: 12.5px; }
+body.auth footer.legal { margin-top: 24px; justify-content: center; font-size: 12.5px; }
+body.auth footer.legal a { text-decoration: none; }
+body.auth footer.legal a:hover { color: var(--ink); text-decoration: underline; }
+@media (prefers-color-scheme: dark) { button.github { background: #f6f8fa; border-color: #f6f8fa; color: #1f2328; } button.github:hover { background: #ffffff; border-color: #ffffff; } .auth-card { box-shadow: 0 12px 32px -12px rgb(0 0 0 / 60%); } }
+@media (prefers-reduced-motion: reduce) { button.github { transition: none; } button.github:active { transform: none; } }
+@media (max-width: 420px) { .auth-card { padding: 32px 20px 24px; border-radius: 16px; } }
 `;
 
 export const LEGAL_SITE_ORIGIN = "https://omnyohq.com";
@@ -115,7 +135,11 @@ function legalFooter(): string {
   ).join("")}</footer>`;
 }
 
-export function page(title: string, body: string): string {
+export function page(
+  title: string,
+  body: string,
+  layout: "default" | "auth" = "default",
+): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -125,7 +149,7 @@ export function page(title: string, body: string): string {
 <title>${escapeHtml(title)}</title>
 <style>${STYLE}</style>
 </head>
-<body><main>${body}${legalFooter()}</main></body>
+<body${layout === "auth" ? ' class="auth"' : ""}><main>${body}${legalFooter()}</main></body>
 </html>`;
 }
 
@@ -139,14 +163,21 @@ function notice(text: string | null): string {
     : `<p class="notice" role="status">${escapeHtml(text)}</p>`;
 }
 
+export const OMNYO_MARK = `<svg class="brand-mark" viewBox="3 5 56 54" aria-hidden="true" focusable="false"><path d="M46.85 12.3a24.7 24.7 0 1 0 5.45 5.45L43.2 26.85a12.15 12.15 0 1 1-6.05-6.05Z" fill="currentColor"/><circle cx="49.5" cy="14.5" r="6.5" fill="#ff4f17"/></svg>`;
+
+export const GITHUB_MARK = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>`;
+
 export function signInPage(next: string, message: string | null): string {
   return page(
     "Sign in to Omnyo",
-    `<h1>Sign in to Omnyo</h1>
+    `<div class="auth-card">${OMNYO_MARK}
+<h1>Sign in to Omnyo</h1>
+<p class="lede">Open your Omnyo from anywhere.</p>
 ${notice(message)}
-<p>Open your Omnyo from anywhere.</p>
-<form method="post" action="/sign-in">${hidden("next", next)}<button class="primary" type="submit">Continue with GitHub</button></form>
-<p class="muted terms">By signing in you accept the <a href="${LEGAL_SITE_ORIGIN}/terms">Terms</a>. See <a href="${LEGAL_SITE_ORIGIN}/privacy">Privacy</a>.</p>`,
+<form method="post" action="/sign-in">${hidden("next", next)}<button class="github" type="submit">${GITHUB_MARK}<span>Continue with GitHub</span></button></form>
+<p class="fine">Omnyo never sees your repositories or code.</p>
+<p class="muted terms">By signing in you accept the <a href="${LEGAL_SITE_ORIGIN}/terms">Terms</a>. See <a href="${LEGAL_SITE_ORIGIN}/privacy">Privacy</a>.</p></div>`,
+    "auth",
   );
 }
 
