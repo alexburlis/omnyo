@@ -150,7 +150,9 @@ it("publishes the exact event dictionary and distinguishes old clients from new 
   expect(html).toContain("no hidden SDK fields");
   expect(html).toContain("Older builds used a reusable installation ID");
   expect(html).toContain("does not erase those records");
-  expect(html).not.toContain('href="https://github.com/alexburlis/omnyo"');
+  expect(
+    html.slice(html.indexOf("<article"), html.indexOf("</article>")),
+  ).not.toContain('href="https://github.com/alexburlis/omnyo"');
 });
 
 it("describes verified public installs, capped counts and raw retention accurately", () => {
@@ -222,7 +224,9 @@ it("describes verified public installs, capped counts and raw retention accurate
 
 it("keeps the public dictionaries matched to their event schemas", () => {
   expect(SITE_USAGE_DICTIONARY.map(({ name }) => name).sort()).toEqual(
-    siteUsageEventSchema.options.map((event) => event.shape.name.value).sort(),
+    siteUsageEventSchema.def.options
+      .map((event) => event.shape.name.def.values[0])
+      .sort(),
   );
   expect(PRODUCT_USAGE_DICTIONARY.map(({ name }) => name).sort()).toEqual(
     productUsageEventSchema.options

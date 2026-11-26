@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { WorkflowNavigation } from "../workflow-catalog/navigation";
 import { guideMenu } from "./content-links";
-import { GITHUB_URL, MACOS_DOWNLOAD_URL } from "./site";
+import { GITHUB_URL, MACOS_DOWNLOAD_URL, REPO_URL } from "./site";
 import { SiteFooter, SiteNav } from "./site-chrome";
 
 const DROPPED_LINKS = [
@@ -39,7 +39,7 @@ describe("site navigation", () => {
     for (const menu of ["site-nav-links", "site-nav-sheet"]) {
       expect(hrefs(section(html, menu))).toEqual(
         menu === "site-nav-links"
-          ? ["/features", ...guideHrefs, "/plugin-guide", GITHUB_URL]
+          ? ["/features", ...guideHrefs, "/plugin-guide", REPO_URL]
           : ["/features", "/plugin-guide", ...guideHrefs, GITHUB_URL],
       );
     }
@@ -69,7 +69,7 @@ describe("site navigation", () => {
       ...guideHrefs,
       "/workflows",
       "/plugin-guide",
-      GITHUB_URL,
+      REPO_URL,
     ]);
     expect(html).toContain(
       'class="is-current" href="/workflows" aria-current="page">Workflows',

@@ -16,8 +16,14 @@ import {
 
 import { guideFooterLinks, guideMenu, type ContentLink } from "./content-links";
 import { DownloadButton } from "./download";
-import { GITHUB_NAME, GitHubGlyph } from "./github";
-import { BB_URL, GITHUB_URL, MACOS_DOWNLOAD_URL, TERMS_URL } from "./site";
+import { GitHubGlyph } from "./github";
+import {
+  BB_URL,
+  GITHUB_URL,
+  MACOS_DOWNLOAD_URL,
+  REPO_URL,
+  TERMS_URL,
+} from "./site";
 import { ThemeToggle } from "./theme-toggle";
 
 import { explorePath } from "../explore/catalog";
@@ -309,9 +315,8 @@ export function SiteNavLinks({
           path={path}
         />
       ))}
-      <a className="site-nav-gh" href={GITHUB_URL} aria-label={GITHUB_NAME}>
+      <a className="site-nav-gh" href={REPO_URL} aria-label="Omnyo on GitHub">
         <GitHubGlyph className="site-nav-gh-glyph" />
-        <span className="site-nav-gh-label">Releases</span>
       </a>
     </nav>
   );

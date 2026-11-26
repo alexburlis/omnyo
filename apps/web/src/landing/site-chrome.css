@@ -291,18 +291,10 @@
 }
 
 :where(.site-nav, .fx-nav) .site-nav-links > .site-nav-gh {
-  margin-left: 9px;
-  padding: 0 13px 0 12px;
-}
-
-:where(.site-nav, .fx-nav) .site-nav-links > .site-nav-gh::before {
-  content: "";
-  position: absolute;
-  top: 9px;
-  bottom: 9px;
-  left: -6px;
-  width: 1px;
-  background: var(--sn-hair);
+  justify-content: center;
+  width: 34px;
+  margin-left: 4px;
+  padding: 0;
 }
 
 :where(.site-nav, .fx-nav) .site-nav-gh-glyph {
@@ -313,16 +305,6 @@
 
 :where(.site-nav, .fx-nav) .site-nav-gh:hover .site-nav-gh-glyph {
   transform: rotate(-10deg) scale(1.1);
-}
-
-@media (max-width: 1080px) {
-  .site-nav-gh-label {
-    display: none;
-  }
-
-  :where(.site-nav, .fx-nav) .site-nav-links > .site-nav-gh {
-    padding: 0 10px;
-  }
 }
 
 .site-nav .theme-toggle {

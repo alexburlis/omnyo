@@ -14,6 +14,8 @@ export const BB_URL = "https://github.com/get-bb/bb";
 
 export const GITHUB_URL = "https://github.com/alexburlis/omnyo-releases";
 
+export const REPO_URL = "https://github.com/alexburlis/omnyo";
+
 export const TERMS_URL = "/terms";
 
 export const OPERATOR = {

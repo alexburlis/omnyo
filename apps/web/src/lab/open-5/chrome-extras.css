@@ -46,12 +46,6 @@
   --sn-gap: clamp(16px, 1.2vw, 22px);
 }
 
-@media (max-width: 1599px) {
-  .lab-open-5 .nav-end .site-nav-gh-label {
-    display: none;
-  }
-}
-
 @media (max-width: 1419px) {
   .lab-open-5 .nav-act [data-act-label] {
     display: none;
