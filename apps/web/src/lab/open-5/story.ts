@@ -204,7 +204,7 @@ export function startStory(
   const windows = [...root.querySelectorAll<HTMLElement>("[data-win]")];
   const lines = [...root.querySelectorAll<HTMLElement>("[data-line]")];
   const navLabel = root.querySelector<HTMLElement>("[data-act-label]");
-  const progressBar = root.querySelector<HTMLElement>("[data-progress]");
+  const progressBar = root.querySelector<HTMLElement>("[data-nav-progress]");
   const nav = root.querySelector<HTMLElement>(".nav");
   const navShade = root.querySelector<HTMLElement>("[data-nav-shade]");
   const storyPin = scenes.story?.querySelector<HTMLElement>(".story-pin");

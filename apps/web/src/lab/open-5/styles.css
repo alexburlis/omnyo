@@ -82,6 +82,14 @@ body:has(.lab-open-5) {
   overflow-x: clip;
 }
 
+.lab-open-5:has(> .site-nav) {
+  display: flow-root;
+}
+
+.lab-open-5 > .site-nav {
+  margin-bottom: calc(-1 * (var(--site-nav-height) + var(--site-nav-inset)));
+}
+
 .lab-open-5 *,
 .lab-open-5 *::before,
 .lab-open-5 *::after {

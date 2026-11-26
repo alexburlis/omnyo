@@ -7,7 +7,6 @@ import "./chrome-extras.css";
 import {
   type CSSProperties,
   type ReactNode,
-  useContext,
   useEffect,
   useRef,
   useSyncExternalStore,
@@ -18,9 +17,11 @@ import { getFeatureMeta } from "../../features/features";
 import { DownloadButton, DownloadPanel } from "../../landing/download";
 import { GitHubButton } from "../../landing/github";
 import { BB_URL } from "../../landing/site";
-import { workflowGalleryPath } from "../../workflow-catalog/catalog";
-import { WorkflowNavigation } from "../../workflow-catalog/navigation";
-import { SiteNavLinks, SiteNavMenu } from "../../landing/site-chrome";
+import {
+  SiteNavLinks,
+  SiteNavMenu,
+  useSiteFooterProductLinks,
+} from "../../landing/site-chrome";
 import { ThemeToggle } from "../../landing/theme-toggle";
 import {
   PLATFORM_LINE,
@@ -157,7 +158,7 @@ function Nav({ themed }: { themed: boolean }) {
       </a>
       <div className="nav-act" aria-hidden="true">
         <span className="nav-act-bar">
-          <span data-progress />
+          <span data-nav-progress />
         </span>
         <span data-act-label>Omnyo</span>
       </div>
@@ -682,7 +683,7 @@ const FOOT_FEATURES = [
 ] as const;
 
 function Footer() {
-  const showWorkflows = useContext(WorkflowNavigation);
+  const productLinks = useSiteFooterProductLinks();
 
   return (
     <footer className="foot" data-scene="footer">
@@ -697,7 +698,7 @@ function Footer() {
         </div>
         <nav className="foot-cols" aria-label="Footer">
           <div>
-            <p className="foot-head">Features</p>
+            <p className="foot-head">Product</p>
             {FOOT_FEATURES.map((slug) => getFeatureMeta(slug))
               .filter((meta) => meta !== undefined)
               .map((meta) => (
@@ -705,8 +706,11 @@ function Footer() {
                   {meta.name}
                 </a>
               ))}
-            <a href="/features">All features</a>
-            {showWorkflows ? <a href={workflowGalleryPath}>Workflows</a> : null}
+            {productLinks.map(({ href, label }) => (
+              <a href={href} key={href}>
+                {label}
+              </a>
+            ))}
           </div>
           <div>
             <p className="foot-head">Guides</p>
@@ -767,6 +771,7 @@ const readReducedMotion = () => window.matchMedia(REDUCED_MOTION).matches;
 
 export function KineticShell({
   children,
+  header,
   labels,
   onProductProgress,
   productStage = false,
@@ -775,6 +780,7 @@ export function KineticShell({
   className = "",
 }: {
   children: ReactNode;
+  header?: ReactNode;
   labels?: readonly string[];
   onProductProgress?: (progress: number) => void;
   productStage?: boolean;
@@ -782,7 +788,7 @@ export function KineticShell({
   themed?: boolean;
   className?: string;
 }) {
-  const rootRef = useRef<HTMLElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
 
   const reduced = useSyncExternalStore(
     watchReducedMotion,
@@ -805,7 +811,7 @@ export function KineticShell({
   }, [reduced, labels, onProductProgress, productStage, productMorph, themed]);
 
   return (
-    <main
+    <div
       ref={rootRef}
       className={`lab-open-5 ${className} ${reduced ? "is-reduced" : ""}`}
     >
@@ -813,10 +819,10 @@ export function KineticShell({
       {reduced ? null : (
         <canvas className="particles" data-particles aria-hidden="true" />
       )}
-      <Nav themed={themed} />
-      {children}
+      {header ?? <Nav themed={themed} />}
+      <main>{children}</main>
       <Footer />
-    </main>
+    </div>
   );
 }
 

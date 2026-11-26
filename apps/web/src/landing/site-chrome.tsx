@@ -17,7 +17,13 @@ import {
 import { guideFooterLinks, guideMenu, type ContentLink } from "./content-links";
 import { DownloadButton } from "./download";
 import { GITHUB_NAME, GitHubGlyph } from "./github";
-import { BB_URL, GITHUB_URL, MACOS_DOWNLOAD_URL, TERMS_URL } from "./site";
+import {
+  BB_URL,
+  GITHUB_URL,
+  MACOS_DOWNLOAD_URL,
+  TERMS_URL,
+  type PublicMacDownload,
+} from "./site";
 import { ThemeToggle } from "./theme-toggle";
 
 import { explorePath } from "../explore/catalog";
@@ -57,9 +63,9 @@ export function OmnyoMark({ className }: { className?: string }) {
   );
 }
 
-function SiteBrand() {
+function SiteBrand({ href = "/" }: { href?: string }) {
   return (
-    <a className="site-brand" href="/" aria-label="Omnyo home">
+    <a className="site-brand" href={href} aria-label="Omnyo home">
       <OmnyoMark className="site-brand-mark" />
       <span>Omnyo</span>
     </a>
@@ -252,6 +258,12 @@ function primaryLinks(
     : [features, pluginGuide];
 }
 
+function inCurrentSection(section: SiteSection, current?: SiteSection) {
+  return (
+    current === section || (section === "explore" && current === "workflows")
+  );
+}
+
 function glideTo(nav: HTMLElement, target: EventTarget | null) {
   if (!(target instanceof Element)) return;
 
@@ -302,10 +314,7 @@ export function SiteNavLinks({
         <SectionLink
           key={link.href}
           {...link}
-          inSection={
-            current === link.section ||
-            (link.section === "explore" && current === "workflows")
-          }
+          inSection={inCurrentSection(link.section, current)}
           path={path}
         />
       ))}
@@ -317,7 +326,13 @@ export function SiteNavLinks({
   );
 }
 
-export function SiteNavMenu({ path }: { path?: string }) {
+export function SiteNavMenu({
+  current,
+  path,
+}: {
+  current?: SiteSection;
+  path?: string;
+}) {
   const showWorkflows = useContext(WorkflowNavigation);
   const showExplore = useContext(ExploreNavigation);
   const details = useDismissableDetails();
@@ -332,6 +347,11 @@ export function SiteNavMenu({ path }: { path?: string }) {
           {primaryLinks(showWorkflows, showExplore).map((link) => (
             <a
               key={link.href}
+              className={
+                inCurrentSection(link.section, current)
+                  ? "is-current"
+                  : undefined
+              }
               href={link.href}
               aria-current={path === link.href ? "page" : undefined}
             >
@@ -379,9 +399,11 @@ export function SiteNavMenu({ path }: { path?: string }) {
 export function SiteNav({
   current,
   path,
+  macDownload,
 }: {
   current?: SiteSection;
   path?: string;
+  macDownload?: PublicMacDownload | null;
 }) {
   const header = useRef<HTMLElement>(null);
 
@@ -426,11 +448,11 @@ export function SiteNav({
 
   return (
     <header ref={header} className="site-nav">
-      <SiteBrand />
+      <SiteBrand href={path === "/" ? "#top" : "/"} />
       <SiteNavLinks current={current} path={path} />
       <ThemeToggle />
-      <DownloadButton />
-      <SiteNavMenu path={path} />
+      <DownloadButton macDownload={macDownload} />
+      <SiteNavMenu current={current} path={path} />
     </header>
   );
 }
@@ -469,17 +491,23 @@ function FooterLinks({
   ));
 }
 
-export function SiteFooter({ current }: { current?: string }) {
+export function useSiteFooterProductLinks() {
   const showWorkflows = useContext(WorkflowNavigation);
   const showExplore = useContext(ExploreNavigation);
 
-  const product: ContentLink[] = primaryLinks(false, showExplore).map(
+  const product: ContentLink[] = primaryLinks(showWorkflows, showExplore).map(
     ({ href, label }) => ({ href, label }),
   );
 
   if (showExplore && showWorkflows) {
     product.push({ href: workflowGalleryPath, label: "Workflows" });
   }
+
+  return product;
+}
+
+export function SiteFooter({ current }: { current?: string }) {
+  const product = useSiteFooterProductLinks();
 
   return (
     <footer className="site-footer">

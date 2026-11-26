@@ -17,6 +17,7 @@ import type {
   ComparisonTable,
 } from "./comparison-types";
 import { CITATION } from "./comparison-head";
+import { comparisonPath } from "./comparisons";
 
 const CITATION_RUN = /(?:\[\^\d+\])+/g;
 
@@ -114,7 +115,7 @@ export function ComparisonPage({
   body: ComparisonBody;
 }) {
   return (
-    <FeatureShell>
+    <FeatureShell path={comparisonPath(meta.slug)}>
       <article className="fx-article">
         <header className="fx-hero">
           <p className="fx-crumbs">

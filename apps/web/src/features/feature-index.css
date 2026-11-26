@@ -2,6 +2,10 @@
   html:has(.fx-index) {
     scroll-behavior: smooth;
   }
+
+  .fx-rail {
+    transition: top 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
 }
 
 .fx-index {
@@ -158,7 +162,7 @@
 
 .fx-rail {
   position: sticky;
-  top: 68px;
+  top: var(--site-nav-clearance, 80px);
   z-index: 9;
   background: color-mix(in oklab, var(--bg) 86%, transparent);
   backdrop-filter: blur(14px);
