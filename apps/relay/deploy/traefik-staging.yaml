@@ -1,0 +1,36 @@
+tcp:
+  routers:
+    omnyo-relay-staging-tls:
+      entryPoints:
+        - https
+      rule: 'HostSNIRegexp(`^(?:[a-z0-9-]{1,63}\.)?stg\.omnyo\.link$`)'
+      priority: 200
+      service: omnyo-relay-staging-tls
+      tls:
+        passthrough: true
+  services:
+    omnyo-relay-staging-tls:
+      loadBalancer:
+        servers:
+          - address: "omnyo-relay-staging:8443"
+        serversTransport: omnyo-relay-staging-proxy-v2
+  serversTransports:
+    omnyo-relay-staging-proxy-v2:
+      proxyProtocol:
+        version: 2
+
+http:
+  routers:
+    omnyo-relay-staging-http:
+      entryPoints:
+        - http
+      rule: 'HostRegexp(`^(?:[a-z0-9-]{1,63}\.)?stg\.omnyo\.link$`)'
+      priority: 200
+      middlewares:
+        - omnyo-relay-staging-https
+      service: noop@internal
+  middlewares:
+    omnyo-relay-staging-https:
+      redirectScheme:
+        scheme: https
+        permanent: true
