@@ -43,7 +43,7 @@ afterEach(() => {
 });
 
 describe("ThreadTimelineRows row isolation", () => {
-  it("re-renders only the rows whose mobile action display flips when a message is appended", () => {
+  it("renders only the appended row when a message is appended", () => {
     const queryClient = new QueryClient();
     const rows = Array.from({ length: 12 }, (_, index) => assistantRow(index));
 
@@ -65,9 +65,6 @@ describe("ThreadTimelineRows row isolation", () => {
     renderedMessageTexts.length = 0;
 
     view.rerender(renderTimeline([...rows, assistantRow(12)]));
-    expect([...renderedMessageTexts].sort()).toEqual([
-      "Assistant answer number 11.",
-      "Assistant answer number 12.",
-    ]);
+    expect(renderedMessageTexts).toEqual(["Assistant answer number 12."]);
   });
 });
