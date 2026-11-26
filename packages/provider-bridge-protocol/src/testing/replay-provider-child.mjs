@@ -792,10 +792,14 @@ function main() {
           typeof message.params?.cwd === "string"))
     ) {
       let recordedInSetup = false;
+
       for (let index = position; index < script.length; index += 1) {
         const step = script[index];
+
         if (step.dir !== "bridge→provider") continue;
+
         if (SESSION_DEFINING_KEY.test(step.classified.key)) break;
+
         if (
           step.classified.kind === "request" &&
           step.classified.key === live.classified.key
@@ -804,6 +808,7 @@ function main() {
           break;
         }
       }
+
       if (!recordedInSetup) {
         log(
           `synthesizing unrecorded Codex sandbox setup response for ${live.classified.key}`,
@@ -816,6 +821,7 @@ function main() {
               ? { requirements: null }
               : { config: {}, origins: {} },
         });
+
         return;
       }
     }

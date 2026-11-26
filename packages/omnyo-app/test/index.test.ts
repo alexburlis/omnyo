@@ -985,6 +985,7 @@ describe("omnyo-app launcher", () => {
           OMNYO_SERVER_URL: url,
           OMNYO_SERVER_HEADERS: scopedHeaders,
         });
+
         expect(scoped.env.OMNYO_SERVER_URL).toBe(url);
         expect(scoped.env.OMNYO_SERVER_HEADERS).toBe(scopedHeaders);
       }

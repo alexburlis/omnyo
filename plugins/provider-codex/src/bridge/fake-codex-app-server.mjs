@@ -648,9 +648,11 @@ async function handleRequest(message) {
           ...(script?.configRead ?? { config: { model: null } }),
         });
       }
+
       return;
     case "configRequirements/read":
       respond(id, script?.configRequirementsRead ?? { requirements: null });
+
       return;
     case "permissionProfile/list":
       respond(
@@ -658,9 +660,11 @@ async function handleRequest(message) {
         script?.permissionProfileListPages?.[params?.cursor ?? "first"] ??
           script?.permissionProfileList ?? { data: [] },
       );
+
       return;
     case "skills/list":
       respond(id, script?.skillsList ?? { data: [] });
+
       return;
     case "skills/extraRoots/set":
       respond(id, {});
