@@ -1,0 +1,113 @@
+# RF-085 — Retire the Codex bridge's `bb-account-pool` V1 resume admission (`admitLegacyPoolProviderV1`, the legacy app-server launch and the session field that carries it)
+
+**Rank and disposition**
+
+**Rank:** _unranked: the index step did not run (see [the folder README](../README.md))_
+
+- **Potential:** low. About 175 handwritten production lines (about 150 non-blank) disappear from one file, `plugins/provider-codex/src/bridge/bridge.ts`, together with one self-contained mechanism: a file-system admission check, a second app-server spawn on resume, a session field carried across session rebuilds, and a fork-refusal branch. About 310 test lines go with it. The code is contained, so the maintenance saving is real but small.
+- **Confidence:** high that the mechanism exists and is as described (Proven by inspection). High that it is **in active use today** (Reproduced on this MacBook, see Context). The retirement gate therefore fails at the snapshot date.
+- **Readiness:** decision-needed, and the gate is currently **not met**. Alex must decide that BB-era Codex chats routed through the Account Pool no longer need to be resumable, after the threads that still use them are finished. On 26 November 2026 one BB-era thread from 18 October 2026 was still being resumed and written to on this MacBook.
+- **Effort:** about 1-2 hours for the gate check across enrolled machines; about 2-3 hours for the deletion, test edits and review once the gate clears.
+- **Risk:** low for the code change, which is one file plus tests and is reverted with `git revert`. The product risk is that a BB-era pooled chat can no longer be continued: its resume fails visibly with the existing error "The saved session provider does not match the configured Account Pool route." No data is rewritten or deleted.
+- **Prerequisites:** the owner decision and the investigation gate in Execution steps, step 1. No other RF item has to land first.
+- **Related and overlapping work:**
+  - **RF-006** (stopped-state BB-to-Omnyo identity adoption), **RF-012** (BB-to-Omnyo rename tooling), **RF-039**, **RF-040**, **RF-015** and **RF-043** belong to the same BB-to-Omnyo retirement family. Each removes a different mechanism. This card can share their "BB upgrade floor" decision, but its gate is different: RF-006 asks whether any installation still holds BB-era *state roots*, while this card asks whether any user still needs to *resume* BB-era *Codex chats*. An installation can pass RF-006's gate and still fail this one, as this MacBook does.
+  - `plugins/chat-importer/src/native/codex.ts:42-45` `OMNYO_MODEL_PROVIDERS` also names `"bb-account-pool"`. It classifies such rollouts as Omnyo-owned so that Chat Import does not import them twice. It is **not** part of this card and must stay, because those rollouts stay on disk after this retirement.
+  - `packages/config/src/legacy-wire-headers-v1.ts:2` (`x-bb-account-pool-token`) is a separate wire-header shim and is out of scope.
+- **Why it deserves its place:** every change to app-server launch arguments, `spawnChildConnection`, session construction or `registerResumableSession` has to thread the optional legacy admission through. Its rank should stay low because the removal is small and it is blocked by live use.
+
+**Context and evidence**
+
+*Snapshot.* Commit `e9e1b74c3b906edbf2d4b4c3da8f930c62e24f9e` (origin/main, 26 November 2026). The audit worktree had already been removed, so this card reads files with `git show e9e1b74c3:<path>` from `$OMNYO_CHECKOUT`. All paths are repository-relative at that commit. No tests ran, because the snapshot has no `node_modules`.
+
+*What the mechanism does.* BB was the private predecessor of Omnyo. From 4 September 2026 (private commit `5551197af4`, "Account Pool: route Codex accounts through the hub") until the rename around 12 November 2026, the Codex bridge launched `codex app-server` with the custom model-provider id `bb-account-pool` whenever the Account Pool routed Codex. Codex writes that id into each native rollout's first line (`session_meta.payload.model_provider`) and into its thread metadata. After the rename the bridge uses `omnyo-account-pool`. Codex binds a saved thread to its original provider id, so resuming a BB-era thread under the new id would not work. The V1 admission (added in private commit `3504a806cd`, 12 November 2026) lets those threads resume:
+
+- `plugins/provider-codex/src/bridge/bridge.ts:333` `LEGACY_POOL_MODEL_PROVIDER_V1 = "bb-account-pool"`, and `:337-341` `interface LegacyPoolProviderAdmissionV1 { version: 1; nativeThreadId; provider }`.
+- `:433-438` exported `resolveAppServerLaunch(env)` is a wrapper that calls `resolveSessionAppServerLaunch(env, null)`. `:440-496` `resolveSessionAppServerLaunch(env, legacyAdmission)` throws "The saved session requires the configured Account Pool route." when an admission exists but no pool is configured (`:462-468`). It otherwise uses `legacyAdmission?.provider ?? currentPoolProvider` (`:472`) for the `model_provider` and `model_providers.<id>.*` arguments (`:478-493`).
+- `:584` the session field `legacyPoolProviderAdmissionV1`. It is initialised to `null` at `:1751`, set at `:1905`, read at `:1949-1953` (`poolProvider` for the `thread/start|resume|fork` params at `:1963-1969`), and copied into the rebuilt session by `registerResumableSession` at `:2126`.
+- `:1303-1338` `spawnChildConnection({ legacyPoolProviderAdmissionV1?, ... })` passes the admission to `resolveSessionAppServerLaunch` (`:1323-1326`) and strips it from the connection callbacks (`:1328-1332`).
+- `:1559-1585` the two zod schemas `legacyPoolThreadMetadataSchemaV1` and `legacyPoolSessionMetaSchemaV1`. The second accepts originators `"bb"` and `"bb_composer_predictions"` and source `"vscode"`.
+- `:1587-1681` `admitLegacyPoolProviderV1(metadata, nativeThreadId, env)`. It validates the `thread/read` metadata, uses `realpath` to confirm the rollout path is inside `CODEX_HOME/sessions` or `CODEX_HOME/archived_sessions`, reads the first line (up to 1 MiB, in 16 KiB chunks), and requires the id, session id, CLI version, fork link and parent link to match.
+- `:1810-1818` `createSessionConnection(legacyAdmission)`. `:1880-1909` is the resume branch. When the saved provider is `bb-account-pool` it refuses a fork ("This saved session cannot be forked with the current provider. Resume it to continue."), kills the probe connection, runs the admission, checks `session.closing`, stores the admission and respawns the app-server under the legacy id.
+- Imports used only by the admission: `:5` `open, realpath` (`node:fs/promises`), `:6` `homedir` (`node:os`), the `isAbsolute`, `relative` and `sep` names at `:7` (`join` stays: `:251`, `:252`, `:405`, `:3751`), and `:8` `resolveCodexHome`. That helper stays exported from `plugins/provider-codex/src/codex-home.ts`, which `src/ai/codex-auth.ts:55` and `src/native-roots.ts:83` also use.
+
+*What stays (important).* The saved-provider probe is **shared** with current behaviour and must survive: `readingSavedProvider` (`:1806-1807`), the callback guards in `createSessionConnection` (`:1822`, `:1834-1840`, `:1846`), `savedPoolThreadSchema` (`:1550-1557`), the `thread/read` call and identity check (`:1864-1879`), the current-provider mismatch check (`:1910-1919`, which still allows forking a default `openai` session into the pool), and the `session.closing` check after the probe (`:1924-1930`).
+
+*Consumer search (Proven by inspection).* `git grep -n -E "LEGACY_POOL|LegacyPool|legacyAdmission|bb-account-pool|admitLegacyPool" e9e1b74c3` over the whole tree, and a second case-insensitive search for `legacyPoolProvider`, found only `bridge.ts`, its two test files, `plugins/chat-importer/src/native/codex.ts:44` and `packages/config/src/legacy-wire-headers-v1.ts:2` (a different symbol). The user-visible error strings ("cannot be forked with the current provider", "first-party V1 native", "native history owner") appear only in `bridge.ts`, so no docs or skills describe them. None of the symbols are exported from the plugin or the SDK; `resolveAppServerLaunch` is the only exported neighbour, and its only importer is `app-server-launch.test.ts`. Nothing else in the repository launches Codex with `bb-account-pool`: `plugins/account-pool/src/prediction-native.ts:33` uses `omnyo-account-pool`.
+
+*Tests that encode the contract.* In `plugins/provider-codex/src/bridge/bridge.session-signature.test.ts` (1,166 lines), the V1-only cases are `:646` (resume with `bb` and `bb_composer_predictions` originators), `:730` (eight rejection variants), `:812` (fork refusal), `:898` (admission survives the session rebuild path), `:947` (release during admission) and `:980` (admission is not carried into a fresh session). Together they span about 310 lines. The fixture `savedPoolFixture` (`:548-631`, default originator `"bb"` and `model_provider: "bb-account-pool"` at `:564` and `:582`) and `poolFixtureLaunches` (`:632`) are **shared** with the current-provider cases at `:830`, `:849` and `:871`. `plugins/provider-codex/src/bridge/app-server-launch.test.ts:42-48` asserts that the default launch never uses `bb-account-pool`.
+
+*Live use (Reproduced, this MacBook only, 26 November 2026).* A read-only scan of the first line of every rollout under `~/.codex/sessions` and `~/.codex/archived_sessions` (1,985 files) found:
+
+| `model_provider` | `sessions` | `archived_sessions` |
+|---|---|---|
+| `omnyo-account-pool` | 1,320 | 256 |
+| `openai` | 245 | 0 |
+| `bb-account-pool` | 162 | 2 |
+
+Of the 164 `bb-account-pool` rollouts, 7 are top-level chats (`source: "vscode"`), last written between 1 and 26 November 2026. The other 157 are subagent or `guardian_review` rollouts. Their parent is mostly one chat (`01a14e1f-…`, created 18 October 2026, 226 MB, last written at 14:05 on 26 November 2026). Five new `bb-account-pool` guardian rollouts were created on 26 November 2026 between 12:03 and 13:29, with CLI 0.172.0. The current bridge launches Codex with `model_provider="bb-account-pool"` only after `admitLegacyPoolProviderV1` succeeds, so this is direct evidence that the V1 admission path ran today. New chats on the same day record `originator: "omnyo"` and `omnyo-account-pool`, so nothing *creates* new BB-era top-level chats; BB-era chats are only *continued*. The 3090 and a connected MacBook worker clones were not checked. The method has a limit: the scan read only the first 4 KB of each file. Every file matched one of the three providers within that window, so on this sample no first line was cut off before its provider field.
+
+*Maintenance cost today.* Anyone changing app-server launch arguments, `spawnChildConnection`, session construction or `registerResumableSession` has to keep the optional admission flowing through four places and keep six legacy test cases and the BB-shaped fixture passing.
+
+**Proposed end state and preservation argument**
+
+*What disappears.* The `bb-account-pool` constant and admission type; the `legacyAdmission` parameter, its `if` block and `??` fallback in the launch resolver; the `resolveSessionAppServerLaunch` wrapper split (collapse into `resolveAppServerLaunch(env)`); the session field and its four uses; the optional `spawnChildConnection` input; the two V1 schemas and `admitLegacyPoolProviderV1`; the legacy branch of the resume probe and its fork refusal; the imports that only the admission uses; and the six V1-only test cases.
+
+*What remains.* One pool provider identity, `CODEX_POOL_MODEL_PROVIDER = "omnyo-account-pool"`, chosen by `codexPoolProvider(env)`. The saved-provider probe on resume and fork stays as it is, including the default-provider fork allowance and the `session.closing` check.
+
+*Behaviour after the change.* A resume or fork of a BB-era pooled chat while the Account Pool is configured reaches the existing check at `:1910-1919` and fails visibly with "The saved session provider does not match the configured Account Pool route." This is not a fallback; it is the existing unknown-provider path. Native rollouts are not touched. The chat's Omnyo timeline should stay readable because the Omnyo server stores it (Hypothesis: not verified against the server's timeline storage for this card). Chat Import keeps classifying these rollouts as Omnyo sessions.
+
+*Non-goals.* Do not rewrite native Codex rollouts or thread metadata to the new id. Codex owns those files, and rewriting them is the riskier alternative this mechanism exists to avoid. Do not change `plugins/chat-importer/src/native/codex.ts`. Do not remove `LEGACY_BRIDGE_MINTED_ID_PATTERN` and `stripLegacyBridgeIdPrefix` (`bridge.ts:735-741`, used at `:2018`). They strip pre-protocol-v2 checkpoint ids that may still sit in the Omnyo database, need a separate data gate, and save only 7 lines. Do not touch the `originator: "bb"` headers in `src/ai/chatgpt-client.ts:159` and `src/bridge/provider-maintenance.ts:449`; they are a different contract.
+
+*Why this is the simplest sufficient option.* Once nobody needs to resume BB-era chats, deletion leaves one provider identity and no extra code path. A partial option exists: keep the legacy id but drop the 95-line file-system validation. It is not recommended. That validation is the guard that only first-party BB rollouts are relaunched with pool credentials, and its rejection cases are covered by tests. Removing only that guard would need its own security review and would still leave the legacy plumbing in place.
+
+*Remaining uncertainty.* Other enrolled machines may hold BB-era pooled chats that were not checked. Whether Alex still wants to continue BB-era chats is the owner's decision.
+
+**Expected gain and cost**
+
+- *Production (projection from line spans at the snapshot, counted with `sed -n <range>p bridge.ts | wc -l`):* about 175 lines removed (about 150 non-blank) and about 5-10 lines rewritten, all in `bridge.ts`. Main spans: `:1559-1682` (124), `:1880-1908` (28 → a 2-3 line `if` remains), `:433-439` (7), `:337-342` (6), `:463-468` (6), `:1810-1818` (8 → about 3), the imports at `:5-8` (4 → 1), and eight single lines.
+- *Tests:* about 310 lines removed from `bridge.session-signature.test.ts`. About 5-10 lines change in its shared fixture defaults. In `app-server-launch.test.ts`, 7 lines become redundant but can stay as a cheap regression guard.
+- *Mechanisms:* before, two pool provider identities, a file-system admission check, and a second app-server spawn on resume. After, one identity and one probe.
+- *Performance:* neutral for current chats. The removed path runs only when the saved provider is `bb-account-pool`.
+- *Cost:* BB-era pooled chats can no longer be continued, and their users must start a new chat.
+
+**Execution steps**
+
+1. **Investigation gate (must pass before any edit).**
+   1. Confirm the snapshot anchors still match: `git -C $OMNYO_CHECKOUT grep -n -E "LEGACY_POOL_MODEL_PROVIDER_V1|admitLegacyPoolProviderV1|legacyPoolProviderAdmissionV1" HEAD -- plugins/provider-codex`. If the mechanism has grown new consumers (for example a second legacy provider id, or a fork path for V1 chats), re-plan.
+   2. On every enrolled machine that runs Codex chats (this MacBook, the 3090, a connected MacBook worker clones and any others in `docs/machines.md`), count BB-era pooled rollouts and their latest write time. Do this read-only, under the effective `CODEX_HOME` of the Omnyo host daemon (default `~/.codex`). For example, run this on macOS from the Codex home:
+      `find sessions archived_sessions -name 'rollout-*.jsonl' -print0 | xargs -0 -n 200 sh -c 'for f; do head -c 65536 "$f" | head -n1 | grep -q "\"model_provider\":\"bb-account-pool\"" && stat -f "%Sm %N" -t "%Y-%m-%d" "$f"; done' _ | sort | tail`
+      Treat the read window as a limit: a first line longer than 64 KB is not detected.
+   3. Present Alex with the count of top-level (`"source":"vscode"`) BB-era chats per machine and the most recent write date. Ask him to decide that these chats no longer need to be resumable. A reasonable gate is no write in the last 14 days, plus his confirmation.
+   4. **Stop** if any top-level BB-era chat was written recently and Alex wants to keep it, or if any machine cannot be checked and Alex does not accept that gap. On 26 November 2026 this gate failed on this MacBook.
+2. **Characterise the surviving probe.** Before deleting the V1 tests, make sure the non-legacy probe keeps its coverage. The cases at `bridge.session-signature.test.ts:830`, `:849` and `:871` already cover current-provider resume, default-provider fork and mismatch refusal. Port the release-during-probe case from `:947` to a current-provider fixture (`fixture.configure({ modelProvider: "omnyo-account-pool", path: null }, { threadReadDelayMs: 2000 })`). That case should assert that a session released during `thread/read` raises `CodexSessionReleasedError` and installs no native writer, through the surviving check at `bridge.ts:1924-1930`.
+3. **Edit `plugins/provider-codex/src/bridge/bridge.ts`.**
+   1. Delete `LEGACY_POOL_MODEL_PROVIDER_V1` (`:333`) and `LegacyPoolProviderAdmissionV1` (`:337-341`).
+   2. Replace the wrapper pair at `:433-496` with one exported `resolveAppServerLaunch(env: NodeJS.ProcessEnv = process.env)` that contains the current body. Drop the `legacyAdmission !== null` throw (`:463-467`) and use `const poolProvider = currentPoolProvider` (or rename `currentPoolProvider` to `poolProvider`).
+   3. Remove the session field at `:584`, its initialiser at `:1751`, and its copy in `registerResumableSession` at `:2126`. At `:1949-1953` compute `poolProvider` from `codexPoolProvider(appServerLaunchEnv(decoded.sessionOptions.envVars ?? {}))` alone.
+   4. In `spawnChildConnection` (`:1303-1338`), remove the optional `legacyPoolProviderAdmissionV1` input. Call `resolveAppServerLaunch(appServerLaunchEnv(callbacks.envVars))`, and destructure only `envVars` out of the callbacks.
+   5. Delete `legacyPoolThreadMetadataSchemaV1`, `legacyPoolSessionMetaSchemaV1` and `admitLegacyPoolProviderV1` (`:1559-1681`). Keep `savedPoolThreadSchema` (`:1550-1557`).
+   6. Make `createSessionConnection` take no argument and drop its conditional spread (`:1810-1818`). Delete the `bb-account-pool` branch (`:1881-1909`) and turn the `else if` into `if (metadata.thread.modelProvider !== CODEX_POOL_MODEL_PROVIDER && !(args.request.kind === "fork" && metadata.thread.modelProvider === CODEX_DEFAULT_MODEL_PROVIDER)) throw …`. If `connection`, `clientVersion` and `supportsAgentsEnabled` are no longer reassigned, change them from `let` to `const`.
+   7. Remove the unused imports: `:5` (`open`, `realpath`), `:6` (`homedir`), `isAbsolute`, `relative` and `sep` from `:7` (keep `join`), and `:8` (`resolveCodexHome`). Let typecheck and lint confirm that nothing else used them.
+   - *Checkpoint:* `rg -n "bb-account-pool|LegacyPool|legacyPool|legacyAdmission" plugins/provider-codex/src` should return only test hits that step 4 removes.
+4. **Edit the tests.** In `bridge.session-signature.test.ts`, delete the V1-only cases at `:646`, `:730`, `:812`, `:898` and `:980`, and replace `:947` with the current-provider version from step 2. Change `savedPoolFixture`'s defaults to a current pool chat (`originator = "omnyo"`, `model_provider: "omnyo-account-pool"` at `:564`, `modelProvider: "omnyo-account-pool"` at `:582`). Then remove options or helpers that only V1 cases used, such as the first-line writing or `path` handling, if nothing else reads them. Keep `app-server-launch.test.ts:42-48` as is.
+5. **Supporting material.** No docs, skills, manifests, exports or generated files reference the mechanism at the snapshot (see the consumer search). Re-run that search on the current head and update anything new it finds.
+6. **Review.** Inspect the complete diff. Only `bridge.ts` and the two test files should change. Recount the removed lines against this card's baseline.
+
+**Verification and acceptance criteria**
+
+None of these commands were run for this card, because the snapshot has no `node_modules`. The package name and scripts come from `plugins/provider-codex/package.json` (`"name": "omnyo-plugin-provider-codex"`, scripts `test`, `typecheck`, `lint`). Run them from `$OMNYO_CHECKOUT` in a worktree with dependencies installed:
+
+- `pnpm --filter omnyo-plugin-provider-codex typecheck` must pass.
+- `pnpm --filter omnyo-plugin-provider-codex test -- src/bridge/bridge.session-signature.test.ts src/bridge/app-server-launch.test.ts` must pass. Passing the file filter through to `vitest run` is the usual pnpm form but was not confirmed here. The remaining cases at `:830`, `:849` and `:871` and the ported release case must pass without changes to their assertions.
+- `pnpm exec oxfmt plugins/provider-codex/src/bridge/bridge.ts plugins/provider-codex/src/bridge/bridge.session-signature.test.ts`, then `pnpm exec oxlint --deny-warnings --format=agent plugins/provider-codex/src/bridge` must report no unused imports and no warnings.
+- Behaviour checks the tests must show: a current pooled resume keeps its single app-server spawn and current `model_provider` arguments; a default-provider fork into the pool still works; a resume of a saved chat whose provider is neither the pool id nor allowed fails with the mismatch error and spawns no second app-server; a release during the probe still raises `CodexSessionReleasedError`.
+- Structural completion: `rg -n "bb-account-pool" plugins/provider-codex` returns only the negative assertion in `app-server-launch.test.ts`; `bridge.ts` has one launch resolver and no admission state in `CodexBridgeSession`.
+- No UI changes, so no visual checks are needed. Performance does not need measuring, because the current path loses no work.
+
+**Rollback and stop conditions**
+
+- *Rollback:* the change is code-only, inside one plugin, and leaves persisted data alone. `git revert` of the commit restores BB-era resume. Native rollouts are never modified, so a revert fully restores the capability.
+- *Stop before editing* if the step 1 gate fails: a BB-era top-level chat is still being written, Alex wants to keep BB-era chats resumable, or a machine cannot be checked and Alex does not accept that gap. The gate failed on 26 November 2026, so re-check after Alex finishes or abandons the BB-era chats that are still active.
+- *Stop during the change* if the surviving probe needs behaviour that only the V1 branch provided (for example, a test at `:830`, `:849` or `:871` starts depending on the second spawn), or if a new consumer of the symbols appears on the current head.
+- *Safer alternative while the gate fails:* leave the mechanism as it is. It is contained in one file and costs little to keep.

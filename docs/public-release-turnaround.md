@@ -170,6 +170,11 @@ keeping all 30 records and their review assignments. That is a reduction
 in launched verifier jobs on this fixture. It establishes neither an
 elapsed-time speedup nor equivalent model judgment on a live audit.
 
+The release wait included a second audit of the same scope. Before starting
+workers, the audit workflow now checks for a matching completed or active
+audit and reserves its output directory. Additional findings belong in a
+separate supplement.
+
 An authorized production run is needed to measure the complete new release
 path. Record the gate delay, publication and coordinator confirmation under
 the same prerequisites used for the baseline.
