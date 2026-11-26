@@ -82,7 +82,9 @@ export function usePendingTimelineMessages(threadId: string) {
     [threadId, status, entries, queue],
   );
 
-  const [retained, setRetained] = useState<readonly PendingSentMessage[]>([]);
+  const [retained, setRetained] =
+    useState<readonly PendingSentMessage[]>(submissions);
+
   useEffect(() => {
     let current = true;
 
