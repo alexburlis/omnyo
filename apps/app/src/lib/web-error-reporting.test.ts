@@ -800,14 +800,21 @@ describe("applyWebErrorReporting", () => {
 });
 
 describe("split failure capture ownership", () => {
-  it.each([true, false])(
-    "correlates the final header timeout only when error reporting is enabled (%s)",
-    async (enabled) => {
+  it.each([
+    { kind: "timeout", enabled: true, phase: "request" },
+    { kind: "timeout", enabled: false, phase: "request" },
+    { kind: "network", enabled: true, phase: "request" },
+    { kind: "network", enabled: false, phase: "request" },
+    { kind: "network", enabled: true, phase: "body" },
+    { kind: "http", enabled: true, phase: "request" },
+  ])(
+    "correlates the final header failure ($kind, $phase, reporting $enabled)",
+    async ({ kind, enabled, phase }) => {
       const { envelopes, transport } = recordingTransport();
 
       if (enabled) applyWebErrorReporting(TARGET, transport);
       vi.useFakeTimers();
-      const id = `capture-stalled-${enabled}`;
+      const id = `capture-${kind}-${phase}-${enabled}`;
       const manifest = document.createElement("script");
       manifest.id = "omnyo-prefetch-manifest";
       manifest.type = "application/json";
@@ -817,16 +824,35 @@ describe("split failure capture ownership", () => {
       });
       document.head.append(manifest);
 
-      const fetch = vi.fn(
-        (_url: string, options: RequestInit) =>
-          new Promise<Response>((_resolve, reject) => {
+      let requests = 0;
+
+      const fetch = vi.fn(async (_url: string, options: RequestInit) => {
+        requests += 1;
+
+        if (kind === "timeout")
+          return new Promise<Response>((_resolve, reject) => {
             options.signal?.addEventListener(
               "abort",
               () => reject(new Error("aborted")),
               { once: true },
             );
-          }),
-      );
+          });
+
+        if (requests === 3) {
+          if (kind === "http") return new Response(null, { status: 404 });
+
+          if (phase === "body")
+            return new Response(
+              new ReadableStream({
+                start(controller) {
+                  controller.error(new TypeError("private body failure"));
+                },
+              }),
+            );
+        }
+
+        throw new TypeError("private request failure");
+      });
 
       vi.stubGlobal("fetch", fetch);
       const load = vi.fn(async () => () => null);
@@ -854,17 +880,29 @@ describe("split failure capture ownership", () => {
         const events = sentEvents(envelopes);
         expect(events).toHaveLength(enabled ? 1 : 0);
 
-        if (enabled)
+        if (enabled) {
           expect(events[0]).toMatchObject({
             contexts: {
               diagnostic: {
-                kind: "timeout",
-                downloadPhase: "request",
+                kind,
+                downloadPhase: phase,
                 attempt: 3,
-                assetAttemptId: attemptIds[2],
+                ...(kind === "http" ? { status: 404 } : {}),
               },
             },
           });
+
+          if (phase === "request" && kind !== "http")
+            expect(events[0]).toHaveProperty(
+              "contexts.diagnostic.assetAttemptId",
+              attemptIds[2],
+            );
+          else
+            expect(events[0]).not.toHaveProperty(
+              "contexts.diagnostic.assetAttemptId",
+            );
+          expect(JSON.stringify(envelopes)).not.toContain("private ");
+        }
       } finally {
         manifest.remove();
       }

@@ -151,13 +151,14 @@ function PrivacyRoute() {
       <h3>Reply suggestions</h3>
 
       <p>
-        Same chat is the default prediction setting in updated builds. The agent
-        can write a suggestion during its normal turn. Omnyo saves that
-        suggestion on your server. Choosing Fixed Codex via Account Pooler sends
+        From Omnyo 1.0.184, Same chat is the default. The agent can write a
+        suggestion during its normal turn, and Omnyo saves it on your server.
+        Earlier versions use Codex for predictions when the plugin is enabled.
+        Choosing Fixed Codex via Account Pooler in 1.0.184 or later also sends
         part of the completed conversation to OpenAI, including prompts and
-        replies from chats with other providers. The request excludes attachment
-        contents and tool output. You can turn Composer predictions off in the
-        plugin’s settings.
+        replies from chats with other providers. The request in 1.0.184 excludes
+        attachment contents and tool output. You can turn Composer predictions
+        off in the plugin’s settings.
       </p>
 
       <h3>Weekly activity count and optional product analytics</h3>

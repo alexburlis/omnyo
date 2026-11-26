@@ -512,6 +512,7 @@ function waitingEntry(
     running: null,
     waiting: {
       group: "comes-back",
+      kind: until === null ? "event" : "scheduled",
       reason,
       waitId: null,
       returnAt: until,

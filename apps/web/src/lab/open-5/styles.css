@@ -58,6 +58,8 @@ body:has(.lab-open-5) {
   --stage-fg: rgb(var(--tone-stage-fg));
   --accent: #ff4f17;
   --accent-text: oklch(0.52 0.17 37);
+  --selection-bg: var(--accent);
+  --selection-fg: #fff;
   --bg: var(--base-bg);
   --fg: var(--base-fg);
   --muted: color-mix(in oklab, var(--fg) 58%, var(--bg));
@@ -80,6 +82,14 @@ body:has(.lab-open-5) {
   overflow-x: clip;
 }
 
+.lab-open-5:has(> .site-nav) {
+  display: flow-root;
+}
+
+.lab-open-5 > .site-nav {
+  margin-bottom: calc(-1 * (var(--site-nav-height) + var(--site-nav-inset)));
+}
+
 .lab-open-5 *,
 .lab-open-5 *::before,
 .lab-open-5 *::after {
@@ -100,9 +110,9 @@ body:has(.lab-open-5) {
   color: inherit;
 }
 
-.lab-open-5 ::selection {
-  background: var(--accent);
-  color: #fff;
+::selection {
+  background: var(--selection-bg, revert);
+  color: var(--selection-fg, revert);
 }
 
 .lab-open-5 .particles {
@@ -131,6 +141,16 @@ body:has(.lab-open-5) {
     var(--v-out, var(--base-bg))
       calc(var(--vr, 0px) + var(--v-edge, 0) * 2.75px)
   );
+}
+
+.lab-open-5
+  [data-scene][data-idle]
+  :is(.hero-orbit, .win-cursor, .am-spin, .am-working, .am-dot),
+.lab-open-5
+  [data-scene][data-idle]
+  :is(.hero-scroll-line, .kinetic-clock-dot)::after,
+.lab-open-5 [data-scene][data-idle] .win-wait::before {
+  animation-play-state: paused !important;
 }
 
 .lab-open-5 .static-mark {

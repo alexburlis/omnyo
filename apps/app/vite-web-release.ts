@@ -22,6 +22,26 @@ export function webBundleRelease(bundle: OutputBundle): string {
   return `web-${hash.digest("hex")}`;
 }
 
+export async function webSourceRevision(
+  sourceDirectory: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string> {
+  const sourceRevision =
+    env.OMNYO_WEB_SOURCE_REVISION ??
+    (
+      await promisify(execFile)("git", ["rev-parse", "HEAD"], {
+        cwd: sourceDirectory,
+      })
+    ).stdout;
+
+  const trimmed = sourceRevision.trim();
+
+  if (!/^[a-f0-9]{40,64}$/.test(trimmed))
+    throw new Error("Invalid web source revision");
+
+  return trimmed;
+}
+
 export function webReleaseIdentity(sourceDirectory: string): Plugin {
   return {
     name: "omnyo-web-release-identity",
@@ -30,16 +50,7 @@ export function webReleaseIdentity(sourceDirectory: string): Plugin {
       async handler(_html, context) {
         if (context.bundle === undefined) return [];
 
-        const { stdout } = await promisify(execFile)(
-          "git",
-          ["rev-parse", "HEAD"],
-          { cwd: sourceDirectory },
-        );
-
-        const sourceRevision = stdout.trim();
-
-        if (!/^[a-f0-9]{40,64}$/.test(sourceRevision))
-          throw new Error("Invalid web source revision");
+        const sourceRevision = await webSourceRevision(sourceDirectory);
 
         return [
           {

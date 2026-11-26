@@ -1,11 +1,12 @@
 import { QueryClient } from "@tanstack/react-query";
 import { afterEach, expect, it, vi } from "vitest";
-import {
-  getPendingSentMessages,
-  withPendingSentMessages,
-} from "@/hooks/cache-owners/pending-sent-messages";
+import { withPendingSentMessages } from "@/hooks/cache-owners/pending-sent-messages";
 import { stageTimelineFollowUp } from "./stage-timeline-follow-up";
-import { pendingTimelineSubmissions } from "./timeline-submissions";
+import { readStagingFollowUps } from "./staging-follow-ups";
+import {
+  pendingQueueFollowUps,
+  pendingTimelineSubmissions,
+} from "./timeline-submissions";
 import * as outbox from "./send-outbox";
 import type { OutboxEntry } from "./send-outbox-entry";
 
@@ -86,7 +87,14 @@ it("renders identical sends immediately and replaces only the confirmed submissi
   const first = send(),
     second = send();
 
-  const immediate = getPendingSentMessages(queryClient, threadId);
+  const immediate = pendingTimelineSubmissions(
+    threadId,
+    "idle",
+    readStagingFollowUps(),
+    [],
+    [],
+  );
+
   expect(immediate.map((item) => item.row.text)).toEqual([
     "same words",
     "same words",
@@ -94,7 +102,8 @@ it("renders identical sends immediately and replaces only the confirmed submissi
   expect(entries).toHaveLength(0);
   resume(true);
   expect(await Promise.all([first, second])).toEqual([true, true]);
-  const staged = pendingTimelineSubmissions(threadId, entries, []);
+  expect(readStagingFollowUps()).toEqual([]);
+  const staged = pendingTimelineSubmissions(threadId, "idle", [], entries, []);
   expect(staged.map((item) => item.row.id)).toEqual(
     immediate.map((item) => item.row.id),
   );
@@ -110,6 +119,8 @@ it("renders identical sends immediately and replaces only the confirmed submissi
   expect(
     pendingTimelineSubmissions(
       threadId,
+      "idle",
+      [],
       [
         {
           ...entries[0]!,
@@ -120,6 +131,46 @@ it("renders identical sends immediately and replaces only the confirmed submissi
     ),
   ).toHaveLength(0);
 });
+
+it.each([
+  ["idle", 1, 0],
+  ["active", 0, 1],
+] as const)(
+  "shows a follow-up to an %s thread in exactly one place from the click until it is staged",
+  async (status, chatRows, queueRows) => {
+    vi.mocked(outbox.isSendOutboxAvailable).mockResolvedValue(true);
+    vi.mocked(outbox.stageThreadMessageInOutbox).mockResolvedValue("staged");
+    const queryClient = new QueryClient();
+    const threadId = `thr_${status}`;
+
+    const send = stageTimelineFollowUp({
+      queryClient,
+      threadId,
+      projectId: "project",
+      execution: null,
+      sourceOf: () => null,
+      submission: {
+        input: [{ type: "text", text: "Queue me", mentions: [] }],
+        prepareInput: undefined,
+        getDraft: () => ({ text: "Queue me", mentions: [], attachments: [] }),
+      },
+    });
+
+    const staging = readStagingFollowUps();
+    expect(
+      pendingTimelineSubmissions(threadId, status, staging, [], []),
+    ).toHaveLength(chatRows);
+    expect(
+      pendingQueueFollowUps(threadId, status, staging, [], []).map(
+        (message) =>
+          message.content[0]?.type === "text" && message.content[0].text,
+      ),
+    ).toEqual(queueRows ? ["Queue me"] : []);
+    expect(await send).toBe(true);
+    expect(readStagingFollowUps()).toEqual([]);
+    queryClient.clear();
+  },
+);
 
 it.each(["unavailable", "failure"] as const)(
   "removes the click prediction after %s staging",
@@ -155,7 +206,7 @@ it.each(["unavailable", "failure"] as const)(
     if (outcome === "failure") await expect(send).rejects.toThrow("Disk full");
     else expect(await send).toBe(false);
     expect(discard).toHaveBeenCalledOnce();
-    expect(getPendingSentMessages(queryClient, "thr_failed")).toEqual([]);
+    expect(readStagingFollowUps()).toEqual([]);
     queryClient.clear();
   },
 );

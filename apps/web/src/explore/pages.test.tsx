@@ -272,14 +272,14 @@ describe("Explore details", () => {
 
     const html = renderToStaticMarkup(<ExplorePluginPage {...detail} />);
 
-    expect(html).toContain("Plugin · By bb · Omnyo Official");
+    expect(html).toContain("Plugin · By Omnyo · Omnyo Official");
     expect(html).toContain('href="#find-in-omnyo"');
     expect(html).toContain('id="find-in-omnyo"');
     expect(html).toContain(
       "<code>omnyo plugin install browser-automation@omnyo-official</code>",
     );
     expect(html).toContain("Plugins, then Installed plugins");
-    expect(html).toContain('href="https://github.com/get-bb"');
+    expect(html).toContain('href="https://omnyohq.com"');
     expect(html).toContain("Included with Omnyo for Mac");
     expect(
       new Set(
@@ -313,7 +313,7 @@ describe("Explore navigation", () => {
     expect(footer).toContain('href="/workflows"');
   });
 
-  it("leaves the inactive navigation unchanged", () => {
+  it("keeps Workflows in the header and footer when Explore is inactive", () => {
     const nav = withNavigation(<SiteNav />, {
       workflows: true,
       explore: false,
@@ -327,7 +327,7 @@ describe("Explore navigation", () => {
     expect(nav).toContain('href="/workflows"');
     expect(nav).not.toContain('href="/explore"');
     expect(footer).not.toContain('href="/explore"');
-    expect(footer).not.toContain('href="/workflows"');
+    expect(footer).toContain('href="/workflows"');
   });
 });
 

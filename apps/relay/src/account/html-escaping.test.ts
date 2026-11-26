@@ -10,8 +10,10 @@ import type { AccountState, ServerSummary } from "./api.js";
 import {
   dashboardPage,
   errorPage,
+  GITHUB_MARK,
   linkPage,
   messageFor,
+  OMNYO_MARK,
   signInPage,
 } from "./html.js";
 
@@ -43,7 +45,9 @@ const ALLOWED_TAGS = new Set([
   "code",
 ]);
 
-function expectInert(html: string): void {
+function expectInert(rendered: string): void {
+  const html = rendered.replaceAll(OMNYO_MARK, "").replaceAll(GITHUB_MARK, "");
+
   const tags = [...html.matchAll(/<\s*([a-zA-Z][a-zA-Z0-9-]*)/gu)].map(
     (match) => (match[1] ?? "").toLowerCase(),
   );

@@ -50,8 +50,7 @@ const downloaded = new Set<string>();
 
 export type SplitDownloadFailure = (
   | { kind: "http"; status: number }
-  | { kind: "timeout"; assetAttemptId?: string }
-  | { kind: "network" }
+  | { kind: "timeout" | "network"; assetAttemptId?: string }
 ) & {
   assetName?: string;
   downloadPhase?: "request" | "body";
@@ -99,16 +98,15 @@ export function recordSplitDownloadFailure(
           status: failure.status,
           failureClass: "upstream-rejected",
         }
-      : failure.kind === "timeout"
-        ? {
-            ...base,
-            kind: failure.kind,
-            failureClass: "timeout",
-            ...(failure.assetAttemptId === undefined
-              ? {}
-              : { assetAttemptId: failure.assetAttemptId }),
-          }
-        : { ...base, kind: failure.kind, failureClass: "connection" };
+      : {
+          ...base,
+          ...(failure.assetAttemptId === undefined
+            ? {}
+            : { assetAttemptId: failure.assetAttemptId }),
+          ...(failure.kind === "timeout"
+            ? { kind: failure.kind, failureClass: "timeout" }
+            : { kind: failure.kind, failureClass: "connection" }),
+        };
 
   failureDiagnostics.set(error, Object.freeze(diagnostic));
 }
@@ -188,14 +186,14 @@ function splitAssetAttemptId(url: string): string | undefined {
 function downloadAsset(
   url: string,
   priority: RequestPriority,
-  traceHeaderTimeout: boolean,
+  traceRequestFailure: boolean,
 ) {
   if (downloaded.has(url)) return Promise.resolve<AssetDownload>("downloaded");
   let pending = downloading.get(url);
 
   if (pending === undefined) {
     const assetAttemptId =
-      splitDownloadDiagnosticsEnabled && traceHeaderTimeout
+      splitDownloadDiagnosticsEnabled && traceRequestFailure
         ? splitAssetAttemptId(url)
         : undefined;
 
@@ -224,19 +222,14 @@ function downloadAsset(
 
         return "downloaded";
       })
-      .catch((): SplitDownloadFailure => {
-        const base = { downloadPhase, online: navigator.onLine };
-
-        return controller.signal.aborted
-          ? {
-              ...base,
-              kind: "timeout",
-              ...(downloadPhase === "request" && assetAttemptId !== undefined
-                ? { assetAttemptId }
-                : {}),
-            }
-          : { ...base, kind: "network" };
-      })
+      .catch((): SplitDownloadFailure => ({
+        kind: controller.signal.aborted ? "timeout" : "network",
+        downloadPhase,
+        online: navigator.onLine,
+        ...(downloadPhase === "request" && assetAttemptId !== undefined
+          ? { assetAttemptId }
+          : {}),
+      }))
       .finally(() => {
         clearTimeout(deadline);
         downloading.delete(url);
@@ -252,7 +245,7 @@ export type SplitDownload = "unlisted" | "downloaded" | SplitDownloadFailure;
 export async function downloadSplit(
   id: string,
   priority: RequestPriority = "low",
-  traceHeaderTimeout = false,
+  traceRequestFailure = false,
 ): Promise<SplitDownload> {
   const urls = splitAssetUrls(id);
 
@@ -260,7 +253,7 @@ export async function downloadSplit(
 
   const results = await Promise.all(
     urls.map(async (url) => {
-      const result = await downloadAsset(url, priority, traceHeaderTimeout);
+      const result = await downloadAsset(url, priority, traceRequestFailure);
 
       if (typeof result === "string") return result;
       const assetName = manifestAssetName(url);

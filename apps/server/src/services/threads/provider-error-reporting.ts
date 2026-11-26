@@ -3,11 +3,9 @@ import { eq, gte, and } from "drizzle-orm";
 import {
   getThread,
   getAppSettings,
-  getLatestStoredThreadEventOfTypes,
   threadFailures,
   type DbConnection,
 } from "@omnyo/db";
-import { systemErrorEventDataSchema } from "@omnyo/domain";
 import {
   captureProcessError,
   type ErrorDiagnosticContext,
@@ -17,6 +15,7 @@ import {
   buildTurnFailedEvent,
   loadFailedTurn,
   loadFailedTurnErrorMessage,
+  loadFailedTurnSystemError,
 } from "./turn-failed.js";
 
 const observationStartedAt = Date.now();
@@ -63,6 +62,23 @@ function failureClass(
       return "internal";
     default:
       return "unknown";
+  }
+}
+
+function modelConfirmationFailureClass(
+  code: string | null | undefined,
+): ErrorDiagnosticContext["failureClass"] | undefined {
+  switch (code) {
+    case "claude_model_confirmation_rejected":
+      return "sdk-rejected";
+    case "claude_model_confirmation_timeout":
+      return "timeout";
+    case "claude_model_confirmation_transport":
+      return "connection";
+    case "claude_model_confirmation_unknown":
+      return "unknown";
+    default:
+      return undefined;
   }
 }
 
@@ -120,25 +136,17 @@ export function captureActionableProviderFailures(
     )
       continue;
 
-    const systemError = getLatestStoredThreadEventOfTypes(db, {
+    const systemError = loadFailedTurnSystemError(db, {
       threadId: failure.threadId,
-      types: ["system/error"],
-      afterSequence: request.requestSequence,
+      failed: request,
     });
 
-    let commandCode: string | undefined;
-    let expectedFailure: boolean | undefined;
+    const commandCode = systemError?.commandErrorCode;
+    const expectedFailure = systemError?.expectedFailure;
 
-    if (systemError !== null) {
-      try {
-        const data = systemErrorEventDataSchema.safeParse(
-          JSON.parse(systemError.data),
-        ).data;
-
-        commandCode = data?.commandErrorCode;
-        expectedFailure = data?.expectedFailure;
-      } catch {}
-    }
+    const modelConfirmationClass = modelConfirmationFailureClass(
+      systemError?.errorInfo?.providerCode,
+    );
 
     if (
       expectedFailure === true ||
@@ -155,7 +163,13 @@ export function captureActionableProviderFailures(
 
     const operationId = `${eventId.slice(0, 8)}-${eventId.slice(8, 12)}-${eventId.slice(12, 16)}-${eventId.slice(16, 20)}-${eventId.slice(20)}`;
     const status = errorInfo?.httpStatusCode;
-    const error = new Error("Provider operation failed");
+
+    const error = new Error(
+      modelConfirmationClass === undefined
+        ? "Provider operation failed"
+        : `Claude model confirmation failed: ${modelConfirmationClass}`,
+    );
+
     error.stack = undefined;
     captureProcessError(error, {
       level: "error",
@@ -163,12 +177,19 @@ export function captureActionableProviderFailures(
       eventId,
       diagnostic: {
         operation:
-          commandCode === undefined ? "provider-request" : "thread-startup",
+          modelConfirmationClass !== undefined
+            ? "claude-model-confirmation"
+            : commandCode === undefined
+              ? "provider-request"
+              : "thread-startup",
         stage: "complete",
-        failureClass: failureClass(category),
+        failureClass: modelConfirmationClass ?? failureClass(category),
         outcome: "terminal",
         retryable: false,
-        dependency: commandCode === undefined ? "provider" : "host-daemon",
+        dependency:
+          commandCode === undefined || modelConfirmationClass !== undefined
+            ? "provider"
+            : "host-daemon",
         operationId,
         attempt: failed.attemptNumber,
         ...(status !== null &&

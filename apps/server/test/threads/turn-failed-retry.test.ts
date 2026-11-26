@@ -16,6 +16,7 @@ import {
   setThreadExecutionOverride,
   setQueuedThreadMessageFailureReason,
 } from "@omnyo/db";
+import { turnScope } from "@omnyo/domain";
 import type { ThreadQueuedMessage } from "@omnyo/domain";
 import type { PluginHookName } from "@omnyo/plugin-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -474,6 +475,11 @@ describe("the turn.failed announcement", () => {
       ).toEqual(exitedInfo);
 
       const midTurn = seedFailableThread(harness, "host-exit-turn");
+      seedInputAccepted(harness, {
+        environmentId: midTurn.environment.id,
+        threadId: midTurn.thread.id,
+        requestId: midTurn.requestId,
+      });
       seedEvent(harness.deps, {
         threadId: midTurn.thread.id,
         environmentId: midTurn.environment.id,
@@ -482,7 +488,7 @@ describe("the turn.failed announcement", () => {
           getLatestThreadSequence(harness.db, { threadId: midTurn.thread.id }) +
           1,
         type: "system/error",
-        scope: { kind: "thread" },
+        scope: turnScope("turn-1"),
         data: {
           code: "provider_process_exited",
           message: 'Provider "codex" exited unexpectedly (signal SIGTERM)',

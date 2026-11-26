@@ -7,7 +7,7 @@ import {
   resetPluginCssForTest,
   useAllPluginCssSettled,
   usePluginCss,
-  usePluginCssReady,
+  usePluginCssStatus,
 } from "./plugin-css";
 
 const DEMO_STYLESHEET = 'link[data-omnyo-plugin-css="demo"]';
@@ -21,7 +21,7 @@ function dispatchLinkEvent(selector: string, type: "load" | "error"): void {
 function useMountedPluginCssReady(pluginId: string): boolean {
   usePluginCss(pluginId);
 
-  return usePluginCssReady(pluginId);
+  return usePluginCssStatus(pluginId) === "ready";
 }
 
 afterEach(() => {
@@ -31,7 +31,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("usePluginCssReady", () => {
+describe("usePluginCssStatus", () => {
   it("holds a plugin until its stylesheet loads", () => {
     applyPluginCss("demo", "/demo.css?h=1");
     const { result } = renderHook(() => useMountedPluginCssReady("demo"));
@@ -41,13 +41,15 @@ describe("usePluginCssReady", () => {
     expect(result.current).toBe(true);
   });
 
-  it("treats a stylesheet that failed to load as ready", () => {
+  it("retries a stylesheet that failed to load before showing the slot", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     applyPluginCss("demo", "/demo.css?h=1");
     const { result } = renderHook(() => useMountedPluginCssReady("demo"));
 
     expect(result.current).toBe(false);
     dispatchLinkEvent(DEMO_STYLESHEET, "error");
+    expect(result.current).toBe(false);
+    dispatchLinkEvent(DEMO_STYLESHEET, "load");
     expect(result.current).toBe(true);
   });
 

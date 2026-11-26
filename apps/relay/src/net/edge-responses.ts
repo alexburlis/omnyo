@@ -41,6 +41,13 @@ export function writeBadRequest(response: PlainResponse): void {
   response.end("Bad request\n");
 }
 
+export function badRequestResponse(): Response {
+  return new Response("Bad request\n", {
+    status: 400,
+    headers: { "content-type": "text/plain; charset=utf-8" },
+  });
+}
+
 function fieldName(name: string): string {
   return name.trim().toLowerCase();
 }

@@ -33,7 +33,7 @@ describe("Marketplace storefront", () => {
     ).toEqual({});
     expect(
       filterMarketplaceItems(marketplaceItems, { source: "omnyo" }),
-    ).toHaveLength(17);
+    ).toHaveLength(18);
     expect(
       filterMarketplaceItems(marketplaceItems, {
         source: "github",

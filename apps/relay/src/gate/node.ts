@@ -1,12 +1,13 @@
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
-import { getRequestListener } from "@hono/node-server";
+import { RequestError, getRequestListener } from "@hono/node-server";
 import { prepareSplitAssetAttempt } from "@omnyo/process-utils/split-asset-attempt";
 import type { ClientIpSource, RelayLogger } from "../contracts.js";
 import { prepareIncomingClientIp } from "../net/client-ip.js";
 import {
   type EdgeRequest,
   type EdgeResponse,
+  badRequestResponse,
   writeBadRequest,
 } from "../net/edge-responses.js";
 import type { Gate, GateRequestMeta } from "./gate.js";
@@ -40,6 +41,8 @@ export function createGateNodeHandlers(
     },
     {
       errorHandler: (error) => {
+        if (error instanceof RequestError) return badRequestResponse();
+
         log.error("gate.failure", {
           error: error instanceof Error ? error.name : "unknown",
         });

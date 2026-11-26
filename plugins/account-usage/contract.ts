@@ -57,6 +57,7 @@ export const accountRowSchema = z.object({
   enabled: z.boolean(),
   canResetCredits: z.boolean(),
   canSignInAgain: z.boolean(),
+  nativeProfile: z.literal(true).optional(),
   extraUsage: extraUsageSchema.nullish(),
   status: z.enum(["disabled", "ready", "held", "exhausted", "error"]),
   statusLabel: z.string(),
@@ -112,6 +113,7 @@ export const groupSchema = z.object({
   providerId: z.string(),
   poolProvider: z.enum(["claude", "codex"]),
   routingEnabled: z.boolean(),
+  nativeProfiles: z.literal(true).optional(),
   readyCount: z.number(),
   totalCount: z.number(),
 
@@ -130,6 +132,7 @@ export const snapshotSchema = z.object({
   error: z.string().nullable(),
 
   poolUnavailable: z.boolean(),
+  claudeError: z.string().optional(),
   groups: z.array(groupSchema),
 });
 

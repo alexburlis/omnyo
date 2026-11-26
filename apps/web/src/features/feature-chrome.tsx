@@ -6,32 +6,16 @@ import "./features.css";
 import type { ReactNode } from "react";
 
 import { comparisonMetas, comparisonPath } from "../compare/comparisons";
-import { DownloadButton, DownloadPanel } from "../landing/download";
+import { DownloadPanel } from "../landing/download";
 import { SWITCH_GUIDES, TOPIC_GUIDES } from "../landing/site-links";
 import { BB_URL, GITHUB_URL } from "../landing/site";
 import {
   OmnyoMark,
-  SiteNavLinks,
-  SiteNavMenu,
+  SiteNav,
   type SiteSection,
+  useSiteFooterProductLinks,
 } from "../landing/site-chrome";
-import { ThemeToggle } from "../landing/theme-toggle";
 import { featureGroups } from "./features";
-
-function FeatureNav({ current }: { current?: SiteSection }) {
-  return (
-    <header className="fx-nav">
-      <a className="fx-brand" href="/" aria-label="Omnyo home">
-        <OmnyoMark className="fx-brand-mark" />
-        <span>Omnyo</span>
-      </a>
-      <SiteNavLinks current={current} />
-      <ThemeToggle />
-      <DownloadButton />
-      <SiteNavMenu />
-    </header>
-  );
-}
 
 export function FeatureClosing() {
   return (
@@ -44,7 +28,9 @@ export function FeatureClosing() {
   );
 }
 
-function FeatureFooter() {
+function FeatureFooter({ path }: { path: string }) {
+  const productLinks = useSiteFooterProductLinks();
+
   return (
     <footer className="fx-foot">
       <div className="fx-foot-top">
@@ -53,6 +39,18 @@ function FeatureFooter() {
           <p>The unified interface for coding agents.</p>
         </div>
         <nav className="fx-foot-cols" aria-label="Footer">
+          <div>
+            <p className="fx-foot-head">Product</p>
+            {productLinks.map((link) => (
+              <a
+                href={link.href}
+                key={link.href}
+                aria-current={path === link.href ? "page" : undefined}
+              >
+                {link.label}
+              </a>
+            ))}
+          </div>
           {featureGroups().map((entry) => (
             <div key={entry.group}>
               <p className="fx-foot-head">{entry.group}</p>
@@ -114,15 +112,17 @@ function FeatureFooter() {
 export function FeatureShell({
   children,
   current,
+  path,
 }: {
   children: ReactNode;
   current?: SiteSection;
+  path: string;
 }) {
   return (
     <div className="fx">
-      <FeatureNav current={current} />
+      <SiteNav current={current} path={path} />
       <main>{children}</main>
-      <FeatureFooter />
+      <FeatureFooter path={path} />
     </div>
   );
 }

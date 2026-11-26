@@ -10,6 +10,7 @@ import type {
 import { STALE_AFTER_MS } from "../contract.ts";
 import {
   OMNYO_PROVIDER_ID,
+  NATIVE_CLAUDE_KIND,
   CLAUDE_FAMILIES,
   POOL_PROVIDERS,
   type AccountSummary,
@@ -107,6 +108,7 @@ export function normaliseWindows(
   now: number,
 ): NormalisedWindow[] {
   const out: NormalisedWindow[] = [];
+  const limit = account.kind === NATIVE_CLAUDE_KIND ? 1 : threshold;
 
   const push = (
     key: string,
@@ -122,8 +124,8 @@ export function normaliseWindows(
       label,
       usedFraction: clamp01(utilization),
       resetAt,
-      tone: toneFor(utilization, status, resetAt, threshold, now),
-      blocking: isBlocking(utilization, status, resetAt, threshold, now),
+      tone: toneFor(utilization, status, resetAt, limit, now),
+      blocking: isBlocking(utilization, status, resetAt, limit, now),
       gatesAccount,
     });
   };
@@ -234,10 +236,15 @@ function servingState(
   account: AccountSummary,
   peers: AccountSummary[],
 ): AccountRow["serving"] {
+  if (account.kind === NATIVE_CLAUDE_KIND) return "idle";
+
   if (account.inFlight > 0) return "serving";
 
   if (account.status !== "ready") return "idle";
-  const ready = peers.filter((p) => p.status === "ready");
+
+  const ready = peers.filter(
+    (p) => p.status === "ready" && p.kind !== NATIVE_CLAUDE_KIND,
+  );
 
   if (ready.length === 0) return "idle";
 
@@ -466,6 +473,7 @@ export function buildAccountRow(
       account.provider === "codex" &&
       account.kind === "oauth",
     canSignInAgain: account.provider === "codex" && account.kind === "oauth",
+    ...(account.kind === NATIVE_CLAUDE_KIND ? { nativeProfile: true } : {}),
     status: account.status,
     statusLabel: statusLabel(account),
     serving: servingState(account, peers),
@@ -519,6 +527,9 @@ export function buildGroups(
       providerId: OMNYO_PROVIDER_ID[provider],
       poolProvider: provider,
       routingEnabled: status.routing[provider],
+      ...(accounts.some((account) => account.kind === NATIVE_CLAUDE_KIND)
+        ? { nativeProfiles: true }
+        : {}),
       readyCount,
       totalCount: rows.length,
       nextCapacityAt:

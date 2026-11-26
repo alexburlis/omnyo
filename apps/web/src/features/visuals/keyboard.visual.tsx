@@ -3,19 +3,30 @@ export const label =
 
 const QUERY = ["a", "r", "c", "h"] as const;
 
-const COMMANDS = [
+interface PaletteCommand {
+  name: string;
+  keys: string | null;
+  match: readonly number[];
+  fate: "ar" | "arc" | "kept" | "top";
+}
+
+const SETTLED: readonly PaletteCommand[] = [
   { name: "New thread", keys: "⇧ ⌘ O", match: [], fate: "ar" },
   { name: "Search threads…", keys: "⌘ K", match: [2, 3, 4, 5], fate: "kept" },
   { name: "Rename thread", keys: null, match: [], fate: "arc" },
   { name: "Archive thread", keys: null, match: [0, 1, 2, 3], fate: "top" },
+];
+
+const DROPPED: readonly PaletteCommand[] = [
   { name: "Shelve thread", keys: "⇧ ⌘ F", match: [], fate: "ar" },
   { name: "Copy thread link", keys: "⇧ ⌘ C", match: [], fate: "ar" },
   { name: "Previous thread", keys: "⌘ ↑", match: [], fate: "ar" },
   { name: "Next thread", keys: "⌘ ↓", match: [], fate: "ar" },
-] as const;
+];
 
-const SIDEBAR = [
-  "Add CSV export",
+const ARCHIVED = "Add CSV export";
+
+const REMAINING = [
   "Review: Add CSV export",
   "Date parser tests",
   "Weekday issue triage",
@@ -43,27 +54,33 @@ function Title({ name, match }: { name: string; match: readonly number[] }) {
   );
 }
 
+function Command({ command, on }: { command: PaletteCommand; on: boolean }) {
+  return (
+    <p className={`fv-keys-row is-${command.fate}${on ? " is-on" : ""}`}>
+      <Title name={command.name} match={command.match} />
+      {command.keys ? <kbd>{command.keys}</kbd> : null}
+    </p>
+  );
+}
+
 export function Visual() {
   return (
     <div className="fv fv-keyboard" aria-hidden="true">
       <div className="fv-keys-app">
         <aside className="fv-keys-side">
           <p className="fv-keys-new">New thread</p>
-          {SIDEBAR.map((title, index) => (
-            <p
-              key={title}
-              className={
-                index === 0
-                  ? "is-on is-gone"
-                  : index === 1
-                    ? "is-next"
-                    : "is-below"
-              }
-            >
-              <i />
-              <span>{title}</span>
-            </p>
-          ))}
+          <p className="is-on is-gone">
+            <i />
+            <span>{ARCHIVED}</span>
+          </p>
+          <div className="fv-keys-gap">
+            {REMAINING.map((title, index) => (
+              <p key={title} className={index === 0 ? "is-next" : "is-below"}>
+                <i />
+                <span>{title}</span>
+              </p>
+            ))}
+          </div>
         </aside>
         <div className="fv-keys-main">
           <div className="fv-keys-composer" />
@@ -93,15 +110,14 @@ export function Visual() {
         </div>
         <div className="fv-keys-list">
           <p className="fv-keys-label">Threads</p>
-          {COMMANDS.map((command, index) => (
-            <p
-              key={command.name}
-              className={`fv-keys-row is-${command.fate}${index === 0 ? " is-on" : ""}`}
-            >
-              <Title name={command.name} match={command.match} />
-              {command.keys ? <kbd>{command.keys}</kbd> : null}
-            </p>
+          {SETTLED.map((command, index) => (
+            <Command key={command.name} command={command} on={index === 0} />
           ))}
+          <div className="fv-keys-rest">
+            {DROPPED.map((command) => (
+              <Command key={command.name} command={command} on={false} />
+            ))}
+          </div>
         </div>
       </section>
     </div>

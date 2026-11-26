@@ -370,7 +370,12 @@ vi.mock("@/hooks/mutations/thread-runtime-mutations", () => ({
 vi.mock("@/hooks/mutations/thread-state-mutations", () => {
   const mutate = vi.fn();
 
-  return { useMarkThreadRead: () => ({ mutate }) };
+  const mutateAsync = vi.fn();
+
+  return {
+    useMarkThreadRead: () => ({ mutate }),
+    useUpdateThread: () => ({ mutateAsync }),
+  };
 });
 
 vi.mock("@/hooks/useThreadReadTracking", () => ({

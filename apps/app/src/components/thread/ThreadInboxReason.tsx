@@ -236,7 +236,7 @@ function ReasonHeadline({
   text: string;
 }) {
   return (
-    <p className="flex min-w-0 items-start gap-2 text-sm leading-5 text-foreground">
+    <p className="flex min-w-0 items-start gap-2 text-sm leading-5 text-foreground max-md:text-xs max-md:leading-4">
       <Icon
         name={attention ? "AlertCircle" : "Clock"}
         aria-hidden="true"
@@ -454,7 +454,10 @@ export function ThreadInboxReason({
     primaryTiming.push(returnTiming(primaryWaiting.returnAt, now));
 
   return (
-    <div className="space-y-2 px-3 py-2" role="status">
+    <div
+      className="space-y-2 px-3 py-2 max-md:space-y-1 max-md:py-1"
+      role="status"
+    >
       {showReason && !hasLinkedReason ? (
         entry.reason.kind === "deliver" ? (
           <DeliverReason
@@ -645,7 +648,7 @@ export function ThreadInboxReason({
         </div>
       ) : null}
       {showReason && entry.recap && entry.recap !== entry.reason.text ? (
-        <p className="line-clamp-2 text-xs leading-5 text-muted-foreground">
+        <p className="line-clamp-2 text-xs leading-5 text-muted-foreground max-md:leading-4">
           {entry.recap}
         </p>
       ) : null}
