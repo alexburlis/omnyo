@@ -1,4 +1,4 @@
-import { memo, useCallback, type ReactNode } from "react";
+import { memo, useCallback } from "react";
 import type {
   PermissionMode,
   ProviderInfo,
@@ -89,7 +89,6 @@ export interface ExecutionAgentOptionsConfig {
 }
 
 export interface ExecutionControlsProps {
-  accountControl?: (disabled: boolean) => ReactNode;
   providerRouting?: SystemProvidersQuery;
   catalog: ExecutionCatalogConfig;
   provider: ExecutionProviderConfig;
@@ -106,7 +105,6 @@ export interface ExecutionControlsProps {
 }
 
 export const ExecutionControls = memo(function ExecutionControls({
-  accountControl,
   catalog,
   provider,
   providerRouting,
@@ -149,51 +147,46 @@ export const ExecutionControls = memo(function ExecutionControls({
     selectedProviderId.length > 0 ||
     handoff !== undefined;
 
-  return (
-    <>
-      {showModelPicker ? (
-        <ModelReasoningPicker
-          providers={catalog.providers}
-          providerOptions={provider.options ?? []}
-          providerRouting={providerRouting}
-          selectedProviderId={selectedProviderId}
-          onSelectedProviderChange={provider.onChange}
-          hasMultipleProviders={provider.hasMultiple ?? false}
-          modelValue={model.active?.model ?? model.selected}
-          modelOptions={model.options}
-          moreModelOptions={model.moreOptions}
-          catalogModelOptions={catalog.modelOptions}
-          modelCatalogIsVerified={catalog.verified}
-          modelIsLoading={model.isLoading}
-          modelLoadFailed={model.loadFailed}
-          modelLoadError={model.loadError}
-          modelNotice={model.notice}
-          onModelChange={model.onChange}
-          reasoningValue={reasoning.value}
-          reasoningOptions={reasoning.options}
-          onReasoningChange={reasoning.onChange}
-          onSelectionChange={handleSelectionChange}
-          serviceTierValue={serviceTier?.value}
-          serviceTierOptions={
-            serviceTier?.supported
-              ? serviceTier.options
-              : EMPTY_SERVICE_TIER_OPTIONS
-          }
-          onServiceTierChange={handleServiceTierChange}
-          sessionOptionSelectionsForProvider={
-            provider.sessionOptionSelectionsForProvider
-          }
-          agentSections={agentOptions?.sections}
-          onAgentOptionChange={agentOptions?.onChange}
-          muted
-          showFavoriteChips={favoriteChips}
-          disabled={disabled}
-          handoff={handoff}
-          presentation={presentation}
-          selects={selects}
-        />
-      ) : null}
-      {accountControl?.(disabled ?? false)}
-    </>
-  );
+  return showModelPicker ? (
+    <ModelReasoningPicker
+      providers={catalog.providers}
+      providerOptions={provider.options ?? []}
+      providerRouting={providerRouting}
+      selectedProviderId={selectedProviderId}
+      onSelectedProviderChange={provider.onChange}
+      hasMultipleProviders={provider.hasMultiple ?? false}
+      modelValue={model.active?.model ?? model.selected}
+      modelOptions={model.options}
+      moreModelOptions={model.moreOptions}
+      catalogModelOptions={catalog.modelOptions}
+      modelCatalogIsVerified={catalog.verified}
+      modelIsLoading={model.isLoading}
+      modelLoadFailed={model.loadFailed}
+      modelLoadError={model.loadError}
+      modelNotice={model.notice}
+      onModelChange={model.onChange}
+      reasoningValue={reasoning.value}
+      reasoningOptions={reasoning.options}
+      onReasoningChange={reasoning.onChange}
+      onSelectionChange={handleSelectionChange}
+      serviceTierValue={serviceTier?.value}
+      serviceTierOptions={
+        serviceTier?.supported
+          ? serviceTier.options
+          : EMPTY_SERVICE_TIER_OPTIONS
+      }
+      onServiceTierChange={handleServiceTierChange}
+      sessionOptionSelectionsForProvider={
+        provider.sessionOptionSelectionsForProvider
+      }
+      agentSections={agentOptions?.sections}
+      onAgentOptionChange={agentOptions?.onChange}
+      muted
+      showFavoriteChips={favoriteChips}
+      disabled={disabled}
+      handoff={handoff}
+      presentation={presentation}
+      selects={selects}
+    />
+  ) : null;
 });

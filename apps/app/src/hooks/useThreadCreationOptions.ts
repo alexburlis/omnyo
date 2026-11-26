@@ -134,7 +134,6 @@ type SessionOptionSelectionsForProvider = (
 ) => SessionOptionSelections;
 
 interface UseThreadCreationOptionsResult<TExecutionInputSources> {
-  claudeAccounts: ReturnType<typeof useClaudeAccounts>;
   claudeProfileSelection: ClaudeProfileSelection | undefined;
   executionOptionsRouting: SystemProvidersQuery;
   selectedProviderId: string;
@@ -1337,7 +1336,6 @@ export function useThreadCreationOptions(
   }, [scope, setRootComposeReuseValue]);
 
   return {
-    claudeAccounts,
     claudeProfileSelection,
     executionOptionsRouting,
     selectedProviderId: effectiveProviderId,

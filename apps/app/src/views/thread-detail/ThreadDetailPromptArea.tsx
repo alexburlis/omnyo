@@ -128,10 +128,7 @@ import {
 } from "@/components/promptbox/banner/LazyQueuedMessagesList";
 import { useComposerTextEffects } from "@/lib/composer-text-effects";
 import { useLatestRef } from "@/hooks/useLatestRef";
-import {
-  ClaudeAccountControl,
-  type ClaudeProfileSelection,
-} from "@/components/promptbox/ClaudeAccountControl";
+import type { ClaudeProfileSelection } from "@/hooks/useClaudeAccounts";
 import { useThreadCreationOptions } from "@/hooks/useThreadCreationOptions";
 import {
   useActiveComposerDraft,
@@ -759,20 +756,12 @@ export function ThreadDetailPromptArea({
 
   const isHandoffSelection = handoffSourceSelection?.threadId === thread.id;
 
-  const [handoffClaudeProfile, setHandoffClaudeProfile] = useState<{
-    threadId: string;
-    selection: ClaudeProfileSelection;
-  } | null>(null);
-
-  const sourceClaudeProfile: ClaudeProfileSelection =
-    thread.claudeProfileBinding
-      ? { kind: "profile", profileId: thread.claudeProfileBinding.profileId }
-      : { kind: "unprofiled" };
-
-  const selectedClaudeProfile =
-    isHandoffSelection && handoffClaudeProfile?.threadId === thread.id
-      ? handoffClaudeProfile.selection
-      : sourceClaudeProfile;
+  const threadClaudeProfile: ClaudeProfileSelection | undefined =
+    isHandoffSelection
+      ? undefined
+      : thread.claudeProfileBinding
+        ? { kind: "profile", profileId: thread.claudeProfileBinding.profileId }
+        : { kind: "unprofiled" };
 
   const sessionOptionChoices = useThreadSessionOptionChoices({
     threadId: thread.id,
@@ -810,7 +799,6 @@ export function ThreadDetailPromptArea({
     setSelectedProviderId,
     setProviderModelReasoning,
     providers,
-    claudeAccounts,
     providerOptions,
     hasMultipleProviders,
     selectedProviderComposerActions,
@@ -839,7 +827,8 @@ export function ThreadDetailPromptArea({
     serviceTierOptions,
     executionInputSources,
   } = useThreadCreationOptions({
-    claudeProfile: selectedClaudeProfile,
+    claudeProfile: threadClaudeProfile,
+    automaticClaudeProfile: isHandoffSelection,
     claudeProjectId: thread.projectId,
     enabled: thread.archivedAt === null,
     environmentId: thread.environmentId ?? undefined,
@@ -926,7 +915,6 @@ export function ThreadDetailPromptArea({
     setServiceTier(handoffSourceSelection.serviceTier);
     setPermissionMode(handoffSourceSelection.permissionMode);
     setHandoffSourceSelection(null);
-    setHandoffClaudeProfile(null);
 
     const restoredDraft = stripThreadHandoffPrefix(
       handoffSeed,
@@ -1444,9 +1432,6 @@ export function ThreadDetailPromptArea({
 
         const request = {
           ...baseRequest,
-          ...(selectedProviderId === "claude-code"
-            ? { claudeProfile: selectedClaudeProfile }
-            : {}),
           providerId: selectedProviderId,
           model: effectiveSelectedModel,
           reasoningLevel,
@@ -1539,7 +1524,6 @@ export function ThreadDetailPromptArea({
       restoreFailedDraft,
       reasoningLevel,
       selectedProviderId,
-      selectedClaudeProfile,
       serviceTier,
       setBottomAttachmentError,
       supportsServiceTier,
@@ -2167,20 +2151,6 @@ export function ThreadDetailPromptArea({
 
   const bottomExecutionConfig = useMemo(
     () => ({
-      accountControl: (disabled: boolean) => (
-        <ClaudeAccountControl
-          data={claudeAccounts.data}
-          error={claudeAccounts.error}
-          selection={selectedClaudeProfile}
-          handoff
-          disabled={disabled}
-          onSetDefault={claudeAccounts.setProjectDefault}
-          onChange={(selection) => {
-            beginHandoff();
-            setHandoffClaudeProfile({ threadId: thread.id, selection });
-          }}
-        />
-      ),
       providerRouting:
         thread.environmentId === null
           ? executionOptionsRouting
@@ -2239,10 +2209,6 @@ export function ThreadDetailPromptArea({
     }),
     [
       applyExecutionTuple,
-      claudeAccounts.data,
-      claudeAccounts.error,
-      claudeAccounts.setProjectDefault,
-      selectedClaudeProfile,
       catalogModelOptions,
       pickerSessionOptionSections,
       sessionOptionChoices.choose,
@@ -2273,7 +2239,6 @@ export function ThreadDetailPromptArea({
       supportsServiceTier,
       serviceTierOptions,
       thread.environmentId,
-      thread.id,
       thread.providerId,
     ],
   );
