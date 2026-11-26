@@ -2,7 +2,7 @@ import type { FeaturePageBody } from "../feature-types";
 
 export const page: FeaturePageBody = {
   headline: "Your chats stay on a server you run",
-  lede: "Omnyo stores chats on your own computer and sends prompts only to the AI provider you pick. Here is exactly what leaves your machine.",
+  lede: "Omnyo stores chats on your own computer. Your AI provider processes your prompts. Here’s what Omnyo can send when you use predictions, voice input, or remote access.",
   sections: [
     {
       heading: "No Omnyo account, no Omnyo cloud",
@@ -34,12 +34,12 @@ export const page: FeaturePageBody = {
     {
       label: "Predictions",
       value:
-        "Reply suggestions are on by default and use your Codex allowance, so idle chats' context goes to OpenAI.",
+        "From Omnyo 1.0.184, Same chat uses the current agent by default. Older versions and the Fixed Codex setting can send context from completed chats to OpenAI, including Claude chats.",
     },
     {
       label: "Voice",
       value:
-        "Local Voice transcribes on your Apple-silicon Mac. Audio stays there.",
+        "Dictation by Paraspeech transcribes on the Mac running your server. Older versions could use Codex cloud transcription when Dictation was unavailable.",
     },
     {
       label: "Push",
@@ -74,8 +74,7 @@ export const page: FeaturePageBody = {
     },
     {
       question: "Can I turn off reply suggestions?",
-      answer:
-        "Yes. Switch off the Composer Predictions plugin, and idle chats are no longer sent for suggestions.",
+      answer: "Yes. Turn off Composer predictions in the plugin’s settings.",
     },
   ],
   relatedFeatures: ["open-source", "devices", "usage-tracking"],

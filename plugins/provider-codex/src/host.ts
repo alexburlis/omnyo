@@ -5,10 +5,7 @@ import {
   experimental_nativeRootsHostContract,
   type ExperimentalNativeRootsResolveAnswer,
 } from "@omnyo/plugin-sdk/host";
-import {
-  completeCodexInference,
-  transcribeCodexVoice,
-} from "./ai/chatgpt-client.js";
+import { completeCodexInference } from "./ai/chatgpt-client.js";
 import { readCodexAuthCredentials } from "./ai/codex-auth.js";
 import { AiServiceFailure, toAiServiceFailure } from "./ai/failure.js";
 import {
@@ -40,8 +37,6 @@ export default experimental_defineHostEntry({
       resolveCodexNativeRoots({ homeDir: os.homedir(), env: process.env }),
     "codex.ai.complete": (input, context) =>
       textResult(completeCodexInference(input, context.signal)),
-    "codex.ai.transcribe": (input, context) =>
-      textResult(transcribeCodexVoice(input, context.signal)),
     "codex.ai.status": async (): Promise<CodexAiStatus> => {
       try {
         await readCodexAuthCredentials();

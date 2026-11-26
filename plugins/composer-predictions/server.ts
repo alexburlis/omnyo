@@ -224,6 +224,9 @@ function predictionFailureMessage(rawMessage: string): string {
   if (message.includes("conversation context is unavailable or too large"))
     return "The conversation is unavailable or too large to predict. No prediction was generated.";
 
+  if (message === "Native Codex request failed (-32601)")
+    return "This Codex version does not support the prediction request. Update Codex and retry.";
+
   return "Codex could not generate a reply. Retry the prediction.";
 }
 
@@ -331,11 +334,24 @@ const predictionModelSchema = z
   .trim()
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u);
 
-export default async function plugin(api: PluginApi) {
-  const reports = registerCompletionReports(api);
+const predictionProviderSchema = z.enum(["same-chat", "codex"]);
 
+export default async function plugin(api: PluginApi) {
   const settings = api.settings.define({
     enabled: { type: "boolean", label: "Composer predictions", default: true },
+    provider: {
+      type: "select",
+      label: "Prediction provider",
+      description:
+        "Same chat uses a suggestion from the agent’s normal turn. Fixed Codex sends chat context to OpenAI, including from other providers.",
+      options: [...predictionProviderSchema.options],
+      experimental_optionLabels: {
+        "same-chat": "Same chat",
+        codex: "Fixed Codex via Account Pooler",
+      },
+      default: "same-chat",
+      experimental_schema: predictionProviderSchema,
+    },
     codexModel: {
       type: "string",
       label: "Codex prediction model",
@@ -345,6 +361,12 @@ export default async function plugin(api: PluginApi) {
   });
 
   let config = await settings.get();
+
+  const reports = registerCompletionReports(
+    api,
+    () => config.enabled && config.provider === "same-chat",
+  );
+
   let disposed = false;
   const firstGeneration = Date.now();
   const predictions = new Map<string, Prediction>();
@@ -363,6 +385,7 @@ export default async function plugin(api: PluginApi) {
   const cacheSchema = z.object({
     sourceSeq: z.number().int().nullable(),
     state: predictionSchema,
+    provider: predictionProviderSchema.default("codex"),
   });
 
   function readSignal(): AbortSignal {
@@ -520,10 +543,16 @@ export default async function plugin(api: PluginApi) {
   }
 
   function store(sourceSeq: number, state: PredictionState): Promise<void> {
+    const provider = config.provider;
+
     const pending = saving
       .catch(() => {})
       .then(() =>
-        api.storage.kv.set(cacheKey(state.threadId), { sourceSeq, state }),
+        api.storage.kv.set(cacheKey(state.threadId), {
+          sourceSeq,
+          state,
+          provider,
+        }),
       );
 
     saving = pending;
@@ -540,7 +569,9 @@ export default async function plugin(api: PluginApi) {
       await api.storage.kv.get(cacheKey(threadId)),
     );
 
-    return cached.success && cached.data.state.threadId === threadId
+    return cached.success &&
+      cached.data.state.threadId === threadId &&
+      cached.data.provider === config.provider
       ? cached.data
       : null;
   }
@@ -657,13 +688,14 @@ export default async function plugin(api: PluginApi) {
     if (kept !== null && kept.state.status !== "idle")
       return { ...kept.state, basis };
 
-    const report = await reports.readiness(threadId, completed, readSignal());
+    const report = (await reports.read(threadId, completed, readSignal()))
+      ?.readiness;
 
     const reply =
       report?.ready === false ? null : await finalReply(threadId, completed);
 
     const readiness =
-      (reply === null ? null : reportedBlocker(reply)) ?? report;
+      (reply === null ? null : reportedBlocker(reply)) ?? report ?? null;
 
     return readiness === null
       ? null
@@ -962,6 +994,7 @@ export default async function plugin(api: PluginApi) {
         noSuggestionReason: null,
         message: null,
         archiveReadiness: null,
+        ...(config.provider === "same-chat" ? { sameChat: true as const } : {}),
       },
       sourceSeq: null,
       hostId: null,
@@ -1118,6 +1151,8 @@ export default async function plugin(api: PluginApi) {
     entry.epoch += 1;
     entry.restored = true;
 
+    const sameChat = config.provider === "same-chat";
+
     if (clearSource) {
       entry.attempts = 0;
       clearRetry(entry);
@@ -1130,6 +1165,7 @@ export default async function plugin(api: PluginApi) {
       entry.state.noSuggestionReason === null &&
       entry.state.message === message &&
       entry.state.archiveReadiness === archiveReadiness &&
+      (entry.state.sameChat === true) === sameChat &&
       (!clearSource || entry.sourceSeq === null)
     )
       return entry.state;
@@ -1153,6 +1189,8 @@ export default async function plugin(api: PluginApi) {
       archiveReadiness,
     };
 
+    if (sameChat) entry.state.sameChat = true;
+    else delete entry.state.sameChat;
     persistTransition(entry);
 
     return publish(entry);
@@ -1345,6 +1383,64 @@ export default async function plugin(api: PluginApi) {
           entry,
           "Work status is unavailable. Retry when Omnyo is available.",
         );
+
+      if (config.provider === "same-chat") {
+        const [report, reply, current, currentSource] = await Promise.all([
+          reports.read(threadId, source, readSignal()),
+          finalReply(threadId, source),
+          predictionAdmission(api, threadId, background),
+          latestOwnerCompletion(threadId, source.seq),
+        ]);
+
+        if (disposed || entry.epoch !== observedEpoch) return entry.state;
+
+        if (
+          current.blocker !== null ||
+          current.work?.basis !== basis ||
+          currentSource?.seq !== source.seq
+        )
+          return skip(
+            entry,
+            current.blocker ?? "changed",
+            source.seq,
+            current.work,
+          );
+
+        const readiness =
+          (reply === null ? null : reportedBlocker(reply)) ??
+          report?.readiness ??
+          null;
+
+        const suggestedReply = ownsNextStep(current.work)
+          ? null
+          : (report?.suggestedReply ?? null);
+
+        const state: PredictionState = {
+          threadId,
+          generation: entry.state.generation + 1,
+          basis,
+          status:
+            suggestedReply === null && readiness === null ? "none" : "ready",
+          text: suggestedReply,
+          noSuggestionReason:
+            suggestedReply === null
+              ? "The agent did not suggest a reply during this turn."
+              : null,
+          message: null,
+          archiveReadiness: readiness,
+          assessmentVersion: ASSESSMENT_VERSION,
+          sameChat: true,
+        };
+
+        await store(source.seq, state);
+
+        if (disposed || entry.epoch !== observedEpoch) return entry.state;
+        entry.sourceSeq = source.seq;
+        entry.state = state;
+
+        return publish(entry);
+      }
+
       entry.hostId = environment.hostId;
 
       const hostId = environment.hostId;
@@ -1438,7 +1534,9 @@ export default async function plugin(api: PluginApi) {
 
         if (archiveReadiness?.ready === true) {
           const checkedReadiness = await Promise.all([
-            reports.readiness(threadId, source, controller.signal),
+            reports
+              .read(threadId, source, controller.signal)
+              .then((report) => report?.readiness ?? null),
             finalReply(threadId, source),
           ])
             .then(([report, reply]) =>

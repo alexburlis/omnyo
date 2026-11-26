@@ -16,8 +16,13 @@ including failures before this logging was installed.
 completed-turn `sourceSeq` and `skippedAt`. A repeated reason for the same turn
 is recorded once. Server logs use the `Prediction skipped:` prefix with this record.
 
-Bundled into Omnyo as `omnyo--composer-predictions`. The server
-prepares a suggestion for every idle, completed chat on any provider before you open it. The
+Bundled into Omnyo as `omnyo--composer-predictions`. In the plugin settings,
+choose **Same chat** (the default), **Fixed Codex via Account Pooler**, or turn
+Composer predictions off. Same chat uses a suggestion that the current agent
+includes in its normal turn. Omnyo reads the saved suggestion after completion
+without another inference request. Existing sessions pick up the instruction
+when they start or resume with the updated plugin. Fixed Codex can prewarm a
+suggestion for an idle, completed chat before you open it. The
 composer renders the prepared state in its first paint from the conversation
 bootstrap and an app-wide realtime store, so opening a chat never requests or waits
 for inference. The suggestion fills the empty prompt box at its full width as muted
@@ -29,7 +34,7 @@ shadow back. Typing hides it, and Escape or the dismiss control dismisses it.
 Leaving an empty box restores the suggestion. Desktop auto-focus does not hide it.
 Running turns, submission and new turns invalidate the suggestion.
 
-A finished chat always gets a suggested reply. When no job, callback, loop or
+In Fixed Codex mode, a finished chat gets a suggested reply when inference is available. When no job, callback, loop or
 child chat owns the next step, the prediction must return one: completed work, a
 pending decision or an approval the assistant is waiting on, such as a release, is
 never a reason to omit it. The suggestion may ask for exactly that approval, because
@@ -40,7 +45,7 @@ work owns the next step. A finished chat's stored result without a reply, such a
 one saved before this rule, is predicted again; a dismissed suggestion stays
 dismissed.
 
-Force a reply when none is showing or the suggestion is not useful. The caption's
+In Fixed Codex mode, force a reply when none is showing or the suggestion is not useful. The caption's
 Suggest another reply, Suggest anyway on an omitted reply, the composer's Suggest a
 reply button and the Suggest a reply command in the command palette all run
 inference now and require a reply even while a loop, job or other chat owns the
@@ -51,14 +56,13 @@ uses allowance. Forcing needs an Account Pooler that accepts `force`; an older o
 fails with “Update Account Pooler to suggest a reply on demand.” and ordinary
 predictions keep working.
 
-The server prewarms successful chats on every provider, including already-read chats, at startup, when chat state
+In Fixed Codex mode, the server prewarms successful chats on every provider, including already-read chats, at startup, when chat state
 changes and every three minutes. It runs one background prediction at a time, bounds each to four minutes and checks the Codex subscription’s included allowance. After a restart, stored predictions for unchanged chats are restored in parallel without waiting behind new inference, and the most recently active chats are predicted first. Pending questions, queued or scheduled messages, and active chat work exclude a chat. Archived chats are skipped, and unchanged idle state is never republished. Running or waiting work the chat owns, such as a job, child chat or callback, delays background inference until it clears. Core vetoes the archive recommendation live while it is open. Eligibility is checked again before accepting the result. Leaving or hiding the composer keeps the shared prediction;
 explicit cancellation and dismissal still stop it. Transient machine, transport, readiness and timeout failures retry automatically after 1, 5 and 20 minutes and then every 20 minutes, ahead of the waiting queue. A failure caused by an unavailable machine never exhausts its retries: the three-minute sweep keeps checking it and the machine’s reconnection regenerates it immediately; exhausted allowance retries after 30 minutes and then every 90 minutes until it returns, unless a current assessment or an explicit blocker settles the turn; configuration, model and version failures wait for an explicit Retry.
 
 ## Account and allowance
 
-Every chat provider, including Claude Code, uses a Codex subscription already
-connected to Account Pooler. Enable Codex routing and keep an eligible account
+When you choose Fixed Codex, chat context from every provider, including Claude Code, goes to OpenAI using a Codex subscription connected to Account Pooler. Enable Codex routing and keep an eligible account
 in the pool. Before sending chat text, Account Pooler checks included allowance
 and an explicitly zero credit balance. If no account qualifies, Composer
 Predictions reports the allowance problem and uses its existing retry schedule.
@@ -70,8 +74,7 @@ tools and returns a structured reply and assessment. The prediction uses the
 model in Composer Predictions settings, which defaults to `gpt-6.1-sol`.
 Cached suggestions and dismissals for unchanged chats remain available.
 
-The same prediction call returns an advisory archive-readiness verdict and a short
-reason. Ready means the whole requested outcome is delivered with proportionate
+Fixed Codex returns an advisory archive-readiness verdict. Same chat uses the matching agent outcome report for archive readiness. Ready means the whole requested outcome is delivered with proportionate
 evidence and no material obligation remains. Earlier commitments and later
 corrections still count. A finished plan, audit, draft, preparation step or bounded
 handoff does not wait for unrequested implementation or a possible next project.

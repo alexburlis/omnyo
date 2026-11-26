@@ -37,21 +37,6 @@ export const codexAiCompleteInputSchema = z
 
 export type CodexAiCompleteInput = z.infer<typeof codexAiCompleteInputSchema>;
 
-export const codexAiTranscribeInputSchema = z
-  .object({
-    model: z.string().min(1),
-    audioBase64: z.string().min(1),
-    mimeType: z.string().min(1),
-    filename: z.string().min(1),
-    hint: z.string().nullable(),
-    timeoutMs: z.number().int().positive(),
-  })
-  .strict();
-
-export type CodexAiTranscribeInput = z.infer<
-  typeof codexAiTranscribeInputSchema
->;
-
 export const codexAiStatusSchema = z.discriminatedUnion("ready", [
   z.object({ ready: z.literal(true) }).strict(),
   z.object({ ready: z.literal(false), message: z.string().min(1) }).strict(),
@@ -62,10 +47,6 @@ export type CodexAiStatus = z.infer<typeof codexAiStatusSchema>;
 export const codexAiHostContract = defineRpcContract({
   "codex.ai.complete": {
     input: codexAiCompleteInputSchema,
-    output: textResultSchema,
-  },
-  "codex.ai.transcribe": {
-    input: codexAiTranscribeInputSchema,
     output: textResultSchema,
   },
   "codex.ai.status": {

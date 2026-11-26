@@ -2363,7 +2363,6 @@ function ThreadDetailViewInternal(
 
   const gitActions = useThreadGitActions({
     environment,
-    requestEnvironmentAction,
     thread,
     workspaceStatus,
   });

@@ -50,7 +50,7 @@ omnyo composer-predictions request <thread-id> --json
 
 `request` reuses the stored prediction while the latest completed turn is unchanged. Omnyo's automatic compaction of an idle chat before its prompt cache expires is not a new turn and keeps the stored prediction. The work basis identifies the conversation, so a verdict stays valid while jobs and other obligations change; core vetoes the recommendation live while they are open. Add `--fresh` to run inference again for that same turn, for example to compare results after a prompt change. The RPC equivalent is `request` with `fresh: true`. Each fresh request uses allowance.
 
-A finished chat, where no job, callback, loop or child chat owns the next step, always gets a reply: completed work, a pending decision or an approval the assistant awaits never leaves it empty. A finished chat's stored result without a reply is predicted again; a dismissal is kept. Force a reply while other work owns the next step:
+In Fixed Codex mode, a finished chat, where no job, callback, loop or child chat owns the next step, always gets a reply: completed work, a pending decision or an approval the assistant awaits never leaves it empty. A finished chat's stored result without a reply is predicted again; a dismissal is kept. Force a reply while other work owns the next step:
 
 ```sh
 omnyo composer-predictions request <thread-id> --force --json
@@ -79,7 +79,8 @@ or agent are not external waits. This advice never authorizes implementation or
 archives a chat.
 
 Agents use `report_chat_outcome` to record an outcome and evidence or a blocker
-and next action. Answer the user normally. Reports apply only to the matching
+and next action. In Same chat mode, include `suggestedReply` when a useful next
+user message is clear. Omnyo stores this draft and reads it after the turn. Answer the user normally. Reports apply only to the matching
 input and successful turn. A reported blocker overrides a positive prediction.
 Older replies with explicit `Not ready:` reports can still keep a chat open.
 

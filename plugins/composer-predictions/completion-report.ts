@@ -4,6 +4,8 @@ import type { PredictionState } from "./contract";
 
 const text = z.string().trim().min(1).max(400);
 
+const suggestedReplySchema = z.string().trim().min(1).max(4_000);
+
 const reportSchema = z.discriminatedUnion("status", [
   z
     .object({ status: z.literal("complete"), outcome: text, evidence: text })
@@ -15,6 +17,7 @@ const receiptSchema = z.object({
   turnId: z.string().min(1),
   requestSeq: z.number().int().positive(),
   report: reportSchema,
+  suggestedReply: suggestedReplySchema.optional(),
 });
 
 const toolName = "report_chat_outcome";
@@ -29,20 +32,25 @@ function key(threadId: string) {
   return `completion-report:v1:${threadId}`;
 }
 
-export function registerCompletionReports(api: PluginApi) {
-  async function latestRequest(threadId: string, signal: AbortSignal) {
+export function registerCompletionReports(
+  api: PluginApi,
+  usesSameChat: () => boolean,
+) {
+  async function latestRequest(
+    threadId: string,
+    signal: AbortSignal,
+    beforeSeq?: number,
+  ) {
     const [request] = await api.sdk.threads.events.list({
       threadId,
       types: ["client/turn/requested"],
       order: "desc",
       limit: "1",
+      ...(beforeSeq === undefined ? {} : { beforeSeq: String(beforeSeq) }),
       signal,
     });
 
-    return request?.type === "client/turn/requested" &&
-      request.data.maintenance === undefined
-      ? request
-      : null;
+    return request?.type === "client/turn/requested" ? request : null;
   }
 
   api.agents.registerTool({
@@ -52,8 +60,11 @@ export function registerCompletionReports(api: PluginApi) {
     instructions:
       "Before a final reply, report the whole requested outcome and its concrete evidence, or the material blocker and next action. Use the tool for bookkeeping and answer the user normally. Keep private content and credentials out of the report.",
     presentation: { suppress: true },
-    parameters: z.strictObject({ report: reportSchema }),
-    async execute({ report }, { threadId, signal }) {
+    parameters: z.strictObject({
+      report: reportSchema,
+      suggestedReply: suggestedReplySchema.optional(),
+    }),
+    async execute({ report, suggestedReply }, { threadId, signal }) {
       const [started, completed, [accepted], request] = await Promise.all([
         api.sdk.threads.events.list({
           threadId,
@@ -90,6 +101,7 @@ export function registerCompletionReports(api: PluginApi) {
         current === undefined ||
         turn === null ||
         request === null ||
+        request.data.maintenance !== undefined ||
         accepted?.type !== "turn/input/accepted" ||
         accepted.scope.kind !== "turn" ||
         accepted.scope.turnId !== turn ||
@@ -108,6 +120,9 @@ export function registerCompletionReports(api: PluginApi) {
         turnId: turn,
         requestSeq: request.seq,
         report,
+        ...(usesSameChat() && suggestedReply !== undefined
+          ? { suggestedReply }
+          : {}),
       });
 
       return "Recorded.";
@@ -120,14 +135,25 @@ export function registerCompletionReports(api: PluginApi) {
       thread.experimental_visibility === "visible"
         ? [toolName]
         : [],
+    ...(usesSameChat() &&
+    thread.parentThreadId === null &&
+    thread.experimental_visibility === "visible"
+      ? {
+          instructions:
+            "When reporting this turn's outcome with report_chat_outcome, include suggestedReply if a useful next user message is clear. Write it in the user's voice for them to review. Keep it within the agreed scope and leave out credentials and private details. The suggestion is a draft.",
+        }
+      : {}),
   }));
 
   return {
-    async readiness(
+    async read(
       threadId: string,
       completed: CompletedTurn,
       signal: AbortSignal,
-    ): Promise<PredictionState["archiveReadiness"]> {
+    ): Promise<{
+      readiness: NonNullable<PredictionState["archiveReadiness"]>;
+      suggestedReply: string | null;
+    } | null> {
       if (
         completed.scope.kind !== "turn" ||
         completed.data.status !== "completed"
@@ -139,27 +165,42 @@ export function registerCompletionReports(api: PluginApi) {
       ).data;
 
       if (!receipt || receipt.turnId !== completed.scope.turnId) return null;
-      const request = await latestRequest(threadId, signal);
+      let request = await latestRequest(threadId, signal);
 
-      if (request?.seq !== receipt.requestSeq || request.seq >= completed.seq)
+      while (
+        request !== null &&
+        request.seq > completed.seq &&
+        request.data.maintenance !== undefined
+      )
+        request = await latestRequest(threadId, signal, request.seq);
+
+      if (
+        request?.seq !== receipt.requestSeq ||
+        request.seq >= completed.seq ||
+        request.data.maintenance !== undefined
+      )
         return null;
       const { report } = receipt;
 
-      return report.status === "complete"
-        ? {
-            ready: true,
-            reason: `${report.evidence} (reported by the agent)`,
-            recap: report.outcome,
-            waitingOn: null,
-            ask: null,
-          }
-        : {
-            ready: false,
-            reason: report.blocker,
-            recap: report.next,
-            waitingOn: null,
-            ask: null,
-          };
+      return {
+        suggestedReply: receipt.suggestedReply ?? null,
+        readiness:
+          report.status === "complete"
+            ? {
+                ready: true,
+                reason: `${report.evidence} (reported by the agent)`,
+                recap: report.outcome,
+                waitingOn: null,
+                ask: null,
+              }
+            : {
+                ready: false,
+                reason: report.blocker,
+                recap: report.next,
+                waitingOn: null,
+                ask: null,
+              },
+      };
     },
     forget: (threadId: string) => api.storage.kv.delete(key(threadId)),
   };

@@ -273,7 +273,15 @@ export function getAiServiceSelections(db: DbConnection): AiServiceSelections {
       Reflect.get(stored, task),
     );
 
-    if (parsed.success) selections[task] = parsed.data;
+    if (!parsed.success) continue;
+    const selection = parsed.data;
+    selections[task] =
+      task === "voice" &&
+      selection.mode === "service" &&
+      selection.pluginId === "provider-codex" &&
+      selection.serviceId === "codex"
+        ? { mode: "service", pluginId: "local-voice", serviceId: "local-voice" }
+        : selection;
   }
 
   return selections;

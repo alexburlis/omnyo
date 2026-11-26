@@ -49,7 +49,12 @@ async function postVoice(
 
 describe("voice transcription", () => {
   it("logs allowlisted client failures and rejects content-bearing or invalid diagnostic fields", async () => {
-    await withTestHarness({}, async (harness) => {
+    const reportingConfig = {
+      isDevelopment: false,
+      errorReportingDsn: "https://test@example.invalid/1",
+    };
+
+    await withTestHarness(reportingConfig, async (harness) => {
       const warn = vi.spyOn(harness.deps.logger, "warn");
 
       const diagnostic: VoiceDiagnostic = {

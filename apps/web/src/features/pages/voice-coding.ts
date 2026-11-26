@@ -33,7 +33,7 @@ export const page: FeaturePageBody = {
     {
       label: "Privacy",
       value:
-        "Pick Dictation as your voice service to keep audio on your Mac. Automatic may fall back to Codex.",
+        "Dictation by Paraspeech processes audio on the Mac running your Omnyo server.",
     },
     {
       label: "Shortcut",
@@ -60,7 +60,7 @@ export const page: FeaturePageBody = {
     {
       question: "Does my audio leave my Mac?",
       answer:
-        "Not with Dictation by Paraspeech selected. In the default Automatic mode, Omnyo can use Codex cloud transcription when Dictation is not ready, so pin it with `omnyo settings ai-services set voice local-voice`.",
+        "Dictation by Paraspeech transcribes on your Omnyo server. Recordings from your phone go to that server. Omnyo 1.0.184 removes the built-in Codex cloud transcription service.",
     },
     {
       question: "Is this Claude Code's own voice mode?",

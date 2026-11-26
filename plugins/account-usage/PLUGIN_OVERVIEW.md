@@ -1,3 +1,5 @@
+**Experimental. We’re unaware of account bans from using this plugin. Provider terms do not clearly address every use of these features. Use at your own risk.**
+
 Bundled into the private Omnyo distribution as `omnyo--account-usage`. Live Claude and
 Codex usage stays visible in the bottom rail as one small ring per provider.
 The ring shows the account serving a request now, or else the most recently
