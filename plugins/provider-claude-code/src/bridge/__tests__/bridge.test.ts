@@ -5286,6 +5286,87 @@ describe("bridge", () => {
     }
   });
 
+  it.each([
+    [
+      { errorClass: "control_request_failed" },
+      "claude_model_confirmation_rejected",
+    ],
+    [{ code: "ETIMEDOUT" }, "claude_model_confirmation_timeout"],
+    [{ code: "EPIPE" }, "claude_model_confirmation_transport"],
+    [{ code: "private-code-marker" }, "claude_model_confirmation_unknown"],
+  ])(
+    "preserves bounded Claude model confirmation diagnostics for %j",
+    async (fields, providerCode) => {
+      const bridge = createBridgeJsonRpcTestHarness(handleLine);
+      const query = createControlledClaudeQuery();
+      queryMock.mockReturnValue(query);
+
+      const threadId = "thread-model-confirmation";
+      const options = { ...canonicalOptions(), model: "claude-haiku-4-5" };
+
+      const turn = {
+        ...canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "Try the same model" }],
+        }),
+        options,
+      };
+
+      try {
+        bridge.sendRequest(1, "thread/start", {
+          threadId,
+          cwd: "/tmp/worktree",
+          instructionMode: "append",
+          options,
+        });
+        const started = await bridge.waitForResponse(1);
+        expect(started.error).toBeUndefined();
+        query.setModel.mockRejectedValueOnce(
+          Object.assign(new Error("private-message-marker ETIMEDOUT"), fields),
+        );
+
+        bridge.sendRequest(2, "turn/start", turn);
+        const rejected = await bridge.waitForResponse(2);
+        expect(rejected.error?.code).toBe(BRIDGE_JSON_RPC_ERRORS.BRIDGE_ERROR);
+        expect(rejected.error?.data).toEqual({
+          errorInfo: {
+            category: "unknown",
+            providerCode,
+            httpStatusCode: null,
+          },
+        });
+        expect(
+          assembleCapturedThreadEvents(bridge.messages, "claude-code"),
+        ).not.toContainEqual(
+          expect.objectContaining({ type: "turn/input/accepted" }),
+        );
+
+        bridge.sendRequest(3, "turn/start", {
+          ...turn,
+          clientRequestId: "creq_bcdefghjkm",
+        });
+        await expect(readNextPromptText(getLatestQueryCall())).resolves.toBe(
+          "Try the same model",
+        );
+        expect((await bridge.waitForResponse(3)).error).toBeUndefined();
+        expect(
+          assembleCapturedThreadEvents(bridge.messages, "claude-code"),
+        ).toContainEqual(
+          expect.objectContaining({
+            type: "turn/input/accepted",
+            clientRequestId: "creq_bcdefghjkm",
+          }),
+        );
+        expect(queryMock).toHaveBeenCalledOnce();
+        expect(query.setModel).toHaveBeenCalledTimes(2);
+      } finally {
+        query.finish();
+        await bridge.flushWork();
+        bridge.restore();
+      }
+    },
+  );
+
   it("applies live settings and restores the requested model after model fallback", async () => {
     const bridge = createBridgeJsonRpcTestHarness(handleLine);
     const queries: ControlledClaudeQuery[] = [];

@@ -21,7 +21,7 @@ import {
 import type { ProviderRegistryService } from "../providers/provider-registry.js";
 import { buildThreadStatusChangeMetadata } from "./thread-runtime-display.js";
 import { eq } from "drizzle-orm";
-import type { ThreadStatus } from "@omnyo/domain";
+import type { ClientTurnRequestId, ThreadStatus } from "@omnyo/domain";
 import { applyInboxRunEnd, type InboxRunOutcome } from "../inbox/engine.js";
 import { inboxRootOf } from "../inbox/family.js";
 import {
@@ -38,6 +38,7 @@ export interface InboxRunEndHint {
   outcome: InboxRunOutcome;
   reason: string | null;
   summary: string | null;
+  requestId?: ClientTurnRequestId;
 }
 
 export interface LifecycleInboxOptions {
@@ -109,6 +110,7 @@ function applyInboxLifecycle(
     outcome,
     reason: args.hint?.reason ?? null,
     summary: args.hint?.summary ?? null,
+    requestId: args.hint?.requestId,
     retryDecider: outcome === "failed" && providerRetryDecides(db),
     now: Date.now(),
   }).changedThreadIds;

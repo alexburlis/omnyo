@@ -942,6 +942,43 @@ function logBridgeError(message: string): void {
   process.stderr.write(`claude-code bridge: ${message}\n`);
 }
 
+function modelConfirmationCode(error: unknown): string {
+  if (error instanceof Error) {
+    if ("errorClass" in error) {
+      switch (error.errorClass) {
+        case "control_request_failed":
+          return "claude_model_confirmation_rejected";
+        case "process_error":
+        case "process_exited_nonzero":
+        case "process_killed_by_signal":
+          return "claude_model_confirmation_transport";
+      }
+    }
+
+    if ("code" in error) {
+      switch (error.code) {
+        case "ETIMEDOUT":
+          return "claude_model_confirmation_timeout";
+        case "EPIPE":
+        case "ECONNRESET":
+        case "ERR_STREAM_DESTROYED":
+          return "claude_model_confirmation_transport";
+      }
+    }
+  }
+
+  return "claude_model_confirmation_unknown";
+}
+
+class ClaudeModelConfirmationError extends Error {
+  readonly providerCode: string;
+
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.providerCode = modelConfirmationCode(cause);
+  }
+}
+
 function pushPromptInput(
   threadSession: ThreadSession,
   input: string,
@@ -972,7 +1009,13 @@ async function applyLiveSessionSettings(
     (intent === "new-turn" && next.model !== undefined)
   ) {
     threadSession.contextUsageCollector.invalidateCapacity();
-    await threadSession.session.setModel(next.model);
+
+    try {
+      await threadSession.session.setModel(next.model);
+    } catch (error) {
+      throw new ClaudeModelConfirmationError(error);
+    }
+
     seedModelContextWindowHint(threadSession, threadId, next.model);
   }
 
@@ -3005,7 +3048,20 @@ async function runTurnInput(
     await enterPlanModeIfRequested(threadSession, params);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    sendError(id, -32000, message);
+    sendError(
+      id,
+      BRIDGE_JSON_RPC_ERRORS.BRIDGE_ERROR,
+      message,
+      error instanceof ClaudeModelConfirmationError
+        ? {
+            errorInfo: {
+              category: "unknown",
+              providerCode: error.providerCode,
+              httpStatusCode: null,
+            },
+          }
+        : undefined,
+    );
 
     return;
   }

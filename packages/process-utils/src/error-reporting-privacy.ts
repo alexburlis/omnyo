@@ -15,6 +15,7 @@ import type {
 const operations = [
   "request",
   "thread-startup",
+  "claude-model-confirmation",
   "timeline-read",
   "provider-request",
   "voice-transcription",
@@ -44,6 +45,7 @@ const failureClasses = [
   "tls",
   "rate-limit",
   "upstream-rejected",
+  "sdk-rejected",
   "upstream-unavailable",
   "invalid-response",
   "empty-result",
@@ -601,6 +603,7 @@ function diagnosticSummary(context: ErrorDiagnosticContext): string {
   const labels = {
     request: "Request failed",
     "thread-startup": "Thread startup failed",
+    "claude-model-confirmation": "Claude model confirmation failed",
     "timeline-read": "Timeline read failed",
     "provider-request": "Provider request failed",
     "voice-transcription": "Voice transcription failed",

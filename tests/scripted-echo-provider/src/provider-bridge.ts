@@ -1231,7 +1231,14 @@ const handlers: Record<string, RequestHandler> = {
 
     if (errorAfterMs !== undefined) {
       setTimeout(
-        () => io.sendError(id, -32000, "The provider lost the turn start"),
+        () =>
+          io.sendError(id, -32000, "The provider lost the turn start", {
+            errorInfo: {
+              category: "unknown",
+              providerCode: "scripted_turn_start_rejected",
+              httpStatusCode: null,
+            },
+          }),
         errorAfterMs,
       );
 

@@ -327,7 +327,7 @@ describe("turn-start watchdog", () => {
     }
   });
 
-  it("fails a timed-out turn start once the provider answers it with an error", async () => {
+  it("preserves the provider error when a timed-out turn start fails", async () => {
     const realSetTimeout = setTimeout;
     const events: ThreadEvent[] = [];
     const record = createScriptedEchoRequestRecord();
@@ -388,6 +388,12 @@ describe("turn-start watchdog", () => {
     expect(failure).toMatchObject({
       threadId: "t1",
       scope: { kind: "thread" },
+      requestId: "creq_222222222t",
+      errorInfo: {
+        category: "unknown",
+        providerCode: "scripted_turn_start_rejected",
+        httpStatusCode: null,
+      },
     });
     expect(liveRuntime.getLiveThreadIds()).toEqual([]);
   });
