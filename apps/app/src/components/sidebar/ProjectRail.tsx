@@ -77,7 +77,6 @@ import {
   EMPTY_RAIL_ATTENTION,
   inboxTriageLabel,
   isRailAttentionQuiet,
-  railAttentionBadgeCount,
   railAttentionLabel,
   sumRailAttention,
   type InboxTriageCounts,
@@ -111,6 +110,22 @@ const NEEDS_BADGE_CLASS = cn(
   "bg-attention text-[color-mix(in_oklch,var(--attention)_20%,var(--ink))]",
   "dark:text-[color-mix(in_oklch,var(--attention)_20%,var(--canvas))]",
 );
+
+const RAIL_BADGE_CLASS =
+  "absolute -top-px h-4 min-w-4 rounded-full px-1 text-center text-2xs leading-4 font-bold tabular-nums ring-2 ring-(--omnyo-rail-surface)";
+
+const RAIL_BADGES = [
+  {
+    kind: "failed",
+    position: "-right-0.5",
+    color: "bg-destructive text-destructive-foreground",
+  },
+  { kind: "needs", position: "-left-0.5", color: NEEDS_BADGE_CLASS },
+] as const;
+
+function badgeLabel(count: number): string {
+  return count > 99 ? "99+" : String(count);
+}
 
 const REORDER_KEY_SHORTCUTS = "Alt+ArrowUp Alt+ArrowDown";
 
@@ -155,8 +170,6 @@ const RailTile = forwardRef<HTMLButtonElement, RailTileProps>(
     },
     ref,
   ) => {
-    const badge = railAttentionBadgeCount(counts);
-
     const pill = isSelected
       ? "selected"
       : isCurrent
@@ -209,20 +222,25 @@ const RailTile = forwardRef<HTMLButtonElement, RailTileProps>(
             >
               {face}
             </span>
-            {showAttentionBadge && badge > 0 ? (
-              <span
-                aria-hidden="true"
-                data-rail-tile-badge={counts.failed > 0 ? "failed" : "needs"}
-                className={cn(
-                  "pointer-events-none absolute -top-px -right-0.5 h-4 min-w-4 rounded-full px-1 text-center text-2xs leading-4 font-bold tabular-nums ring-2 ring-(--omnyo-rail-surface)",
-                  counts.failed > 0
-                    ? "bg-destructive text-destructive-foreground"
-                    : NEEDS_BADGE_CLASS,
-                )}
-              >
-                {badge > 99 ? "99+" : badge}
-              </span>
-            ) : null}
+            {showAttentionBadge
+              ? RAIL_BADGES.map(({ kind, position, color }) =>
+                  counts[kind] > 0 ? (
+                    <span
+                      key={kind}
+                      aria-hidden="true"
+                      data-rail-tile-badge={kind}
+                      className={cn(
+                        "pointer-events-none",
+                        RAIL_BADGE_CLASS,
+                        position,
+                        color,
+                      )}
+                    >
+                      {badgeLabel(counts[kind])}
+                    </span>
+                  ) : null,
+                )
+              : null}
             <AppCommandShortcutHint
               shortcut={shortcut}
               className="absolute -bottom-1 left-1/2 z-10 -translate-x-1/2 bg-canvas px-1 py-0.5 text-2xs text-sidebar-foreground opacity-100 shadow-sm"
@@ -268,27 +286,21 @@ function RailAttentionBadge({
   title: string;
   onNavigate?: () => void;
 }) {
-  const badge = railAttentionBadgeCount(counts);
-
-  if (badge === 0) return null;
-
-  return (
-    <SidebarChatListPopover
-      label={`Show ${railAttentionLabel(title, counts)}`}
-      title={title}
-      roots={roots}
-      side="right"
-      onNavigate={onNavigate}
-      badgeKind={counts.failed > 0 ? "failed" : "needs"}
-      className={cn(
-        "absolute -top-px -right-0.5 z-10 h-4 min-w-4 rounded-full px-1 text-center text-2xs leading-4 font-bold tabular-nums ring-2 ring-(--omnyo-rail-surface)",
-        counts.failed > 0
-          ? "bg-destructive text-destructive-foreground"
-          : NEEDS_BADGE_CLASS,
-      )}
-    >
-      {badge > 99 ? "99+" : badge}
-    </SidebarChatListPopover>
+  return RAIL_BADGES.map(({ kind, position, color }) =>
+    counts[kind] > 0 ? (
+      <SidebarChatListPopover
+        key={kind}
+        label={`Show ${title}: ${kind === "failed" ? `${counts.failed} failed` : `${counts.needs} ${counts.needs === 1 ? "needs" : "need"} you`}`}
+        title={title}
+        roots={roots.filter((root) => root.state === kind)}
+        side="right"
+        onNavigate={onNavigate}
+        badgeKind={kind}
+        className={cn("z-10", RAIL_BADGE_CLASS, position, color)}
+      >
+        {badgeLabel(counts[kind])}
+      </SidebarChatListPopover>
+    ) : null,
   );
 }
 
@@ -707,8 +719,6 @@ function HiddenProjectsMenu({
           <>
             <DropdownMenuLabel>Hidden projects</DropdownMenuLabel>
             {entries.map(({ project, counts: projectCounts }) => {
-              const badge = railAttentionBadgeCount(projectCounts);
-
               return (
                 <DropdownMenuItem
                   key={project.id}
@@ -738,19 +748,20 @@ function HiddenProjectsMenu({
                       className="size-2 shrink-0 rounded-full bg-success"
                     />
                   ) : null}
-                  {badge > 0 ? (
-                    <span
-                      aria-hidden="true"
-                      className={cn(
-                        "rounded-full px-1.5 text-2xs font-bold tabular-nums",
-                        projectCounts.failed > 0
-                          ? "bg-destructive text-destructive-foreground"
-                          : NEEDS_BADGE_CLASS,
-                      )}
-                    >
-                      {badge > 99 ? "99+" : badge}
-                    </span>
-                  ) : null}
+                  {[...RAIL_BADGES].reverse().map(({ kind, color }) =>
+                    projectCounts[kind] > 0 ? (
+                      <span
+                        key={kind}
+                        aria-hidden="true"
+                        className={cn(
+                          "rounded-full px-1.5 text-2xs font-bold tabular-nums",
+                          color,
+                        )}
+                      >
+                        {badgeLabel(projectCounts[kind])}
+                      </span>
+                    ) : null,
+                  )}
                 </DropdownMenuItem>
               );
             })}

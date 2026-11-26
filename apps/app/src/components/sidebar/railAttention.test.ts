@@ -12,7 +12,6 @@ import {
   inboxTriage,
   inboxTriageLabel,
   isRailAttentionQuiet,
-  railAttentionBadgeCount,
   railAttentionByProject,
   railAttentionLabel,
   railChatState,
@@ -57,24 +56,24 @@ describe("rail attention fixture", () => {
     ).toEqual(railAttentionFixture.expected.inbox);
   });
 
-  it("badges each project with its failed plus needs-you roots", () => {
+  it("counts failed and needs-you roots separately for each project's badges", () => {
     const counts = railAttentionByProject(railAttentionFixtureThreads);
 
     expect(
       Object.fromEntries(
-        railAttentionFixture.projects.map((project) => [
-          project.id,
-          railAttentionBadgeCount(
-            counts.get(project.id) ?? EMPTY_RAIL_ATTENTION,
-          ),
-        ]),
+        railAttentionFixture.projects.map((project) => {
+          const { failed, needs } =
+            counts.get(project.id) ?? EMPTY_RAIL_ATTENTION;
+
+          return [project.id, { failed, needs }];
+        }),
       ),
     ).toEqual({
-      proj_omnyo: 2,
-      proj_web: 2,
-      proj_ops: 0,
-      proj_empty: 0,
-      proj_personal: 1,
+      proj_omnyo: { failed: 1, needs: 1 },
+      proj_web: { failed: 2, needs: 0 },
+      proj_ops: { failed: 0, needs: 0 },
+      proj_empty: { failed: 0, needs: 0 },
+      proj_personal: { failed: 0, needs: 1 },
     });
   });
 });
