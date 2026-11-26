@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export const NATIVE_CLAUDE_KIND = "native-claude";
+
 export const POOL_PROVIDERS = ["claude", "codex"] as const;
 
 export type PoolProvider = (typeof POOL_PROVIDERS)[number];

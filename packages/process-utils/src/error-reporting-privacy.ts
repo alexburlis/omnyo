@@ -193,6 +193,7 @@ export type SplitLoadDiagnosticContext = {
       kind: "network";
       failureClass: "connection";
       downloadPhase?: "request" | "body";
+      assetAttemptId?: string;
     }
   | {
       stage: "import";
@@ -322,23 +323,22 @@ function readSplitLoadDiagnosticContext(
     ...(downloadPhase === undefined ? {} : { downloadPhase }),
   };
 
-  if (kind === "timeout") {
+  if (kind === "timeout" || kind === "network") {
     const assetAttemptId =
       downloadPhase === "request"
         ? readSplitAssetAttemptId(Reflect.get(value, "assetAttemptId"))
         : undefined;
 
-    return {
+    const correlated = {
       ...download,
-      stage,
-      kind,
-      failureClass: "timeout",
       ...(assetAttemptId === undefined ? {} : { assetAttemptId }),
     };
+
+    return kind === "timeout"
+      ? { ...correlated, stage, kind, failureClass: "timeout" }
+      : { ...correlated, stage, kind, failureClass: "connection" };
   }
 
-  if (kind === "network")
-    return { ...download, stage, kind, failureClass: "connection" };
   const status = boundedNumber(Reflect.get(value, "status"), 599, 100);
 
   return kind === "http" && status !== undefined

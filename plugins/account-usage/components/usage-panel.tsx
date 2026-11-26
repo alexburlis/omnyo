@@ -179,7 +179,8 @@ export function UsagePanel({
 
   if (
     snapshot !== null &&
-    (snapshot.poolUnavailable || snapshot.groups.length === 0)
+    (snapshot.poolUnavailable || snapshot.groups.length === 0) &&
+    snapshot.claudeError === undefined
   )
     return null;
 
@@ -197,7 +198,9 @@ export function UsagePanel({
         : snapshot === null
           ? "Loading"
           : stripAccounts === 0
-            ? "Disabled"
+            ? snapshot.claudeError === undefined
+              ? "Disabled"
+              : "Unavailable"
             : null;
 
   if (layout === "footer") {
@@ -228,6 +231,7 @@ export function UsagePanel({
           aria-label={status}
           title={
             failure?.message ??
+            snapshot?.claudeError ??
             (snapshot === null
               ? undefined
               : `Last reading ${formatAgo(snapshot.fetchedAt, now) ?? "just now"}`)

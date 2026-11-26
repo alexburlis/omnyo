@@ -11,7 +11,8 @@ import {
   type Snapshot,
 } from "./contract.ts";
 import { poolConfigSchema, poolStatusSchema } from "./lib/pool-contracts.ts";
-import { buildSnapshot } from "./lib/normalise.ts";
+import { buildSnapshot, DEFAULT_SWITCH_THRESHOLD } from "./lib/normalise.ts";
+import { createNativeClaudeUsageReader } from "./lib/native-claude-usage.ts";
 import { describePoolReadError } from "./lib/pool-read-error.ts";
 import {
   poolTelemetryReportSchema,
@@ -66,6 +67,7 @@ const emptySnapshot = (
 });
 
 export default function accountUsagePlugin(api: PluginApi): void {
+  const readNativeClaude = createNativeClaudeUsageReader(api);
   let lastSnapshot: Snapshot | null = null;
   let pendingSnapshot: Promise<Snapshot> | null = null;
 
@@ -124,7 +126,34 @@ export default function accountUsagePlugin(api: PluginApi): void {
       signal: AbortSignal.timeout(POOL_READ_TIMEOUT_MS),
     });
 
-  const fetchSnapshot = async (): Promise<Snapshot> => {
+  function includeNativeAfterPoolFailure(
+    snapshot: Snapshot,
+    native: Awaited<ReturnType<typeof readNativeClaude>>,
+  ): Snapshot {
+    if (snapshot.groups.length > 0 || native.accounts.length === 0)
+      return native.error === undefined
+        ? snapshot
+        : { ...snapshot, claudeError: native.error };
+
+    return {
+      ...buildSnapshot(
+        {
+          accepting: false,
+          inFlight: 0,
+          enabledAccountCount: native.accounts.length,
+          routing: { claude: false, codex: false },
+          accounts: native.accounts,
+        },
+        DEFAULT_SWITCH_THRESHOLD,
+        Date.now(),
+      ),
+      error: snapshot.error,
+    };
+  }
+
+  const fetchSnapshot = async (
+    nativeReading = readNativeClaude(),
+  ): Promise<Snapshot> => {
     let method: "status.get" | "config.get" = "status.get";
     let startedAt = performance.now();
 
@@ -141,22 +170,32 @@ export default function accountUsagePlugin(api: PluginApi): void {
         signal: AbortSignal.timeout(POOL_READ_TIMEOUT_MS),
       });
 
-      const snapshot = buildSnapshot(
-        status,
-        config.switchThreshold,
-        Date.now(),
-      );
+      const native = await nativeReading;
+
+      const snapshot = {
+        ...buildSnapshot(
+          { ...status, accounts: [...status.accounts, ...native.accounts] },
+          config.switchThreshold,
+          Date.now(),
+        ),
+        ...(native.error === undefined ? {} : { claudeError: native.error }),
+      };
 
       lastSnapshot = snapshot;
 
       return snapshot;
     } catch (error) {
-      return failedSnapshot("snapshot", method, error, startedAt);
+      return includeNativeAfterPoolFailure(
+        failedSnapshot("snapshot", method, error, startedAt),
+        await nativeReading,
+      );
     }
   };
 
-  const readStatus = (): Promise<Snapshot> => {
-    pendingSnapshot ??= fetchSnapshot().finally(() => {
+  const readStatus = (
+    nativeReading?: ReturnType<typeof readNativeClaude>,
+  ): Promise<Snapshot> => {
+    pendingSnapshot ??= fetchSnapshot(nativeReading).finally(() => {
       pendingSnapshot = null;
     });
 
@@ -164,6 +203,7 @@ export default function accountUsagePlugin(api: PluginApi): void {
   };
 
   const refreshAll = async (): Promise<Snapshot> => {
+    const nativeReading = readNativeClaude(true);
     let method: "status.get" | "account.refreshUsage" = "status.get";
     let startedAt = performance.now();
 
@@ -189,11 +229,14 @@ export default function accountUsagePlugin(api: PluginApi): void {
           ),
       );
     } catch (error) {
-      return failedSnapshot("refresh", method, error, startedAt);
+      return includeNativeAfterPoolFailure(
+        failedSnapshot("refresh", method, error, startedAt),
+        await nativeReading,
+      );
     }
 
     if (pendingSnapshot !== null) await pendingSnapshot;
-    const snapshot = await readStatus();
+    const snapshot = await readStatus(nativeReading);
     api.realtime.publish(USAGE_CHANGED_CHANNEL, {
       fetchedAt: snapshot.fetchedAt,
     });
@@ -297,7 +340,7 @@ export default function accountUsagePlugin(api: PluginApi): void {
         ),
       };
     },
-    snapshot: readStatus,
+    snapshot: () => readStatus(),
     refresh: refreshAll,
     codexResetCredits: async (input) => {
       const result = await api.sdk.plugins.callRpc({
