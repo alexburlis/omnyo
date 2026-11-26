@@ -333,6 +333,53 @@ describe("Codex credit observations", () => {
 });
 
 describe("codexQuotaFromUsage", () => {
+  const hardStop = {
+    reason: "workspace_owner_credits_depleted",
+    resetAt: null,
+  };
+
+  it.each([
+    {
+      report: "current",
+      reason: { type: hardStop.reason },
+      previous: emptyQuota(),
+    },
+    {
+      report: "previous",
+      reason: undefined,
+      previous: { ...emptyQuota(), usageRestriction: hardStop },
+    },
+  ])(
+    "keeps a workspace hard stop from the $report report after a spending-cap reset",
+    ({ reason, previous }) => {
+      const capResetAt = 2_000;
+
+      const quota = codexQuotaFromUsage(
+        ACCOUNT_ID,
+        {
+          rate_limit: {
+            allowed: true,
+            primary_window: { used_percent: 0, limit_window_seconds: 604_800 },
+          },
+          credits: { has_credits: false, unlimited: false },
+          rate_limit_reached_type: reason,
+          spend_control: {
+            reached: true,
+            individual_limit: { remaining_percent: 0, reset_at: capResetAt },
+          },
+        },
+        previous,
+        1_000,
+      );
+
+      if (quota === null) throw new Error("Expected a Codex quota snapshot.");
+      expect(
+        isQuotaExhausted(quota, "other", 0.98, capResetAt * 1_000 + 1),
+      ).toBe(true);
+      expect(quota.usageRestriction).toEqual(hardStop);
+    },
+  );
+
   it("keeps a Pro account's single weekly window out of the Claude slots", () => {
     const quota = codexQuotaFromUsage(
       ACCOUNT_ID,

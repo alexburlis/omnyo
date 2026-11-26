@@ -454,8 +454,10 @@ export function codexQuotaFromUsage(
   }
 
   const observedRestriction =
-    control?.reached === true ||
-    (individual != null && individual.remaining_percent <= 0)
+    (reasonRestriction === null ||
+      reasonRestriction.reason === "spend_control_reached") &&
+    (control?.reached === true ||
+      (individual != null && individual.remaining_percent <= 0))
       ? {
           reason: "spend_control_reached",
           resetAt:
