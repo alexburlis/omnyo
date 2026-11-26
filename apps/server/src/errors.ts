@@ -1,3 +1,4 @@
+import { QueuedMessageThreadUnavailableError } from "@omnyo/db";
 import { ProjectAttachmentError } from "@omnyo/domain";
 import type { ErrorHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -152,6 +153,10 @@ function errorToResponse(
   request: FailedRequest,
   reportedRequest: ReportedRequest,
 ): Response {
+  if (error instanceof QueuedMessageThreadUnavailableError) {
+    return new ApiError(409, "thread_not_writable", error.message).toResponse();
+  }
+
   if (error instanceof ProjectAttachmentError) {
     return new ApiError(400, "invalid_request", error.message).toResponse();
   }
