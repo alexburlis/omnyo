@@ -20,7 +20,7 @@ describe("Marketplace catalog", () => {
     expect(marketplaceItems.filter(({ kind }) => kind === "skill")).toEqual(
       publicSkills.map((skill) => ({ ...skill, kind: "skill" })),
     );
-    expect(publicSkills).toHaveLength(518);
+    expect(publicSkills).toHaveLength(519);
     expect(
       marketplaceItems.flatMap((item) =>
         item.kind === "workflow"

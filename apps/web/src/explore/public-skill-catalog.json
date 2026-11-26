@@ -380,6 +380,29 @@
     "summary": "Build and maintain a small source-linked map of user journeys, prerequisites, and verification evidence."
   },
   {
+    "slug": "audit-codebase-simplification",
+    "title": "Codebase Simplification Audit",
+    "category": "Coding & architecture",
+    "publisher": "Omnyo",
+    "license": "MIT",
+    "keywords": [
+      "dead code",
+      "refactoring",
+      "simplification",
+      "deduplication",
+      "tech debt",
+      "maintainability",
+      "implementation plans",
+      "code audit",
+      "cleanup"
+    ],
+    "source": "omnyo",
+    "sourceUrl": "https://omnyohq.com/skills/omnyo/audit-codebase-simplification/1.0.0/SKILL.md",
+    "revision": "1.0.0",
+    "sha256": "fb0fbe11b124188086309a8d8d5ffc5a33880d8acfdae82b67bc036c78f080d6",
+    "summary": "Find dead code and the largest refactoring, simplification and deduplication opportunities, then write ranked, self-contained plans that preserve behavior, UI and performance."
+  },
+  {
     "slug": "add-agent-memory",
     "title": "Add Agent Memory",
     "category": "Agent workflows",

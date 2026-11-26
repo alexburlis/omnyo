@@ -20,8 +20,8 @@ describe("public Explore skills", () => {
     const owned = publicSkills.filter((skill) => skill.source === "omnyo");
 
     expect(external).toHaveLength(501);
-    expect(owned).toHaveLength(17);
-    expect(new Set(publicSkills.map((skill) => skill.slug)).size).toBe(518);
+    expect(owned).toHaveLength(18);
+    expect(new Set(publicSkills.map((skill) => skill.slug)).size).toBe(519);
 
     for (const skill of external) {
       expect(skill.sourceUrl).toMatch(
@@ -68,7 +68,7 @@ describe("public Explore skills", () => {
     ]);
     expect(found).toMatchObject({
       total: 1,
-      catalogTotal: 518,
+      catalogTotal: 519,
       page: 1,
       lastPage: 1,
     });
