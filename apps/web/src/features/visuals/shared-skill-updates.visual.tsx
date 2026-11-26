@@ -1,5 +1,3 @@
-import "./shared-skill-updates.css";
-
 export const label =
   "One watch on a shared skills folder. An edit to review/SKILL.md updates the API and website skill lists.";
 

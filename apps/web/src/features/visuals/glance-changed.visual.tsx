@@ -1,5 +1,3 @@
-import "./glance-changed.css";
-
 export const label =
   "A Glance card that moved on since you last looked: it lists the status change from Working to Done and the new result, then Ready to archive is clicked and an Undo toast appears.";
 

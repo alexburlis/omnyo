@@ -1,5 +1,3 @@
-import "./privacy-diagnostics.css";
-
 export const label =
   "Updated Omnyo Privacy & diagnostics settings: Weekly activity count, Product analytics for this client, Crash reports and Show diagnostic events, each with its own switch.";
 

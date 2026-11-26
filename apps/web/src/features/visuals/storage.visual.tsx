@@ -1,5 +1,3 @@
-import "./storage.css";
-
 export const label =
   "Omnyo's Storage & retention page for one machine: thread storage by category with free disk space. Clear archived files deletes the stored files of archived threads but keeps their conversations, the archived total drops from 8.4 GB to 94 MB, free disk space rises, and a toast confirms 8.3 GB freed.";
 

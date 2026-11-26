@@ -1,5 +1,3 @@
-import "./plugins.css";
-
 export const label =
   "Omnyo's Installed plugins page. Glance is switched on, then Omnyo Customizer starts picking: the outline follows the pointer to the Category button, a click opens Change this part of Omnyo with the button attached, and the change is typed in for an agent.";
 

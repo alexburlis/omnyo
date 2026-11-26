@@ -1,5 +1,3 @@
-import "./integrations-pr.css";
-
 export const label =
   "A chat's Git control open in its header: branch feat/csv-export with 42 lines added, 7 removed and 2 commits ahead of main. The pull request Add CSV export #128 runs its three checks, turns from Checks running to Ready to merge, and Merge is pressed, so the badge reads Merged.";
 

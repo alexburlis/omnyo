@@ -1,5 +1,3 @@
-import "./keyboard-prompts.css";
-
 export const label =
   "Prompt Library open over the chat composer after pressing Ctrl+R. Typing csv expot, with a typo, still finds the starred prompt Add CSV export with semicolons for de-DE invoices and two recent CSV export prompts. Enter puts the starred prompt into the composer.";
 

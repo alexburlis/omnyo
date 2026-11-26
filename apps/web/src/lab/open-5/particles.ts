@@ -202,16 +202,20 @@ void main() {
   float span = i0 < 0.5 ? ${RAIN_SPAN.toFixed(2)} : mix(0.55, 0.8, morphing);
   float fp = clamp((f - order * (1.0 - span)) / span, 0.0, 1.0);
   fp = fp * fp * (3.0 - 2.0 * fp);
-  vec2 target = morphing > 0.5 ? framePos() : stateAt(i0 + 1.0);
-  vec2 pos = mix(stateAt(i0), target, fp);
+  vec2 pos;
+  if (fp <= 0.0) pos = stateAt(i0);
+  else {
+    vec2 target = morphing > 0.5 ? framePos() : stateAt(i0 + 1.0);
+    pos = fp >= 1.0 ? target : mix(stateAt(i0), target, fp);
+  }
   float swirl = sin(fp * PI) * (30.0 + aSeed.z * 150.0) * mix(1.0, 0.12, morphing);
   float angle = aSeed.w * 6.2831 + fp * 2.6;
   pos += vec2(cos(angle), sin(angle)) * swirl;
 
   float ip = clamp((uIntro - aSeed.x * 0.5) / 0.5, 0.0, 1.0);
   ip = 1.0 - pow(1.0 - ip, 3.0);
-  vec2 introFrom = fieldPos() * 1.25;
-  pos = mix(introFrom, pos, ip) + vec2(cos(angle), sin(angle)) * sin(ip * PI) * 60.0 * aSeed.z;
+  if (ip < 1.0) pos = mix(fieldPos() * 1.25, pos, ip);
+  pos += vec2(cos(angle), sin(angle)) * sin(ip * PI) * 60.0 * aSeed.z;
 
   vec2 away = pos - uPointer;
   float dist = length(away);

@@ -1,5 +1,3 @@
-import "./dev-servers-restart.css";
-
 export const label =
   "Restarting a dev server from an Omnyo chat: above the composer, localhost:5174/invoices is Stopped on studio-mac. You press Restart, it shows Starting…, then Running with an Open button, and a Started localhost:5174/invoices step appears in the chat.";
 

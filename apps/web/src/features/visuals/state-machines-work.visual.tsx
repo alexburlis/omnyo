@@ -1,5 +1,3 @@
-import "./state-machines-work.css";
-
 export const label =
   "A running State Machines instance with its Pause and Stop controls. Under Active work, the Fix the failing check agent step runs out of its 30-minute deadline on attempt 1 of 3, is marked Timed out, waits to retry and starts attempt 2 with a fresh deadline, while the history records each step.";
 

@@ -1,5 +1,3 @@
-import "./dev-servers.css";
-
 export const label =
   "The Dev servers shelf above a chat composer, listing three servers with their address, status and machine, with Open on the running one and Restart on the others.";
 

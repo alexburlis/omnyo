@@ -222,7 +222,9 @@ it("describes verified public installs, capped counts and raw retention accurate
 
 it("keeps the public dictionaries matched to their event schemas", () => {
   expect(SITE_USAGE_DICTIONARY.map(({ name }) => name).sort()).toEqual(
-    siteUsageEventSchema.options.map((event) => event.shape.name.value).sort(),
+    siteUsageEventSchema.def.options
+      .map((event) => event.shape.name.def.values[0])
+      .sort(),
   );
   expect(PRODUCT_USAGE_DICTIONARY.map(({ name }) => name).sort()).toEqual(
     productUsageEventSchema.options

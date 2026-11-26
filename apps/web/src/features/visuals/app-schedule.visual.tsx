@@ -1,5 +1,3 @@
-import "./app.css";
-
 import { AppMock } from "../../lab/app-mock/app-mock";
 
 export const label =

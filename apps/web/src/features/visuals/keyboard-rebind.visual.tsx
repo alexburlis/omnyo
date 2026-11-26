@@ -1,5 +1,3 @@
-import "./keyboard-rebind.css";
-
 export const label =
   "Settings → Keyboard in Omnyo: the Threads shortcuts list New thread, Search threads, Archive thread, Shelve thread and Next thread. You click Archive thread's Unassigned shortcut, it shows Press keys, and the new shortcut ⌥⌘A appears with a reset button.";
 

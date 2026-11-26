@@ -1,5 +1,3 @@
-import "./stats-fabric.css";
-
 import type { CSSProperties } from "react";
 
 export const label =

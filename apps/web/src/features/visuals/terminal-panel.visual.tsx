@@ -1,5 +1,3 @@
-import "./terminal-demo.css";
-
 export const label =
   "A Bash terminal tab beside the chat, showing test results from the project's worktree.";
 

@@ -1,5 +1,3 @@
-import "./storage-cleanup-processes.css";
-
 export const label =
   "Omnyo's Left running page on macbook. The archived chat Add CSV export still has a vite dev server and a tsc watcher using 1.1 GB, counting down to their stop. Both are stopped, the total falls from 1.4 GB in 3 processes to 310 MB in 1 process, and Recent stops lists them as Chat archived. The running chat's server is left alone.";
 

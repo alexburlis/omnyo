@@ -1,5 +1,3 @@
-import "./remote-pair.css";
-
 export const label =
   "Pairing a phone with Omnyo connect: Settings → Mobile on the computer shows a QR code and the one-time pairing code K7QP-3M9X, counting down from 10 minutes. On the iPhone, the code is typed in, Pair is pressed and the phone shows Paired with Omnyo connect, with the server saved.";
 

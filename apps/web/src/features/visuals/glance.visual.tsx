@@ -1,5 +1,3 @@
-import "./glance.css";
-
 export const label =
   "A chat's Glance card updating as the agent works: Toward moves from 3 of 4 date formats passing to all 4 passing, then the status turns from Working to Done with a green result.";
 

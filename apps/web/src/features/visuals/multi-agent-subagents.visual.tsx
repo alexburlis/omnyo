@@ -1,5 +1,3 @@
-import "./multi-agent-subagents.css";
-
 export const label =
   "A Claude Code chat runs two subagents. Each run is a timeline row, the first expands into its searches and file reads, and the count on the chat's status ring drops from 2 to 1 to done as they finish.";
 

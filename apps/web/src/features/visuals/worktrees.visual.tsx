@@ -1,5 +1,3 @@
-import "./worktrees.css";
-
 export const label =
   "Omnyo's new chat box with the Start in menu open. New worktree from main is picked and the chat is sent: it appears under Running in the sidebar, and its new worktree joins the list beside the worktrees of the other running chats, each on its own branch.";
 

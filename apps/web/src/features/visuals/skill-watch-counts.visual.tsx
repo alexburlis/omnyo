@@ -1,5 +1,3 @@
-import "./speed.css";
-
 export const label =
   "Mac test with three workspaces. Two shared a skills folder, which used one native watch. Once idle, zero skill readers remained running.";
 

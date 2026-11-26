@@ -1,5 +1,3 @@
-import "./automations-detail.css";
-
 export const label =
   "An automation's page in Omnyo: Weekday issue triage runs at 09:00 AM, Monday through Friday, with its prompt above a Runs list where today's run appears, runs and succeeds, and the next run moves to Monday.";
 

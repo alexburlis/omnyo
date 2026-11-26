@@ -1,5 +1,3 @@
-import "./self-hosted.css";
-
 export const label =
   "Omnyo settings on your own machine: the Omnyo server on studio-mac is running, two machines are connected, Claude Code and Codex are signed in, and no account is needed.";
 

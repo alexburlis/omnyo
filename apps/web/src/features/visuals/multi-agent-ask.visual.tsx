@@ -1,5 +1,3 @@
-import "./multi-agent-ask.css";
-
 export const label =
   "A child review chat asks whether the export should include archived invoices. The question goes to its parent chat instead of you, the parent answers with omnyo thread tell, and the child carries on.";
 

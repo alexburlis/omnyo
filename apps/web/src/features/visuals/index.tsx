@@ -1,6 +1,14 @@
-import "./kit.css";
+import "../../lab/app-mock/app-mock.css";
+import "./styles.css";
 
-import { useEffect, useRef, type ComponentType } from "react";
+import {
+  lazy,
+  memo,
+  Suspense,
+  useEffect,
+  useRef,
+  type ComponentType,
+} from "react";
 
 export interface VisualModule {
   label: string;
@@ -8,20 +16,29 @@ export interface VisualModule {
   Demo?: ComponentType;
 }
 
-const MODULES = import.meta.glob<VisualModule>("./*.visual.tsx", {
-  eager: true,
-});
+const MODULES = import.meta.glob<VisualModule>("./*.visual.tsx");
 
 const VISUALS = new Map(
-  Object.entries(MODULES).map(([path, module]) => [
+  Object.entries(MODULES).map(([path, load]) => [
     path.slice(2, -".visual.tsx".length),
-    module,
+    lazy(async () => {
+      const entry = await load();
+
+      return { default: () => <VisualArtwork entry={entry} /> };
+    }),
   ]),
 );
 
 export const visualIds = () => [...VISUALS.keys()];
 
-export const getFeatureDemo = (id: string) => VISUALS.get(id)?.Demo;
+const DEMOS = new Map([
+  [
+    "terminal",
+    lazy(async () => ({ default: (await import("./terminal.visual")).Demo })),
+  ],
+]);
+
+export const getFeatureDemo = (id: string) => DEMOS.get(id);
 
 let liveObserver: IntersectionObserver | null = null;
 
@@ -47,8 +64,7 @@ const observeLive = (element: HTMLElement) => {
   };
 };
 
-export function FeatureVisual({ id }: { id: string }) {
-  const entry = VISUALS.get(id);
+function VisualArtwork({ entry }: { entry: VisualModule }) {
   const box = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -59,11 +75,25 @@ export function FeatureVisual({ id }: { id: string }) {
     return observeLive(element);
   }, []);
 
-  if (!entry) throw new Error(`Feature visual ${id} is not registered`);
-
   return (
     <div ref={box} className="fv-box" role="img" aria-label={entry.label}>
       <entry.Visual />
     </div>
   );
 }
+
+export const FeatureVisual = memo(function FeatureVisual({
+  id,
+}: {
+  id: string;
+}) {
+  const Artwork = VISUALS.get(id);
+
+  if (!Artwork) throw new Error(`Feature visual ${id} is not registered`);
+
+  return (
+    <Suspense fallback={null}>
+      <Artwork />
+    </Suspense>
+  );
+});

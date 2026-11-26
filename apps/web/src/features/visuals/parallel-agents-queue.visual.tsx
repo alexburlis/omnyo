@@ -1,5 +1,3 @@
-import "./parallel-agents-queue.css";
-
 export const label =
   "Two chats wait for a slot on a full Mac running 8 of 8 chats. When one chat finishes, the first waiting chat takes its slot; with overflow on, the second starts on a second Mac that has room.";
 

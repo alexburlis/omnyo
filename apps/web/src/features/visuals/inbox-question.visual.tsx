@@ -1,5 +1,3 @@
-import "./inbox-question.css";
-
 export const label =
   "A native question card in an Omnyo chat: the agent asks which date format the CSV export should use, ISO 8601 is picked and submitted, and the chat moves from Needs you back to Working.";
 

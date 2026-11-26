@@ -1,5 +1,3 @@
-import "./devices-tech.css";
-
 export const label =
   "Settings, Machines: four computers connected to one Omnyo server. macbook is this machine and the server, and mac-mini, win-3090 and linux-box run agents for it. Each row shows its status, system and running chats, and a setting picks the default machine for new chats.";
 

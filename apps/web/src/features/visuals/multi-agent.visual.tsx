@@ -1,5 +1,3 @@
-import "./multi-agent.css";
-
 export const label =
   "A parent chat with two child chats nested under it, and the review child reporting back to the parent that its review finished with 1 serious and 2 minor findings.";
 

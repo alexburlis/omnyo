@@ -1,5 +1,3 @@
-import "./keyboard.css";
-
 export const label =
   "Omnyo's quick palette filtering as arch is typed: the Threads commands narrow to Archive thread and Search threads, Enter archives the chat, it leaves the sidebar and a Thread archived toast offers Undo.";
 

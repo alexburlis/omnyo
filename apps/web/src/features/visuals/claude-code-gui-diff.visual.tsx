@@ -1,5 +1,3 @@
-import "./claude-code-gui-diff.css";
-
 export const label =
   "The diff side panel for a Claude Code chat: typing the filter !*.test.ts hides the test file, then the view switches from stacked to split to compare the old and new export code side by side.";
 

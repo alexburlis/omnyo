@@ -1,5 +1,3 @@
-import "./inbox.css";
-
 export const label =
   "The Omnyo Inbox: chats from every project sorted into Needs you, Ready to archive, Running and Waiting, with a question to answer and a finished chat to archive.";
 

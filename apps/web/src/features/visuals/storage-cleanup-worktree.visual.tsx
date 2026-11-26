@@ -1,5 +1,3 @@
-import "./storage-cleanup-worktree.css";
-
 export const label =
   "A finished chat, Add CSV export, is archived from the sidebar. Its worktree folder in harbor-ledger shows Removes in 5 min, then is removed and frees 412 MB, while its branch feat/csv-export stays with its 3 commits. The worktree of the running chat, Date parser tests, is untouched.";
 

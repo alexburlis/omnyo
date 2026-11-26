@@ -1,3 +1,5 @@
+import { Suspense } from "react";
+
 import { FeatureVisual, getFeatureDemo } from "./visuals";
 
 export function FeatureFrame({
@@ -14,7 +16,9 @@ export function FeatureFrame({
   if (Demo) {
     return (
       <div className={className}>
-        <Demo />
+        <Suspense fallback={null}>
+          <Demo />
+        </Suspense>
       </div>
     );
   }

@@ -1,5 +1,3 @@
-import "./performance-switch.css";
-
 export const label =
   "Switching between recently opened chats in Omnyo. The pointer clicks Date parser tests, then Review: Add CSV export, then Add CSV export, and each chat's messages are on screen at once. A gauge marks the measured result: every one of 20 switches took 85 ms or less, against a 100 ms line.";
 

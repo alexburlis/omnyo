@@ -1,5 +1,3 @@
-import "./privacy.css";
-
 export const label =
   "Where your data goes: from Omnyo on your devices to the Omnyo server you run, then to the AI provider you choose. Omnyo runs no AI service.";
 

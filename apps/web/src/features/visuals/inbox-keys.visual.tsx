@@ -1,5 +1,3 @@
-import "./inbox-keys.css";
-
 export const label =
   "Inbox triage from the keyboard: E archives the focused finished chat and an Undo toast appears, then W opens the wait menu and Tomorrow 09:00 moves the next chat to Waiting.";
 

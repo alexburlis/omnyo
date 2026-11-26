@@ -1,5 +1,3 @@
-import "./voice-phone.css";
-
 export const label =
   "Dictating from the iPhone app: you tap the microphone in a chat's composer and speak while a waveform moves. The recording goes to studio-mac, where Dictation by Paraspeech transcribes it on the Mac, and the words appear in the phone's draft.";
 

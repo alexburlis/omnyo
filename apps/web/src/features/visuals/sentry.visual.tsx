@@ -1,5 +1,3 @@
-import "./sentry.css";
-
 export const label =
   "The Sentry inbox in Omnyo: three error issues with event counts, one with a reviewed fix ready and two with a Solve button.";
 

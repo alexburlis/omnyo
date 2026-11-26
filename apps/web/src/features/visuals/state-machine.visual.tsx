@@ -1,5 +1,3 @@
-import "./state-machine.css";
-
 export const label =
   "A running State Machines instance moving through its loop: a new commit runs the checks, a failure goes to the fixer agent, its PR runs the checks again and success returns to waiting for commits, with the current state highlighted as it moves.";
 

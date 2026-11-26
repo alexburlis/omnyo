@@ -1,5 +1,3 @@
-import "./state-machines-decision.css";
-
 export const label =
   "A State Machines decision waiting under Needs you: Merge the date parser fix? You choose Ask for changes, which leads back to Fix the failing check, type the required reason and press Confirm.";
 

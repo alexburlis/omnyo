@@ -1,5 +1,3 @@
-import "./automations-paused.css";
-
 export const label =
   "An automation that keeps failing: Nightly test run fails, a notification says Omnyo will retry it, two retries fail as well, and Omnyo pauses the automation and sends a second notification saying it stopped after repeated failures.";
 

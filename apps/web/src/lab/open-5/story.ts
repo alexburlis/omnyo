@@ -479,8 +479,35 @@ export function startStory(
 
   const viewport = { w: window.innerWidth, h: window.innerHeight };
   let navHeight = NAV_HEIGHT;
+  const layoutRects = new Map<HTMLElement, DOMRect>();
+  const pinHeights = new Map<HTMLElement, number>();
+  let layoutDirty = true;
+  let scrollable = 1;
+
+  const layoutRect = (element: HTMLElement) => {
+    let rect = layoutRects.get(element);
+
+    if (!rect) {
+      const measured = element.getBoundingClientRect();
+      rect = new DOMRect(
+        measured.left + window.scrollX,
+        measured.top + window.scrollY,
+        measured.width,
+        measured.height,
+      );
+      layoutRects.set(element, rect);
+    }
+
+    return new DOMRect(
+      rect.x - window.scrollX,
+      rect.y - window.scrollY,
+      rect.width,
+      rect.height,
+    );
+  };
 
   const handleResize = () => {
+    layoutDirty = true;
     viewport.w = window.innerWidth;
     viewport.h = window.innerHeight;
     view.w = canvas?.clientWidth || viewport.w;
@@ -517,7 +544,7 @@ export function startStory(
 
   const measure = (element: HTMLElement | null, vh: number) => {
     if (!element) return { p: 0, e: 0, rect: null };
-    const rect = element.getBoundingClientRect();
+    const rect = layoutRect(element);
 
     return {
       p: clamp01(-rect.top / Math.max(1, rect.height - vh)),
@@ -547,16 +574,24 @@ export function startStory(
     () => [0, 0, 0, 0] as Vec4,
   );
 
+  const windowLayout = windows.map((): [number, number] => [0, 0]);
+
   let order: number[] | null = null;
 
   const isPinned = (pin: HTMLElement) => {
-    const track = pin.parentElement?.getBoundingClientRect();
+    const track = pin.parentElement ? layoutRect(pin.parentElement) : null;
+    let height = pinHeights.get(pin);
 
-    return Boolean(track && track.top < 0 && track.bottom > pin.offsetHeight);
+    if (height === undefined) {
+      height = pin.offsetHeight;
+      pinHeights.set(pin, height);
+    }
+
+    return Boolean(track && track.top < 0 && track.bottom > height);
   };
 
   const canvasPlace = (morphing: boolean) => {
-    const page = root.getBoundingClientRect();
+    const page = layoutRect(root);
 
     return {
       rides:
@@ -579,6 +614,21 @@ export function startStory(
   };
 
   const updateDom = (vw: number, vh: number) => {
+    if (layoutDirty) {
+      layoutRects.clear();
+      pinHeights.clear();
+      scrollable = document.documentElement.scrollHeight - vh;
+      windows.forEach((element, index) => {
+        const rect = windowRects[index];
+
+        if (!rect) return;
+        windowLayout[index] = [element.offsetLeft, element.offsetTop];
+        rect[2] = element.offsetWidth;
+        rect[3] = element.offsetHeight;
+      });
+      layoutDirty = false;
+    }
+
     const phone = vw <= PHONE_MAX_WIDTH;
     const morphing = morphReady && !phone;
     const place = canvasPlace(morphing);
@@ -604,16 +654,14 @@ export function startStory(
     const productPinRect = morphing ? rectOf(productPin) : undefined;
     const productPinHeight = morphing ? (productPin?.offsetHeight ?? 0) : 0;
     const layerRect = winLayer?.getBoundingClientRect();
-    const scrollable = document.documentElement.scrollHeight - vh;
 
-    windows.forEach((element, index) => {
+    windows.forEach((_, index) => {
       const rect = windowRects[index];
+      const layout = windowLayout[index];
 
-      if (!rect) return;
-      rect[0] = (layerRect?.left ?? 0) + element.offsetLeft;
-      rect[1] = (layerRect?.top ?? 0) + element.offsetTop;
-      rect[2] = element.offsetWidth;
-      rect[3] = element.offsetHeight;
+      if (!rect || !layout) return;
+      rect[0] = (layerRect?.left ?? 0) + layout[0];
+      rect[1] = (layerRect?.top ?? 0) + layout[1];
     });
 
     const storyY = story.rect ? (-story.rect.top / vh) * 100 : -100;
@@ -1182,8 +1230,14 @@ export function startStory(
   let lastHeight = 0;
   let still = 0;
 
+  const schedule = () => {
+    if (!raf && !document.hidden) raf = requestAnimationFrame(frame);
+  };
+
   const frame = (now: number) => {
-    raf = requestAnimationFrame(frame);
+    raf = 0;
+
+    if (document.hidden) return;
     const vw = viewport.w;
     const vh = viewport.h;
     const dt = Math.min(now - last, 64);
@@ -1197,7 +1251,13 @@ export function startStory(
         ? still + 1
         : 0;
 
-    if (!state || !settled || still < 3 || still % REFRESH_FRAMES === 0) {
+    if (
+      !state ||
+      layoutDirty ||
+      !settled ||
+      still < 3 ||
+      still % REFRESH_FRAMES === 0
+    ) {
       state = updateDom(vw, vh);
       lastScroll = scrollY;
       lastWidth = vw;
@@ -1225,7 +1285,11 @@ export function startStory(
       streamRect,
     } = state;
 
-    if (!particles || !canvas) return;
+    if (!particles || !canvas) {
+      if (!settled || still < 3) schedule();
+
+      return;
+    }
 
     const dpr = Math.min(
       window.devicePixelRatio || 1,
@@ -1272,7 +1336,12 @@ export function startStory(
       alpha = 0;
     }
 
-    if (alpha <= 0 && !drawn) return;
+    if (alpha <= 0 && !drawn) {
+      if (!settled || still < 3) schedule();
+
+      return;
+    }
+
     drawn = alpha > 0;
 
     const particleFrame: ParticleFrame = {
@@ -1309,25 +1378,74 @@ export function startStory(
     };
 
     particles.render(particleFrame);
+
+    if (drawn || !settled || still < 3) schedule();
   };
+
+  const refreshLayout = () => {
+    handleResize();
+    schedule();
+  };
+
+  const resize = new ResizeObserver(refreshLayout);
+
+  const measured = new Set([
+    root,
+    nav,
+    canvas,
+    ...Object.values(scenes),
+    ...flows,
+    ...pins,
+    ...windows,
+    productPin,
+    productFrame,
+    productSurface,
+  ]);
+
+  for (const element of measured) {
+    if (element) resize.observe(element);
+  }
+
+  const handleVisibility = () => {
+    if (document.hidden) {
+      cancelAnimationFrame(raf);
+      raf = 0;
+    } else {
+      last = performance.now();
+      refreshLayout();
+    }
+  };
+
+  window.addEventListener("scroll", schedule, { passive: true });
+  window.addEventListener("resize", schedule);
+  window.visualViewport?.addEventListener("resize", schedule);
+  document.addEventListener("visibilitychange", handleVisibility);
+  document.fonts.addEventListener("loadingdone", refreshLayout);
 
   const stopTheme = themed
     ? subscribeTheme(() => {
         tones = readTones(getComputedStyle(root));
         state = updateDom(viewport.w, viewport.h);
+        schedule();
       })
     : () => {};
 
-  raf = requestAnimationFrame(frame);
+  schedule();
 
   return () => {
     stopTheme();
     cancelAnimationFrame(raf);
     revealer.disconnect();
+    resize.disconnect();
     stopDiscs();
     clearMarks();
     window.removeEventListener("resize", handleResize);
+    window.removeEventListener("resize", schedule);
     window.visualViewport?.removeEventListener("resize", handleResize);
+    window.visualViewport?.removeEventListener("resize", schedule);
+    window.removeEventListener("scroll", schedule);
+    document.removeEventListener("visibilitychange", handleVisibility);
+    document.fonts.removeEventListener("loadingdone", refreshLayout);
     window.removeEventListener("pointermove", handlePointer);
     document.documentElement.removeEventListener("pointerleave", handleLeave);
     particles?.dispose();

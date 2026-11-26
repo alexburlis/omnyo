@@ -1,5 +1,3 @@
-import "./codex-gui-picker.css";
-
 export const label =
   "The model picker for a Codex chat: the arrow key steps GPT-5.6 Sol from High to xHigh to Max, Enter applies it, and the lightning button steps the service tier to Fast and then Ultrafast.";
 

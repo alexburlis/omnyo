@@ -1,5 +1,3 @@
-import "./notifications-chime.css";
-
 export const label =
   "Chime's Events settings with the Glass sound theme. As a chat completes, another waits for an answer and a third fails, each plays its sound, its sidebar row lights up and the matching event shows a short sound wave.";
 

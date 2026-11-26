@@ -1,5 +1,3 @@
-import "./stats.css";
-
 import type { ReactNode } from "react";
 
 export const label =

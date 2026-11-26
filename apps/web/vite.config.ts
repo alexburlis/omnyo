@@ -23,6 +23,24 @@ export default defineConfig(({ command }) => ({
     ],
   },
   ssr: command === "build" ? { noExternal: true } : {},
+  environments: {
+    client: {
+      build: {
+        rolldownOptions: {
+          output: {
+            codeSplitting: {
+              groups: [
+                {
+                  name: "guide-meta",
+                  test: /\/guides\/pages\/[^/]+\.meta\.ts$/,
+                },
+              ],
+            },
+          },
+        },
+      },
+    },
+  },
   server: {
     allowedHosts: [".localhost", ".ts.net"],
   },

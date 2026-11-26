@@ -1,5 +1,3 @@
-import "./multi-agent-spawn.css";
-
 export const label =
   "A Claude Code chat starts a Codex review with omnyo thread spawn. The review appears under Child threads, the parent steers it with omnyo thread tell, and the review reports back when it finishes.";
 

@@ -1,5 +1,3 @@
-import "./remote.css";
-
 export const label =
   "A phone showing the Omnyo Inbox with an open question and two answer buttons, reached from the Omnyo server on studio-mac through Omnyo connect.";
 

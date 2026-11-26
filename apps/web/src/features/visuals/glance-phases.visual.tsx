@@ -1,5 +1,3 @@
-import "./glance-phases.css";
-
 export const label =
   "A chat's Glance card above the composer: the phase strip moves from Build to Test to Ship while the Now and Next rows update, then the status turns from Working to Done and Next offers Ready to archive.";
 

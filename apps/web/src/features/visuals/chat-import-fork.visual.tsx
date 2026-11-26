@@ -1,5 +1,3 @@
-import "./chat-import-fork.css";
-
 export const label =
   "An imported Claude Code chat that hides its 112 oldest turns from view. Sending a new message continues it in a fork of the session, while the original session file on disk stays read-only and unchanged.";
 

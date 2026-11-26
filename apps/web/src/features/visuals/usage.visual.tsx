@@ -1,5 +1,3 @@
-import "./usage.css";
-
 export const label =
   "The Account usage popover, opened from the usage rings in Omnyo's bottom bar: the Codex studio account runs down to its limit, and the next ready account, spare, starts serving while the chat keeps running.";
 

@@ -3,7 +3,7 @@ import Copy01Icon from "@hugeicons/core-free-icons/Copy01Icon";
 import Link01Icon from "@hugeicons/core-free-icons/Link01Icon";
 import Tick02Icon from "@hugeicons/core-free-icons/Tick02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { notFound, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { useContext, useState } from "react";
 
 import blogCss from "../blog/blog.css?url";
@@ -26,20 +26,9 @@ import {
 } from "./guide-blocks";
 import { brandProse, faqJsonLd } from "./guide-prose";
 import type { Guide, GuideFaq, GuideStep } from "./guide-types";
-import { getGuide } from "./guides";
 import guidesCss from "./guides.css?url";
 
-export function guideRouteData(slug: string) {
-  const guide = getGuide(slug);
-
-  if (!guide) {
-    throw notFound();
-  }
-
-  return { slug, head: guideHead(guide) };
-}
-
-function guideHead(guide: Guide) {
+export function guideHead(guide: Guide) {
   return {
     meta: pageMeta(
       `${guide.title} — Omnyo`,

@@ -395,12 +395,20 @@ export function SiteNav({
       if (!node) return;
 
       const y = scrollY;
-      const busy = node.querySelector("details[open]") !== null;
-      const hide = y > NAV_HIDE_AFTER && y > last && !busy;
 
       if (Math.abs(y - last) > NAV_SCROLL_SLOP || y <= NAV_SCROLL_SLOP) {
+        const hide =
+          y > NAV_HIDE_AFTER &&
+          y > last &&
+          node.querySelector("details[open]") === null;
+
         node.toggleAttribute("data-hidden", hide);
-        root.dataset.siteNav = hide ? "hidden" : "shown";
+        const visibility = hide ? "hidden" : "shown";
+
+        if (root.dataset.siteNav !== visibility) {
+          root.dataset.siteNav = visibility;
+        }
+
         last = y;
       }
 
