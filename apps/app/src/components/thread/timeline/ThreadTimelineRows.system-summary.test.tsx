@@ -147,7 +147,7 @@ describe("system summary overflow", () => {
     ).toBe("false");
   });
 
-  it("preserves auto-expanded terminal error diagnostics", () => {
+  it("folds terminal error diagnostics behind the row disclosure", () => {
     const detail = "Error: connection failed\n    at reconnect (client.ts:42)";
     renderRow(
       systemRow({
@@ -157,6 +157,14 @@ describe("system summary overflow", () => {
         detail,
       }),
     );
+    const disclosure = screen.getByRole("button", { name: /Provider error/ });
+    expect(disclosure.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText(/at reconnect/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+
+    fireEvent.click(disclosure);
+
+    expect(disclosure.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText(/at reconnect/).textContent).toContain(detail);
     expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
   });

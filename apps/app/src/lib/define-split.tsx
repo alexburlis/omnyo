@@ -99,19 +99,19 @@ async function downloadBeforeImport(
   preflight: "downloaded" | "unlisted";
 }> {
   const assetName = splitImportAssetName(id);
-  let traceHeaderTimeout = false;
+  let traceRequestFailure = false;
 
   for (let attempt = 0; ; attempt += 1) {
-    const result = await downloadSplit(id, priority, traceHeaderTimeout);
+    const result = await downloadSplit(id, priority, traceRequestFailure);
 
     if (typeof result === "string") return { assetName, preflight: result };
     const delay = DOWNLOAD_RETRY_DELAYS[attempt];
 
     if (delay === undefined)
       throw new SplitDownloadError(id, result, attempt + 1);
-    traceHeaderTimeout =
+    traceRequestFailure =
       attempt === DOWNLOAD_RETRY_DELAYS.length - 1 &&
-      result.kind === "timeout" &&
+      result.kind !== "http" &&
       result.downloadPhase === "request";
     await new Promise<void>((resolve) => setTimeout(resolve, delay));
   }

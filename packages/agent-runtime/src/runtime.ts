@@ -2433,7 +2433,12 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
                     threadId,
                     scope: { kind: "thread" },
                     code: "provider_turn_start_failed",
+                    requestId: pendingTurnStart.clientRequestId,
                     message: `The provider failed to start the turn after its request timed out: ${error.message}`,
+                    errorInfo:
+                      error instanceof JsonRpcResponseError
+                        ? error.errorInfo
+                        : undefined,
                   });
                 },
               },

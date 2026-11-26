@@ -17,11 +17,11 @@
   scroll-padding-top: 88px;
 }
 
-:root:has(.site-nav)[data-site-nav="hidden"] {
+:root:has(.site-nav[data-hidden]:not(:focus-within)) {
   --site-nav-clearance: 0px;
 }
 
-:where(.site-nav, .fx-nav) {
+:where(.site-nav) {
   --sn-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   --sn-spring: cubic-bezier(0.34, 1.32, 0.64, 1);
   --sn-hair: color-mix(in oklab, var(--fg) 10%, transparent);
@@ -37,17 +37,26 @@
 }
 
 .site-nav {
+  --paper: rgb(242 241 236);
+  --bg: white;
+  --fg: rgb(12 12 13);
+  --muted: color-mix(in oklab, var(--fg) 62%, var(--paper));
+  --brand: #ff4f17;
+  --accent: var(--brand);
+  --shade: oklch(0.3211 0 0);
+  --site-nav-height: 60px;
+  --site-nav-inset: 10px;
   --sn-w: 1360px;
   --sn-inset: clamp(10px, 2.2vw, 28px);
   position: sticky;
-  top: 10px;
+  top: var(--site-nav-inset);
   z-index: 50;
   display: flex;
   align-items: center;
   gap: 10px;
   width: min(var(--sn-w), calc(100% - 2 * var(--sn-inset)));
-  height: 60px;
-  margin: 10px auto 0;
+  height: var(--site-nav-height);
+  margin: var(--site-nav-inset) auto 0;
   padding: 0 9px 0 20px;
   border-radius: 999px;
   color: var(--fg);
@@ -56,6 +65,15 @@
     width 0.6s var(--sn-ease),
     transform 0.5s var(--sn-ease),
     opacity 0.35s var(--sn-ease);
+}
+
+.dark .site-nav {
+  --paper: rgb(19 19 18);
+  --bg: oklch(0.195 0 0);
+  --fg: rgb(240 239 233);
+  --muted: color-mix(in oklab, var(--fg) 64%, var(--paper));
+  --brand: #ff6a3d;
+  --shade: black;
 }
 
 .site-nav::before {
@@ -122,7 +140,7 @@
   opacity: 0.55;
 }
 
-.site-nav[data-hidden] {
+.site-nav[data-hidden]:not(:focus-within) {
   opacity: 0;
   transform: translateY(calc(-100% - 16px));
   pointer-events: none;
@@ -219,7 +237,7 @@
   display: none;
 }
 
-:where(.site-nav, .fx-nav) .site-nav-links {
+:where(.site-nav) .site-nav-links {
   position: relative;
   gap: 2px;
   margin-right: 4px;
@@ -229,8 +247,8 @@
   box-shadow: inset 0 0 0 1px var(--sn-hair);
 }
 
-:where(.site-nav, .fx-nav) .site-nav-links > a,
-:where(.site-nav, .fx-nav) .site-nav-menu > summary {
+:where(.site-nav) .site-nav-links > a,
+:where(.site-nav) .site-nav-menu > summary {
   position: relative;
   z-index: 1;
   height: 34px;
@@ -240,11 +258,11 @@
   letter-spacing: -0.005em;
 }
 
-:where(.site-nav, .fx-nav) .site-nav-menu > summary {
+:where(.site-nav) .site-nav-menu > summary {
   padding-right: 11px;
 }
 
-:where(.site-nav, .fx-nav) .site-nav-links .is-current {
+:where(.site-nav) .site-nav-links .is-current {
   gap: 7px;
   background: var(--bg);
   box-shadow:
@@ -253,7 +271,7 @@
     0 6px 14px -8px var(--sn-shadow);
 }
 
-:where(.site-nav, .fx-nav) .site-nav-links .is-current::before {
+:where(.site-nav) .site-nav-links .is-current::before {
   content: "";
   flex: none;
   width: 6px;
@@ -264,7 +282,7 @@
     color-mix(in oklab, var(--brand, var(--accent)) 20%, transparent);
 }
 
-:where(.site-nav, .fx-nav) .site-nav-glide {
+:where(.site-nav) .site-nav-glide {
   display: block;
   position: absolute;
   top: 4px;
@@ -282,28 +300,28 @@
     width 0.42s var(--sn-spring);
 }
 
-:where(.site-nav, .fx-nav) .site-nav-links[data-glide] .site-nav-glide {
+:where(.site-nav) .site-nav-links[data-glide] .site-nav-glide {
   opacity: 1;
 }
 
-:where(.site-nav, .fx-nav) .site-nav-links[data-glide="show"] .site-nav-glide {
+:where(.site-nav) .site-nav-links[data-glide="show"] .site-nav-glide {
   transition: opacity 0.25s var(--sn-ease);
 }
 
-:where(.site-nav, .fx-nav) .site-nav-links > .site-nav-gh {
+:where(.site-nav) .site-nav-links > .site-nav-gh {
   justify-content: center;
   width: 34px;
   margin-left: 4px;
   padding: 0;
 }
 
-:where(.site-nav, .fx-nav) .site-nav-gh-glyph {
+:where(.site-nav) .site-nav-gh-glyph {
   width: 17px;
   height: 17px;
   transition: transform 0.5s var(--sn-spring);
 }
 
-:where(.site-nav, .fx-nav) .site-nav-gh:hover .site-nav-gh-glyph {
+:where(.site-nav) .site-nav-gh:hover .site-nav-gh-glyph {
   transform: rotate(-10deg) scale(1.1);
 }
 
@@ -359,17 +377,6 @@
   width: 17px;
   height: 17px;
   color: var(--brand, var(--accent));
-}
-
-.fx-nav .site-nav-links {
-  margin-right: 0;
-}
-
-.site-nav :where(a, summary, button):focus-visible,
-.fx-nav .site-nav-links :where(a, summary, button):focus-visible {
-  outline: 2px solid var(--brand, var(--fg));
-  outline-offset: 2px;
-  border-radius: 999px;
 }
 
 .site-nav-menu {
@@ -617,7 +624,8 @@
 }
 
 .site-nav-sheet a:hover,
-.site-nav-sheet a[aria-current="page"] {
+.site-nav-sheet a[aria-current="page"],
+.site-nav-sheet a.is-current {
   background: color-mix(in oklab, var(--fg) 6%, transparent);
 }
 
@@ -647,9 +655,8 @@
   }
 
   .site-nav {
-    top: 8px;
-    height: 56px;
-    margin-top: 8px;
+    --site-nav-height: 56px;
+    --site-nav-inset: 8px;
     gap: 8px;
     padding: 0 7px 0 16px;
   }

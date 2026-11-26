@@ -1,5 +1,9 @@
 import { stageTimelineFollowUp } from "@/lib/send-outbox/stage-timeline-follow-up";
-import { isBackgroundSend } from "@/lib/send-outbox/timeline-submissions";
+import {
+  outboxEntryPlacement,
+  queuedMessageShowsInChat,
+} from "@/lib/send-outbox/timeline-submissions";
+import { usePendingQueueFollowUps } from "@/hooks/usePendingQueueFollowUps";
 import { useLiveThreadSpeed } from "@/hooks/useLiveThreadSpeed";
 import { ThreadInboxReason } from "@/components/thread/ThreadInboxReason";
 import { useThreadInitialLoadPending } from "@/components/thread/ThreadInitialLoad";
@@ -2759,23 +2763,32 @@ export function ThreadDetailPromptArea({
   const actionableQueuedMessages = useMemo(
     () =>
       queuedMessages.filter(
-        (message) => !isBackgroundSend(message, runtimeDisplayStatus),
+        (message) => !queuedMessageShowsInChat(message, runtimeDisplayStatus),
       ),
     [queuedMessages, runtimeDisplayStatus],
   );
 
+  const pendingQueueFollowUps = usePendingQueueFollowUps(
+    thread.id,
+    runtimeDisplayStatus,
+    queuedMessages,
+  );
+
   const listedQueuedMessages = useMemo(
-    () =>
-      withoutQueuedMessages(
+    () => [
+      ...withoutQueuedMessages(
         actionableQueuedMessages,
         queuedMessagesAwaitingCompaction.filter(
           (message) =>
             message.id !== inlineEditingQueuedMessage?.queuedMessageId,
         ),
       ),
+      ...pendingQueueFollowUps,
+    ],
     [
       inlineEditingQueuedMessage?.queuedMessageId,
       actionableQueuedMessages,
+      pendingQueueFollowUps,
       queuedMessagesAwaitingCompaction,
     ],
   );
@@ -2951,11 +2964,11 @@ export function ThreadDetailPromptArea({
             <WaitingToSendCard
               entries={waitingToSendEntries.filter(
                 (entry) =>
-                  entry.state.kind === "paused" ||
-                  entry.action.kind !== "thread-message" ||
-                  !entry.action.message.input.some(
-                    (part) => part.submissionId === entry.submissionId,
-                  ),
+                  outboxEntryPlacement(
+                    entry,
+                    thread.id,
+                    runtimeDisplayStatus,
+                  ) === "card",
               )}
             />
             {promptQueue}

@@ -30,7 +30,10 @@ function createHostDaemonClient(baseUrl: string, hostKey: string) {
 
 describe("internal session protocol version", () => {
   it("sends current socket policy after an enabled HTTP handshake became stale", async () => {
-    const server = await startTestServer();
+    const server = await startTestServer({
+      isDevelopment: false,
+      errorReportingDsn: "https://public@sentry.example.invalid/1",
+    });
     let socket: WebSocket | undefined;
 
     try {

@@ -847,7 +847,19 @@ function applyEventEffects(
         continue;
       }
 
-      if (event.code === "provider_process_exited") {
+      const turnStartFailed = event.code === "provider_turn_start_failed";
+
+      if (turnStartFailed) {
+        if (
+          event.requestId === undefined ||
+          event.scope.kind !== "thread" ||
+          (thread.status !== "starting" &&
+            thread.status !== "active" &&
+            thread.status !== "stopping")
+        ) {
+          continue;
+        }
+      } else {
         deps.pendingInteractions.interruptPendingInteractionsForThreadIds({
           threadIds: [entry.threadId],
           reason:
@@ -855,14 +867,31 @@ function applyEventEffects(
         });
       }
 
-      if (event.scope.kind === "thread") {
-        rejectUnstartedTurnRequest(deps, entry.threadId);
+      const rejectedRequestId =
+        event.scope.kind === "thread"
+          ? rejectUnstartedTurnRequest(
+              deps,
+              entry.threadId,
+              turnStartFailed ? event.requestId : undefined,
+            )
+          : null;
+
+      if (turnStartFailed && rejectedRequestId === null) {
+        continue;
       }
 
-      const outcome = applyLoggedThreadLifecycleEvent(deps, {
-        event: { type: "run.failed" },
-        threadId: entry.threadId,
-      });
+      const outcome = applyLoggedThreadLifecycleEvent(
+        deps,
+        { event: { type: "run.failed" }, threadId: entry.threadId },
+        turnStartFailed && rejectedRequestId !== null
+          ? {
+              outcome: "failed",
+              reason: null,
+              summary: null,
+              requestId: rejectedRequestId,
+            }
+          : undefined,
+      );
 
       if (outcome.applied) {
         addParentTurnNotificationFollowUp({

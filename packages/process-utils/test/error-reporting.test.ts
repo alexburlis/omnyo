@@ -226,9 +226,9 @@ describe("process error reporting through the Sentry client", () => {
       event.tags = { private: "private-customer" };
       event.contexts = {
         diagnostic: {
-          operation: "request",
+          operation: "claude-model-confirmation",
           stage: "receive",
-          failureClass: "connection",
+          failureClass: "sdk-rejected",
           outcome: "terminal",
           status: 9999,
           attempt: -1,
@@ -252,13 +252,16 @@ describe("process error reporting through the Sentry client", () => {
     expect(JSON.stringify(envelopes)).not.toContain("private-");
     expect(events[0]?.release).toBe("1.0.67");
     expect(events[0]?.contexts?.diagnostic).toEqual({
-      operation: "request",
+      operation: "claude-model-confirmation",
       stage: "receive",
-      failureClass: "connection",
+      failureClass: "sdk-rejected",
       outcome: "terminal",
     });
     expect(envelopes[0]?.[1].map(([header]) => header.type)).toEqual(["event"]);
-    expect(events[0]?.exception?.values?.[0]?.type).toBe("TypeError");
+    expect(events[0]?.exception?.values?.[0]).toMatchObject({
+      type: "TypeError",
+      value: "Claude model confirmation failed: sdk-rejected",
+    });
   });
 
   it("sends only scrubbed exception data with service identity tags", async () => {

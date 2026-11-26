@@ -1,0 +1,34 @@
+ARG NODE_IMAGE=docker.io/library/node@sha256:0efee1e068d21f6edcab7fa8c962fc4ecd50d4e28727bc23963379b63ee318ab
+FROM ${NODE_IMAGE} AS build
+WORKDIR /repo
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches ./patches
+COPY packages/tsconfig/package.json ./packages/tsconfig/
+COPY packages/shared-ui/package.json ./packages/shared-ui/
+COPY packages/config/package.json ./packages/config/
+COPY packages/domain/package.json ./packages/domain/
+COPY packages/process-utils/package.json ./packages/process-utils/
+COPY apps/web/package.json ./apps/web/
+RUN corepack enable && pnpm install --frozen-lockfile --ignore-scripts --filter '@omnyo/web...'
+COPY packages/tsconfig ./packages/tsconfig
+COPY packages/shared-ui/src ./packages/shared-ui/src
+COPY packages/config/src ./packages/config/src
+COPY packages/domain/src ./packages/domain/src
+COPY packages/process-utils/src ./packages/process-utils/src
+COPY assets/omnyo-logo.svg ./assets/omnyo-logo.svg
+COPY plugins ./plugins
+COPY apps/web ./apps/web
+ENV VITE_OMNYO_WEBSITE_SENTRY_DSN=https://74e386708d0e3e948b81b18e2786f03f@o4510702759706624.ingest.de.sentry.io/4512400759849040
+RUN cd apps/web && pnpm exec vite build
+
+FROM ${NODE_IMAGE}
+RUN rm -rf /usr/local/lib/node_modules /opt/yarn-v* /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg
+ENV NODE_ENV=production HOSTNAME=0.0.0.0 PORT=8080
+WORKDIR /app
+COPY --from=build /repo/apps/web/dist ./dist
+COPY --from=build /repo/apps/web/server.mjs ./server.mjs
+COPY apps/landing/scripts/chibistack-test.mjs ./test.mjs
+RUN mkdir -p apps/landing/.next/cache && chown 65532:65532 apps/landing/.next/cache && printf '#!/bin/sh\nexec node /app/test.mjs "$@"\n' > /app/test && chmod 0555 /app/test
+USER 65532:65532
+EXPOSE 8080
+CMD ["node", "--env-file-if-exists=/run/secrets/app.env", "server.mjs"]

@@ -60,7 +60,7 @@ export const page: FeaturePageBody = {
     {
       question: "Does my audio leave my Mac?",
       answer:
-        "Dictation by Paraspeech transcribes on your Omnyo server. When you dictate from a phone, the recording goes to that server.",
+        "Dictation by Paraspeech transcribes on your Omnyo server. Recordings from your phone go to that server. Omnyo 1.0.184 removes the built-in Codex cloud transcription service.",
     },
     {
       question: "Is this Claude Code's own voice mode?",

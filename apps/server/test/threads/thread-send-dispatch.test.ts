@@ -17,6 +17,8 @@ import type { EnvironmentRow } from "@omnyo/db";
 import { eq } from "drizzle-orm";
 import {
   changedMessageSchema,
+  encodeClientTurnRequestIdNumber,
+  INBOX_CALLER_PLUGIN_HEADER,
   threadScope,
   turnScope,
   type ServiceTier,
@@ -25,6 +27,7 @@ import {
   type ThreadEvent,
 } from "@omnyo/domain";
 import { groupHostDaemonEvents } from "@omnyo/host-daemon-contract";
+import * as reporting from "@omnyo/process-utils/error-reporting";
 import { createDeferredPromise } from "@omnyo/test-helpers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TelemetryService } from "../../src/services/system/telemetry.js";
@@ -1466,12 +1469,16 @@ async function postProviderEvents(
   harness: TestAppHarness,
   sessionId: string,
   events: ThreadEvent[],
+  retainedSource?: string,
 ) {
   const response = await harness.app.request("/internal/session/events", {
     method: "POST",
     headers: internalAuthHeaders(harness),
     body: JSON.stringify({
       sessionId,
+      ...(retainedSource === undefined
+        ? {}
+        : { sourceInstanceId: retainedSource, firstEventIndex: 1 }),
       eventGroups: groupHostDaemonEvents(
         events.map((event) => ({ threadId: event.threadId, event })),
       ),
@@ -1615,6 +1622,20 @@ describe("unconfirmed steers", () => {
 describe("unconfirmed turn starts", () => {
   async function startTurnOnIdleThread(harness: TestAppHarness, value: number) {
     const fixture = seedProviderThreadFixture({ harness, value });
+    const providerThreadId = `provider-send-dispatch-${value}`;
+    seedTurnStarted(harness.deps, {
+      threadId: fixture.thread.id,
+      sequence: 3,
+      turnId: "prior-turn",
+      providerThreadId,
+    });
+    seedStoredEvent(harness.deps, {
+      threadId: fixture.thread.id,
+      sequence: 4,
+      type: "turn/completed",
+      scope: turnScope("prior-turn"),
+      data: { providerThreadId, status: "completed" },
+    });
     await sendThreadMessage(harness.deps, {
       environment: fixture.environment,
       payload: {
@@ -1700,10 +1721,31 @@ describe("unconfirmed turn starts", () => {
   it.each([
     { code: "provider_process_exited", value: 82 },
     { code: "provider_turn_start_failed", value: 83 },
+    {
+      code: "provider_turn_start_failed",
+      value: 84,
+      providerCode: "claude_model_confirmation_rejected",
+      laterCode: "provider_process_exited",
+    },
+    {
+      code: "provider_turn_start_failed",
+      value: 85,
+      providerCode: "claude_model_confirmation_rejected",
+      laterCode: "provider_turn_start_timeout",
+    },
   ])(
-    "marks the message failed when $code settles a turn that never started",
-    async ({ code, value }) => {
+    "settles the unstarted turn for $code ($value)",
+    async ({ code, value, providerCode, laterCode }) => {
       await withTestHarness(async (harness) => {
+        const capture = vi
+          .spyOn(reporting, "captureProcessError")
+          .mockImplementation(() => {});
+
+        setAppSettings(harness.db, {
+          ...getAppSettings(harness.db),
+          crashReportsEnabled: true,
+        });
+
         const { requestId, sessionId, thread } = await startTurnOnIdleThread(
           harness,
           value,
@@ -1715,7 +1757,17 @@ describe("unconfirmed turn starts", () => {
             threadId: thread.id,
             scope: threadScope(),
             code,
-            message: "The provider lost the turn start",
+            message: "private-provider-message",
+            requestId,
+            ...(providerCode === undefined
+              ? {}
+              : {
+                  errorInfo: {
+                    category: "unknown",
+                    providerCode,
+                    httpStatusCode: null,
+                  },
+                }),
           },
         ]);
 
@@ -1737,6 +1789,94 @@ describe("unconfirmed turn starts", () => {
             .map((event) => JSON.parse(event.data).code),
         ).toEqual([code]);
         expect(getThread(harness.db, thread.id)?.status).toBe("error");
+
+        expect(capture).not.toHaveBeenCalled();
+
+        if (code === "provider_turn_start_failed") {
+          const staleError = {
+            type: "system/error",
+            threadId: thread.id,
+            scope: threadScope(),
+            code,
+            message: "private-provider-message",
+            errorInfo: {
+              category: "unknown",
+              providerCode: "claude_model_confirmation_transport",
+              httpStatusCode: null,
+            },
+          } satisfies ThreadEvent;
+
+          await postProviderEvents(harness, sessionId, [
+            {
+              ...staleError,
+              requestId: encodeClientTurnRequestIdNumber({ value: 80 }),
+            },
+            staleError,
+          ]);
+        }
+
+        if (laterCode !== undefined) {
+          await postProviderEvents(
+            harness,
+            sessionId,
+            [
+              {
+                type: "system/error",
+                threadId: thread.id,
+                scope:
+                  laterCode === "provider_process_exited"
+                    ? turnScope("prior-turn")
+                    : threadScope(),
+                code: laterCode,
+                message: "private-provider-message",
+              },
+            ],
+            "retained-prior-provider",
+          );
+          expect(
+            listEvents(harness.db, { threadId: thread.id })
+              .filter((event) => event.type === "system/error")
+              .map((event) => JSON.parse(event.data).code)
+              .at(-1),
+          ).toBe(laterCode);
+        }
+
+        const decline = await harness.app.request(
+          `/api/v1/threads/${thread.id}/retry/decline`,
+          {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              [INBOX_CALLER_PLUGIN_HEADER]: "provider-retry",
+            },
+            body: JSON.stringify({
+              turnRequestId: requestId,
+              reason: "not-retryable",
+              incident: null,
+            }),
+          },
+        );
+
+        expect(decline.status, await decline.clone().text()).toBe(200);
+
+        if (providerCode !== undefined) {
+          expect(capture).toHaveBeenCalledExactlyOnceWith(
+            expect.any(Error),
+            expect.objectContaining({
+              diagnostic: expect.objectContaining({
+                operation: "claude-model-confirmation",
+                failureClass: "sdk-rejected",
+                attempt: 1,
+                operationId: expect.any(String),
+              }),
+            }),
+          );
+          expect(JSON.stringify(capture.mock.calls)).not.toContain(
+            "private-provider-message",
+          );
+        } else if (code === "provider_turn_start_failed") {
+          expect(capture).not.toHaveBeenCalled();
+        }
       });
     },
   );

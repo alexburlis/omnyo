@@ -1367,14 +1367,17 @@ describe("interaction lifecycle records from the daemon", () => {
 
 describe("retained event delivery", () => {
   it.each([
-    { identity: "stale", priorRoot: false, expected: "starting" },
-    { identity: "current", priorRoot: false, expected: "error" },
-    { identity: "stale", priorRoot: true, expected: "starting" },
-    { identity: "current", priorRoot: true, expected: "error" },
-    { identity: "missing", priorRoot: false, expected: "starting" },
+    ["provider_process_exited", "stale", false, "starting"],
+    ["provider_process_exited", "current", false, "error"],
+    ["provider_process_exited", "stale", true, "starting"],
+    ["provider_process_exited", "current", true, "error"],
+    ["provider_process_exited", "missing", false, "starting"],
+    ["provider_turn_start_failed", "stale", false, "starting"],
+    ["provider_turn_start_failed", "current", true, "error"],
+    ["provider_turn_start_failed", "missing", false, "starting"],
   ] as const)(
-    "matches retained pending-start exit identity $identity with prior root $priorRoot",
-    async ({ identity, priorRoot, expected }) => {
+    "matches retained pending-start error %s identity %s with prior root %s",
+    async (code, identity, priorRoot, expected) => {
       const { harness, session, thread, environment } = await setupEventRoute();
 
       try {
@@ -1417,8 +1420,8 @@ describe("retained event delivery", () => {
           type: "system/error",
           threadId: thread.id,
           scope: threadScope(),
-          code: "provider_process_exited",
-          message: "provider exited before turn/started",
+          code,
+          message: "provider failed before turn/started",
           ...(identity === "missing" ? {} : { requestId }),
         } as const;
 
@@ -1437,6 +1440,11 @@ describe("retained event delivery", () => {
 
         expect(response.status).toBe(200);
         expect(getThread(harness.db, thread.id)?.status).toBe(expected);
+        expect(
+          listEvents(harness.db, { threadId: thread.id }).filter(
+            (event) => event.type === "client/turn/rejected",
+          ),
+        ).toHaveLength(expected === "error" ? 1 : 0);
       } finally {
         await harness.cleanup();
       }

@@ -93,6 +93,7 @@ function entry(overrides: Partial<InboxEntry>): InboxEntry {
 function row(overrides: Partial<InboxWaitingRow>): InboxWaitingRow {
   return {
     group: "comes-back",
+    kind: "event",
     reason: "Waiting",
     waitId: null,
     returnAt: null,

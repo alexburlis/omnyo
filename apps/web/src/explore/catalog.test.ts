@@ -125,7 +125,7 @@ describe("curated Explore seed", () => {
     });
     expect(byKey.get("plugin/browser-automation")).toMatchObject({
       title: "Browser Automation",
-      publisher: "bb",
+      publisher: "Omnyo",
       path: explorePluginPath("browser-automation"),
       cta: {
         kind: "find-in-omnyo",

@@ -59,7 +59,7 @@ it("keeps a failed diff download inside its file-change row", async () => {
   );
 
   expect((await screen.findByRole("alert")).textContent).toContain(
-    "Could not load",
+    "This part of Omnyo didn’t load",
   );
   screen.getByText("patch rejected");
   screen.getByText("pnpm test");

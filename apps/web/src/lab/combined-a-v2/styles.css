@@ -586,3 +586,52 @@
 .lab-open-5.lab-combined-kinetic.lab-combined-a-v2 .nav-end .theme-toggle {
   mix-blend-mode: difference;
 }
+
+@media (min-width: 821px) {
+  .lab-open-5.lab-combined-kinetic.lab-combined-a-v2[data-morph] .story {
+    height: 310vh;
+  }
+
+  .lab-open-5.lab-combined-kinetic.lab-combined-a-v2[data-morph]
+    .kinetic-workspace {
+    margin-top: -100svh;
+  }
+
+  .lab-open-5.lab-combined-kinetic.lab-combined-a-v2[data-morph]
+    .kinetic-workspace-pin {
+    --enter: 1;
+  }
+
+  .lab-open-5.lab-combined-kinetic.lab-combined-a-v2[data-morph]
+    .kinetic-product {
+    opacity: var(--arrive, 0);
+  }
+
+  .lab-open-5.lab-combined-kinetic.lab-combined-a-v2[data-morph]
+    :is(.kinetic-copy, .kinetic-rail) {
+    opacity: clamp(0, calc((var(--arrive, 0) - 0.35) / 0.65), 1);
+  }
+
+  .lab-open-5.lab-combined-kinetic.lab-combined-a-v2[data-morph]
+    .kinetic-workspace-pin[data-arriving]
+    :is(.kinetic-copy, .kinetic-rail) {
+    visibility: hidden;
+  }
+
+  .lab-open-5.lab-combined-kinetic.lab-combined-a-v2[data-morph]
+    .kinetic-stars {
+    opacity: calc(var(--stage-mix) * 0.75 * var(--arrive, 0));
+  }
+}
+
+.lab-combined-a-v2 :is(.nav-brand, .nav-act, .theme-toggle) {
+  --nav-bg: initial;
+  --nav-fg: initial;
+}
+
+.lab-combined-a-v2 :is(.story-title, .tile-visual, .terminal-demo, .get-glyph) {
+  --bg: initial;
+  --fg: initial;
+  --muted: initial;
+  --soft: initial;
+}

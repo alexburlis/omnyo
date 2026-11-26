@@ -2,7 +2,12 @@
 
 Bundled into the private Omnyo distribution as `omnyo--account-usage`. Live Claude and
 Codex usage stays visible in the bottom rail as one small ring per provider.
-The ring shows the account serving a request now, or else the most recently
+Claude usage comes from the native Claude profiles on the server machine.
+Account Usage reads limits through each profile's Claude Code session, shares
+readings for five minutes, and reads them again when you select **Refresh**.
+A profile that needs attention stays visible with its status.
+
+For pooled accounts, the ring shows the account serving a request now, or else the most recently
 used one; a provider with a single account always shows that account. With
 neither, the ring shows the average weekly percentage left, or the next
 capacity time when nothing is usable. The ring stays quiet while capacity is
@@ -46,14 +51,13 @@ An account in error gets one plain line under it instead of the raw provider
 message, which stays in the line's tooltip. A dead subscription login, such as
 an OAuth refresh rejected with `invalid_grant` or `refresh_token_expired`, reads
 **Signed out** with **Sign in again**. That starts Account Pooler's re-login
-for the same account inside the details: Claude opens the sign-in page and
-takes the pasted code, and Codex shows the device code with **Copy & open** and
-waits for approval. The sign-in survives closing the details. After it
+for the same Codex account inside the details. It shows the device code with
+**Copy & open** and waits for approval. The sign-in survives closing the details. After it
 completes, Account Usage refreshes that account's usage once and shows
 **Signed in again**; a failed usage refresh stays visible. Other account errors
 read **Unavailable** with **Retry**, which refreshes that account's usage
 once. Reset credits stay hidden while an account is signed out. Account Usage
-only relays these requests to Account Pooler's existing login and refresh RPCs;
+relays these Codex requests to Account Pooler's existing login and refresh RPCs;
 it never sees credentials, and only the client may call them.
 
 Opening the details checks each enabled Codex OAuth account's reset credits

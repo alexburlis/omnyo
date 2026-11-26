@@ -528,11 +528,18 @@ describe("reconcilePluginFrontends", () => {
     ]);
 
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    links()[1]?.dispatchEvent(new Event("error"));
+    act(() => {
+      links()[1]?.dispatchEvent(new Event("error"));
+    });
+    expect(links()).toHaveLength(2);
+    expect(container.textContent).toContain("generation v2");
+    act(() => {
+      links()[1]?.dispatchEvent(new Event("error"));
+    });
     expect(links().map((link) => link.getAttribute("href"))).toEqual([
       "/api/v1/plugins/hello/assets/app.css?h=v1",
     ]);
-    expect(container.textContent).toContain("generation v2");
+    expect(container.textContent).toContain("Retry hello styles");
     warn.mockRestore();
 
     deps.fetchCandidates.mockResolvedValue([candidate("hello", "v3")]);

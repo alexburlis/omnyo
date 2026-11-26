@@ -1107,7 +1107,9 @@ function DetailGroup({
   const providerName = providerDisplayName(provider);
   const next = formatUntil(group.nextCapacityAt, now);
 
-  const summary = !group.routingEnabled
+  const routingOff = !group.routingEnabled && !group.nativeProfiles;
+
+  const summary = routingOff
     ? "routing off"
     : `${group.readyCount} of ${group.totalCount} ready${
         group.readyCount === 0 && next !== null
@@ -1128,16 +1130,18 @@ function DetailGroup({
         <span className="text-sidebar-foreground">{providerName}</span>
         <span
           className={`ml-auto inline-flex h-4 items-center rounded-full px-1.5 text-2xs font-medium tabular-nums ${
-            !group.routingEnabled
+            routingOff
               ? "bg-state-hover text-muted-foreground"
               : group.readyCount === 0
                 ? "bg-destructive/10 text-destructive-text"
                 : "bg-state-hover text-muted-foreground"
           }`}
           title={
-            group.routingEnabled
-              ? `${group.readyCount} of ${group.totalCount} accounts can take new requests`
-              : "Account Pooler is not routing requests for this provider"
+            group.nativeProfiles
+              ? "Claude accounts with capacity"
+              : group.routingEnabled
+                ? `${group.readyCount} of ${group.totalCount} accounts can take new requests`
+                : "Account Pooler is not routing requests for this provider"
           }
         >
           {summary}
@@ -1214,7 +1218,7 @@ export function FooterUsage({
   const lastReading =
     status === "Offline" || failure !== null || snapshot?.error != null;
 
-  const message =
+  const poolMessage =
     failure ??
     (snapshot === null
       ? null
@@ -1223,6 +1227,15 @@ export function FooterUsage({
         : status === "Disabled"
           ? "Every pooled account is disabled."
           : null);
+
+  const message = [poolMessage, snapshot?.claudeError]
+    .filter(Boolean)
+    .join(" ");
+
+  const hasError =
+    failure !== null ||
+    snapshot?.error != null ||
+    snapshot?.claudeError != null;
 
   return (
     <Popover open={details.open} onOpenChange={details.onOpenChange}>
@@ -1308,20 +1321,16 @@ export function FooterUsage({
           </button>
         </header>
         <div className="flex min-h-0 flex-col gap-1 overflow-y-auto overscroll-contain p-1 pb-1.5">
-          {message !== null ? (
+          {message ? (
             <p
               className={`m-1 mb-0 flex items-start gap-1.5 rounded-md px-2 py-1.5 text-2xs leading-4 ${
-                failure !== null || snapshot?.error != null
+                hasError
                   ? "border border-surface-destructive-border bg-surface-destructive text-destructive-text"
                   : "bg-state-hover text-muted-foreground"
               }`}
             >
               <Icon
-                name={
-                  failure !== null || snapshot?.error != null
-                    ? "AlertCircle"
-                    : "Info"
-                }
+                name={hasError ? "AlertCircle" : "Info"}
                 aria-hidden="true"
                 className="mt-px size-3 shrink-0"
               />

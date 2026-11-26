@@ -9,6 +9,7 @@ import {
   INBOX_GOAL_VERDICT_HOLD_MS,
   clientTurnRequestIdSchema,
   INBOX_RETRY_DECISION_MS,
+  type ClientTurnRequestId,
   type InboxIncident,
   type InboxProducerKind,
   type InboxProducerVerdict,
@@ -203,6 +204,7 @@ export interface InboxRunEndArgs {
   outcome: InboxRunOutcome;
   reason: string | null;
   summary: string | null;
+  requestId?: ClientTurnRequestId;
   retryDecider: boolean;
   now: number;
 }
@@ -271,6 +273,7 @@ export function applyInboxRunEnd(
     recordFailure(db, {
       threadId: thread.id,
       turnId: mark?.turnId ?? null,
+      requestId: args.requestId,
       reason: args.reason ?? "The turn failed.",
       retryDecider: args.retryDecider,
       heldWaitId:
@@ -565,7 +568,7 @@ function failedTurnRequestId(
   db: DbQueryConnection,
   threadId: string,
   turnId: string | null,
-): string | null {
+): ClientTurnRequestId | null {
   if (turnId === null) return null;
   const row = getStoredTurnRequestEventForTurn(db, { threadId, turnId });
 
@@ -586,6 +589,7 @@ function recordFailure(
   args: {
     threadId: string;
     turnId: string | null;
+    requestId?: ClientTurnRequestId;
     reason: string;
     retryDecider: boolean;
     heldWaitId: string | null;
@@ -603,7 +607,8 @@ function recordFailure(
   const failure = insertFailure(db, {
     threadId: args.threadId,
     turnId: args.turnId,
-    requestId: failedTurnRequestId(db, args.threadId, args.turnId),
+    requestId:
+      args.requestId ?? failedTurnRequestId(db, args.threadId, args.turnId),
     waitId: args.heldWaitId,
     state: args.retryDecider ? "deciding" : "actionable",
     reason: args.reason,

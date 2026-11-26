@@ -2,7 +2,11 @@ import { Component, type ErrorInfo, type ReactNode } from "react";
 import { useThreadInitialLoad } from "@/components/thread/ThreadInitialLoad";
 import { Pill } from "@omnyo/shared-ui/pill";
 import { useRouteAnchorDelegate } from "@/components/ui/app-route-anchor";
-import { usePluginCss, usePluginCssReady } from "@/lib/plugin-css";
+import {
+  retryPluginCss,
+  usePluginCss,
+  usePluginCssStatus,
+} from "@/lib/plugin-css";
 import {
   PluginContext,
   PluginSlotOwnershipContext,
@@ -239,7 +243,7 @@ export function PluginSlotMount({
 }: PluginSlotMountProps) {
   const onRouteAnchorClick = useRouteAnchorDelegate();
   usePluginCss(pluginId);
-  const cssReady = usePluginCssReady(pluginId);
+  const cssStatus = usePluginCssStatus(pluginId);
   const initialLoad = useThreadInitialLoad();
 
   const loadBehindShell =
@@ -248,6 +252,20 @@ export function PluginSlotMount({
       slotKind === "navPanelFixedTab") &&
     initialLoad !== null &&
     !initialLoad.isRevealed();
+
+  if (cssStatus === "failed") {
+    if (crashFallback === null) return null;
+
+    return (
+      <button
+        type="button"
+        className="inline-flex min-h-7 cursor-pointer items-center rounded-md px-2 text-xs text-muted-foreground hover:bg-state-hover hover:text-foreground"
+        onClick={() => retryPluginCss(pluginId)}
+      >
+        Retry {pluginId} styles
+      </button>
+    );
+  }
 
   return (
     <PluginContext.Provider value={pluginId}>
@@ -273,7 +291,9 @@ export function PluginSlotMount({
           className="contents"
           onClick={onRouteAnchorClick}
         >
-          {cssReady || loadBehindShell ? children : pendingFallback}
+          {cssStatus === "ready" || loadBehindShell
+            ? children
+            : pendingFallback}
         </div>
       </PluginSlotBoundary>
     </PluginContext.Provider>

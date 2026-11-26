@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { createPortal } from "react-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -284,6 +290,35 @@ describe("PluginSlotMount", () => {
     expect(screen.queryByText("slot styles loading")).toBeNull();
   });
 
+  it("never mounts unstyled content and recovers when the stylesheet is retried", () => {
+    applyPluginCss("demo", "/demo.css?h=v1");
+    render(
+      <PluginSlotMount
+        pluginId="demo"
+        slotKind="messageDirective"
+        slotId="card"
+      >
+        <Healthy />
+      </PluginSlotMount>,
+    );
+
+    const finish = (type: "load" | "error") =>
+      act(() => {
+        document.head
+          .querySelector('link[data-omnyo-plugin-css="demo"]')
+          ?.dispatchEvent(new Event(type));
+      });
+
+    finish("error");
+    expect(screen.queryByText("healthy slot")).toBeNull();
+    finish("error");
+    expect(screen.queryByText("healthy slot")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry demo styles" }));
+    finish("load");
+    expect(screen.getByText("healthy slot")).toBeDefined();
+  });
+
   it("keeps one sheet through simultaneous mounts and a portal until the final route unmount", async () => {
     vi.useFakeTimers();
     applyPluginCss("demo", "/demo.css?h=v1");
@@ -333,7 +368,8 @@ describe("PluginSlotMount", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_500);
     });
-    expect(pluginSheets()).toHaveLength(0);
+    expect(pluginSheets()).toHaveLength(1);
+    expect(pluginSheets()[0]?.getAttribute("media")).toBe("not all");
   });
 
   it("keeps a crashed slot instance disabled for the session across remounts", () => {

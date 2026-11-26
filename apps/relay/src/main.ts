@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import type { Duplex } from "node:stream";
 import { type SecureContext, TLSSocket, createSecureContext } from "node:tls";
 import { pathToFileURL } from "node:url";
-import { getRequestListener } from "@hono/node-server";
+import { RequestError, getRequestListener } from "@hono/node-server";
 import {
   CERTIFICATE_DIRECTORY,
   type CertificateIssuer,
@@ -69,6 +69,7 @@ import {
   type EdgeResponse,
   type PlainResponse,
   RelayServerResponse,
+  badRequestResponse,
   writeBadRequest,
 } from "./net/edge-responses.js";
 import { EDGE_ALPN_PROTOCOLS, createHttp2Edge } from "./net/http2.js";
@@ -289,6 +290,8 @@ function createPublicHandlers(input: {
     (request) => input.accountFetch(request),
     {
       errorHandler: (error) => {
+        if (error instanceof RequestError) return badRequestResponse();
+
         log.error("apex.failure", {
           error: error instanceof Error ? error.name : "unknown",
         });
