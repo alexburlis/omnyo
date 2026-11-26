@@ -313,7 +313,7 @@ describe("Explore navigation", () => {
     expect(footer).toContain('href="/workflows"');
   });
 
-  it("leaves the inactive navigation unchanged", () => {
+  it("keeps Workflows in the header and footer when Explore is inactive", () => {
     const nav = withNavigation(<SiteNav />, {
       workflows: true,
       explore: false,
@@ -327,7 +327,7 @@ describe("Explore navigation", () => {
     expect(nav).toContain('href="/workflows"');
     expect(nav).not.toContain('href="/explore"');
     expect(footer).not.toContain('href="/explore"');
-    expect(footer).not.toContain('href="/workflows"');
+    expect(footer).toContain('href="/workflows"');
   });
 });
 

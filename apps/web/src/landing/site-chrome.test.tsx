@@ -76,6 +76,16 @@ describe("site navigation", () => {
     );
   });
 
+  it("marks Features as the current section in the mobile menu on detail pages", () => {
+    const html = renderToStaticMarkup(
+      <SiteNav current="features" path="/features/parallel-agents" />,
+    );
+
+    const mobile = section(html, "site-nav-sheet");
+    expect(mobile).toContain('class="is-current" href="/features">Features');
+    expect(mobile).not.toContain('href="/features" aria-current="page"');
+  });
+
   it("marks the current section and page", () => {
     const html = renderToStaticMarkup(
       <SiteNav current="plugin-guide" path="/plugin-guide" />,
