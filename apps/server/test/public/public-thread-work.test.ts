@@ -8,6 +8,7 @@ import {
   publishThreadWork,
   setPendingInteractionResolving,
   threadCallbacks,
+  threadFailures,
   threads,
 } from "@omnyo/db";
 import {
@@ -1012,6 +1013,41 @@ describe("shared thread work API", () => {
       expect(due.activity.map((activity) => activity.kind)).toEqual(["queue"]);
     });
   });
+
+  it.each(["held", "deciding", "actionable"] as const)(
+    "counts a failed run with a %s failure as Failed only when actionable",
+    async (state) => {
+      await withTestHarness(async (harness) => {
+        const { thread } = seedThreadFixture(harness, {
+          thread: { status: "error" },
+        });
+        const now = Date.now();
+        harness.db
+          .insert(threadFailures)
+          .values({
+            id: "failure-1",
+            threadId: thread.id,
+            state,
+            reason: "The turn failed.",
+            createdAt: now,
+            updatedAt: now,
+          })
+          .run();
+        const work = await read(harness, thread.id);
+
+        if (state === "actionable") {
+          expect(work.primary.label).toBe("failed");
+          expect(work.primary.reason.code).toBe("run-failed");
+        } else {
+          expect(work.primary.label).toBe("waiting");
+          expect(work.failures).toHaveLength(0);
+          expect(work.nextActors.map((actor) => actor.label)).toContain(
+            "Automatic retry",
+          );
+        }
+      });
+    },
+  );
 
   it("shows a future scheduled dispatch as Waiting rather than advancing work", async () => {
     await withTestHarness(async (harness) => {
