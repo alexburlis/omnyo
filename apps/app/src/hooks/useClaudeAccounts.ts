@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { sdk } from "@/lib/sdk";
 import { OmnyoHttpError } from "@omnyo/sdk/browser";
 
@@ -49,34 +49,6 @@ export function useClaudeAccounts({
     };
   }, [enabled, hostId, key, projectId]);
 
-  const setProjectDefault = useCallback(
-    async (selection: ClaudeProfileSelection) => {
-      if (!hostId) return;
-
-      try {
-        await sdk.providers.claudeProfiles.defaultsSet({
-          hostId,
-          projectId,
-          selection,
-        });
-
-        const data = await sdk.providers.claudeProfiles.list({
-          hostId,
-          projectId,
-        });
-
-        setResult((current) =>
-          current?.key === key ? { key, data, error: false } : current,
-        );
-      } catch {
-        setResult((current) =>
-          current?.key === key ? { ...current, error: true } : current,
-        );
-      }
-    },
-    [hostId, key, projectId],
-  );
-
   return {
     data: enabled && result?.key === key ? result.data : null,
     error: enabled && result?.key === key && result.error,
@@ -86,6 +58,5 @@ export function useClaudeAccounts({
       !hostId ||
       sdk.providers?.claudeProfiles === undefined ||
       result?.key === key,
-    setProjectDefault,
   };
 }
