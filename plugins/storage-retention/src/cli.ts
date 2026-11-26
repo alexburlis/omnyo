@@ -1,4 +1,5 @@
 import type { Storage } from "./storage.js";
+import { z } from "zod";
 import {
   cliCommand,
   defineCli,
@@ -111,6 +112,83 @@ export function registerCli(
                 throw new Error("Pass --yes to clean the reviewed items.");
 
               return worktrees.cleanSaved(input.positionals.scanId);
+            }),
+        }),
+        "worktrees preview-broken-folder": cliCommand({
+          summary:
+            "Verify an unused managed folder against a retained ref and preview folder-only removal",
+          options: {
+            environment: {
+              type: "string",
+              description: "Managed worktree environment ID",
+            },
+            repo: {
+              type: "string",
+              description:
+                "Configured project repository path on the worktree's machine",
+            },
+            ref: {
+              type: "string",
+              description:
+                "Full retained ref, for example refs/remotes/origin/backup/work",
+            },
+          },
+          run: ({ options }) =>
+            output(() =>
+              api.sdk.plugins.callRpc({
+                pluginId: "environment-git-worktree",
+                method: "previewMissingRegistrationCleanup",
+                outputSchema: z.object({
+                  token: z.string(),
+                  path: z.string(),
+                  ref: z.string(),
+                  head: z.string(),
+                  fileCount: z.number(),
+                  bytes: z.number(),
+                }),
+                input: {
+                  environmentId: required(options.environment, "environment"),
+                  sourcePath: required(options.repo, "repo"),
+                  ref: required(options.ref, "ref"),
+                },
+              }),
+            ),
+        }),
+        "worktrees remove-broken-folder": cliCommand({
+          summary:
+            "Request removal of one verified broken folder through its Worktree provider",
+          positionals: [
+            {
+              name: "token",
+              description: "Token from preview-broken-folder",
+              required: true,
+            },
+          ],
+          options: {
+            "hook-stopped": {
+              type: "boolean",
+              description:
+                "Confirm that the interrupted environment hook has stopped",
+            },
+            yes: YES,
+          },
+          run: ({ options, positionals }) =>
+            output(async () => {
+              if (!options.yes || !options["hook-stopped"])
+                throw new Error(
+                  "Pass --hook-stopped --yes after verifying that the hook has stopped and approving this folder's removal.",
+                );
+
+              return api.sdk.plugins.callRpc({
+                pluginId: "environment-git-worktree",
+                method: "confirmMissingRegistrationCleanup",
+                outputSchema: z.object({
+                  state: z.literal("requested"),
+                  environmentId: z.string(),
+                  path: z.string(),
+                }),
+                input: { token: positionals.token, hookStopped: true },
+              });
             }),
         }),
         cleanup: cliCommand({

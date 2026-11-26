@@ -105,6 +105,21 @@ preserves the commits. The batch checks each reviewed item again and removes
 folders before branches. The matching command is
 `omnyo storage worktrees clean SCAN_ID --yes`.
 
+An unused managed worktree with failed teardown and a missing Git registration
+can be reviewed individually. The preview compares the folder's file bytes and
+modes to a retained local Git ref in the configured project repository. A folder
+with extra files, unsupported entries, or a process using it stays protected.
+
+```sh
+omnyo storage worktrees preview-broken-folder --environment ENVIRONMENT_ID --repo REPOSITORY_PATH --ref refs/remotes/origin/backup/BRANCH
+omnyo storage worktrees remove-broken-folder PREVIEW_TOKEN --hook-stopped --yes
+```
+
+Confirm only after verifying that the interrupted hook has stopped. The Worktree
+provider rechecks the preview before removing the folder and leaves Git refs
+intact. The token expires after five minutes. The confirmation requests teardown.
+Check `omnyo environment show ENVIRONMENT_ID` for its outcome.
+
 Large-file cleanup from the page starts a background job so slow folder walks
 can finish after the remote HTTP request returns. Each machine reports queued, running,
 completed, or failed status, including after navigation or reconnection. The

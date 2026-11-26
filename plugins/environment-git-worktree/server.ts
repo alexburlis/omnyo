@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   defineRpcContract,
   type PluginApi,
@@ -53,6 +54,33 @@ type WorktreeOperation = Pick<
 >;
 
 export const worktreeRpcContract = defineRpcContract({
+  previewMissingRegistrationCleanup: {
+    input: z
+      .object({
+        environmentId: z.string().min(1),
+        sourcePath: z.string().min(1),
+        ref: z.string().min(1),
+      })
+      .strict(),
+    output: z.object({
+      token: z.string(),
+      path: z.string(),
+      ref: z.string(),
+      head: z.string(),
+      fileCount: z.number(),
+      bytes: z.number(),
+    }),
+  },
+  confirmMissingRegistrationCleanup: {
+    input: z
+      .object({ token: z.string(), hookStopped: z.literal(true) })
+      .strict(),
+    output: z.object({
+      state: z.literal("requested"),
+      environmentId: z.string(),
+      path: z.string(),
+    }),
+  },
   defaultBaseBranch: {
     input: z
       .object({
@@ -95,6 +123,81 @@ export default async function worktreePlugin(api: PluginApi): Promise<void> {
   });
 
   const reports = new Map<string, PluginEnvironmentProviderProgress>();
+
+  type Recovery = {
+    environmentId: string;
+    input: z.input<
+      typeof worktreeHostContract.inspectMissingRegistration.input
+    >;
+    proof: z.output<
+      typeof worktreeHostContract.inspectMissingRegistration.output
+    >;
+    hostId: string;
+    expires: number;
+  };
+
+  const previews = new Map<string, Recovery>();
+  const approved = new Map<string, Recovery>();
+
+  async function requireNoChats(environmentId: string) {
+    const pages = await Promise.all(
+      [false, true].map((archived) =>
+        api.sdk.threads.list({
+          environmentId,
+          archived,
+          includeHidden: true,
+          limit: 1,
+        }),
+      ),
+    );
+
+    if (pages.some((page) => page.length > 0))
+      throw new Error("The worktree still belongs to a chat.");
+  }
+
+  async function recoverableEnvironment(
+    environmentId: string,
+    sourcePath: string,
+  ) {
+    const environment = await api.sdk.environments.get({ environmentId });
+
+    if (
+      !environment.managed ||
+      environment.environmentProviderId !==
+        GIT_WORKTREE_ENVIRONMENT_PROVIDER_ID ||
+      !environment.path ||
+      !environment.environmentProviderInstanceKey ||
+      environment.hostLifecycle !== "active" ||
+      environment.lifecycle.phase !== "teardown" ||
+      environment.lifecycle.teardown?.status !== "failed"
+    ) {
+      throw new Error("Select a managed worktree with failed teardown.");
+    }
+
+    const [project] = await Promise.all([
+      api.sdk.projects.get({ projectId: environment.projectId }),
+      requireNoChats(environmentId),
+    ]);
+
+    if (
+      !project.sources.some(
+        (source) =>
+          source.type === "local_path" &&
+          source.hostId === environment.hostId &&
+          source.path === sourcePath,
+      )
+    ) {
+      throw new Error(
+        "Use a configured project repository on the worktree's machine.",
+      );
+    }
+
+    return {
+      hostId: environment.hostId,
+      path: environment.path,
+      pathKey: environment.environmentProviderInstanceKey,
+    };
+  }
 
   host.experimental_onSignal("progress", (event) => {
     const report = reports.get(event.payload.operationId);
@@ -238,12 +341,40 @@ export default async function worktreePlugin(api: PluginApi): Promise<void> {
       reports.set(operationId, context.report);
 
       try {
+        const recovery = approved.get(context.pathKey);
+
+        if (recovery) {
+          approved.delete(context.pathKey);
+
+          if (
+            Date.now() >= recovery.expires ||
+            context.environment?.id !== recovery.environmentId ||
+            context.hostId !== recovery.hostId ||
+            context.path !== recovery.input.path
+          ) {
+            throw new Error(
+              "The approved worktree changed or the review expired.",
+            );
+          }
+
+          await requireNoChats(recovery.environmentId);
+        }
+
         const result = await host.call(
           "remove",
           {
             operationId,
             pathKey: context.pathKey,
             path: context.path,
+            ...(recovery
+              ? {
+                  recovery: {
+                    sourcePath: recovery.input.sourcePath,
+                    ref: recovery.input.ref,
+                    proof: recovery.proof,
+                  },
+                }
+              : {}),
           },
           {
             hostId: context.hostId,
@@ -264,6 +395,106 @@ export default async function worktreePlugin(api: PluginApi): Promise<void> {
   });
 
   api.rpc.register(worktreeRpcContract, {
+    async previewMissingRegistrationCleanup(
+      { environmentId, sourcePath, ref },
+      context,
+    ) {
+      const caller = context.experimental_caller;
+
+      if (
+        caller.kind !== "plugin" ||
+        caller.pluginId !== "omnyo--storage-retention"
+      )
+        throw new Error(
+          "Only Storage Retention can review broken worktree folders.",
+        );
+
+      const environment = await recoverableEnvironment(
+        environmentId,
+        sourcePath,
+      );
+
+      const { hostId, path, pathKey } = environment;
+      const input = { sourcePath, path, pathKey, ref };
+
+      const proof = await host.call("inspectMissingRegistration", input, {
+        hostId,
+        signal: context.experimental_signal,
+        timeoutMs: 120_000,
+      });
+
+      for (const [token, preview] of previews)
+        if (Date.now() >= preview.expires) previews.delete(token);
+
+      if (previews.size >= 64)
+        throw new Error(
+          "Too many outstanding worktree reviews. Let an earlier review expire.",
+        );
+      const token = randomUUID();
+      previews.set(token, {
+        environmentId,
+        hostId,
+        input,
+        proof,
+        expires: Date.now() + 5 * 60_000,
+      });
+
+      return {
+        token,
+        path,
+        ref,
+        head: proof.head,
+        fileCount: proof.fileCount,
+        bytes: proof.bytes,
+      };
+    },
+    async confirmMissingRegistrationCleanup({ token }, context) {
+      const caller = context.experimental_caller;
+
+      if (
+        caller.kind !== "plugin" ||
+        caller.pluginId !== "omnyo--storage-retention"
+      )
+        throw new Error(
+          "Only Storage Retention can confirm broken worktree cleanup.",
+        );
+      const recovery = previews.get(token);
+      previews.delete(token);
+
+      if (!recovery || Date.now() >= recovery.expires)
+        throw new Error("The worktree review expired. Preview it again.");
+      const { environmentId, input } = recovery;
+
+      const environment = await recoverableEnvironment(
+        environmentId,
+        input.sourcePath,
+      );
+
+      if (
+        environment.hostId !== recovery.hostId ||
+        environment.path !== input.path ||
+        environment.pathKey !== input.pathKey
+      )
+        throw new Error("The worktree changed. Preview it again.");
+      const pending = approved.get(input.pathKey);
+
+      if (pending && Date.now() < pending.expires)
+        throw new Error("Cleanup for this worktree was already requested.");
+      approved.set(input.pathKey, recovery);
+
+      try {
+        await api.sdk.environments.experimental_cleanup({
+          environmentId,
+          hookStopped: true,
+        });
+      } catch (error) {
+        if (approved.get(input.pathKey) === recovery)
+          approved.delete(input.pathKey);
+        throw error;
+      }
+
+      return { state: "requested", environmentId, path: input.path } as const;
+    },
     async defaultBaseBranch({ projectId, hostId }) {
       const project = await api.sdk.projects.get({ projectId });
 

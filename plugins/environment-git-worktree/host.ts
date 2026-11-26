@@ -19,6 +19,10 @@ import {
   removeWorktree,
   resolveAdoptableWorktree,
 } from "./host/worktree.js";
+import {
+  inspectMissingRegistration,
+  removeMissingRegistration,
+} from "./host/missing-registration.js";
 
 function completionPathForWorktree(worktreePath: string): string {
   return `${worktreePath}.completed`;
@@ -56,6 +60,19 @@ export function createWorktreeHostEntry() {
     contract: worktreeHostContract,
     experimental_signals: worktreeHostSignals,
     handlers: {
+      inspectMissingRegistration: (input, context) => {
+        if (
+          input.path !==
+          resolveWorktreeTargetPath({
+            dataDir: context.experimental_paths.dataDir,
+            pathKey: input.pathKey,
+            sourcePath: input.sourcePath,
+          })
+        )
+          throw new Error("The folder is not the provider-owned worktree.");
+
+        return inspectMissingRegistration(input, context.signal);
+      },
       async defaultBaseBranch(input) {
         const refs = await readDefaultBranchRefs(input.sourcePath);
 
@@ -146,6 +163,24 @@ export function createWorktreeHostEntry() {
               : [input.path];
 
           for (const path of paths) {
+            if (input.recovery) {
+              const expectedPath = resolveWorktreeTargetPath({
+                dataDir: context.experimental_paths.dataDir,
+                pathKey: input.pathKey,
+                sourcePath: input.recovery.sourcePath,
+              });
+
+              if (path !== expectedPath || path !== input.path)
+                throw new Error(
+                  "The approved folder is not the provider-owned worktree.",
+                );
+              await removeMissingRegistration(
+                { ...input.recovery, path },
+                input.recovery.proof,
+                context.signal,
+              );
+            }
+
             await removeWorktree({
               path,
               completionPath: completionPathForWorktree(path),

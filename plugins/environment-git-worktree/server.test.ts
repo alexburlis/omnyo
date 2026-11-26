@@ -141,6 +141,141 @@ function restoreContext(
 }
 
 describe("worktree resource operations", () => {
+  it("consumes the Storage Retention review through the provider lifecycle only once", async () => {
+    const environmentId = "env-broken";
+
+    const proof = {
+      head: "a".repeat(40),
+      identity: "1:2",
+      registration: "/checkouts/omnyo/.git/worktrees/omnyo",
+      fileCount: 1,
+      bytes: 6,
+    };
+
+    const cleanup = vi.fn(() => ({ ok: true }));
+
+    const { api, harness } = createFakePluginHost({
+      sdk: {
+        environments: {
+          get: () => ({
+            id: environmentId,
+            projectId: PROJECT_ID,
+            hostId: HOST_ID,
+            path: WORKTREE_PATH,
+            managed: true,
+            environmentProviderId: GIT_WORKTREE_ENVIRONMENT_PROVIDER_ID,
+            environmentProviderInstanceKey: THREAD_ID,
+            hostLifecycle: "active",
+            lifecycle: { phase: "teardown", teardown: { status: "failed" } },
+          }),
+          experimental_cleanup: cleanup,
+        },
+        threads: { list: () => [] },
+        projects: {
+          get: () => ({
+            sources: [
+              { type: "local_path", hostId: HOST_ID, path: SOURCE_PATH },
+            ],
+          }),
+        },
+      },
+      experimental_callHostRpc: ({ method }) =>
+        method === "inspectMissingRegistration" ? proof : { status: "removed" },
+    });
+
+    await plugin(api);
+
+    const provider = harness.registrations.environmentProviders.get(
+      GIT_WORKTREE_ENVIRONMENT_PROVIDER_ID,
+    );
+
+    if (!provider) throw new Error("Provider not registered");
+
+    const caller = {
+      experimental_caller: {
+        kind: "plugin",
+        pluginId: "omnyo--storage-retention",
+      },
+    } as const;
+
+    const previewInput = {
+      environmentId,
+      sourcePath: SOURCE_PATH,
+      ref: "refs/heads/main",
+    };
+
+    await expect(
+      harness.callRpc("previewMissingRegistrationCleanup", previewInput),
+    ).rejects.toThrow(/Only Storage Retention/u);
+
+    const preview = await harness.callRpc(
+      "previewMissingRegistrationCleanup",
+      previewInput,
+      caller,
+    );
+
+    if (
+      !preview ||
+      typeof preview !== "object" ||
+      !("token" in preview) ||
+      typeof preview.token !== "string"
+    )
+      throw new Error("Missing preview token");
+    const confirmation = { token: preview.token, hookStopped: true };
+    expect(cleanup).not.toHaveBeenCalled();
+    await expect(
+      harness.callRpc(
+        "confirmMissingRegistrationCleanup",
+        confirmation,
+        caller,
+      ),
+    ).resolves.toEqual({
+      state: "requested",
+      environmentId,
+      path: WORKTREE_PATH,
+    });
+    expect(cleanup).toHaveBeenCalledExactlyOnceWith({
+      environmentId,
+      hookStopped: true,
+    });
+    await expect(
+      harness.callRpc(
+        "confirmMissingRegistrationCleanup",
+        confirmation,
+        caller,
+      ),
+    ).rejects.toThrow(/expired/u);
+
+    const removal = {
+      environment: {
+        ...restoreContext((await setup()).context, "main").previous.environment,
+        id: environmentId,
+      },
+      pathKey: THREAD_ID,
+      hostId: HOST_ID,
+      path: WORKTREE_PATH,
+      resource: null,
+      attempt: 2,
+      report: { step: () => undefined, log: () => undefined },
+      signal: new AbortController().signal,
+    };
+
+    await expect(provider.remove(removal)).resolves.toEqual({
+      status: "removed",
+    });
+    expect(harness.experimental_hostRpcCalls.at(-1)?.input).toMatchObject({
+      recovery: {
+        sourcePath: SOURCE_PATH,
+        ref: previewInput.ref,
+        proof: { head: proof.head },
+      },
+    });
+    await provider.remove(removal);
+    expect(harness.experimental_hostRpcCalls.at(-1)?.input).not.toHaveProperty(
+      "recovery",
+    );
+  });
+
   it("defaults omitted inputs and uses per-attempt path keys", async () => {
     expect(worktreeInputsSchema.parse({})).toEqual({
       branch: { kind: "default" },

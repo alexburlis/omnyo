@@ -20,7 +20,26 @@ export const discoveredWorktreeSchema = z
 
 export type DiscoveredWorktree = z.infer<typeof discoveredWorktreeSchema>;
 
+const missingRegistrationInput = z.object({
+  sourcePath: z.string().min(1),
+  path: z.string().min(1),
+  ref: z.string().min(1),
+});
+
+const missingRegistrationProof = z.object({
+  head: z.string(),
+  identity: z.string(),
+  registration: z.string(),
+});
+
 export const worktreeHostContract = defineRpcContract({
+  inspectMissingRegistration: {
+    input: missingRegistrationInput.extend({ pathKey: z.string().min(1) }),
+    output: missingRegistrationProof.extend({
+      fileCount: z.number(),
+      bytes: z.number(),
+    }),
+  },
   defaultBaseBranch: {
     input: z.object({ sourcePath: z.string().min(1) }).strict(),
     output: z.object({ branch: z.string().min(1).nullable() }).strict(),
@@ -79,6 +98,12 @@ export const worktreeHostContract = defineRpcContract({
         operationId: z.string().min(1),
         pathKey: z.string().min(1),
         path: z.string().min(1).nullable(),
+        recovery: missingRegistrationInput
+          .omit({ path: true })
+          .extend({
+            proof: missingRegistrationProof,
+          })
+          .optional(),
       })
       .strict(),
     output: z.discriminatedUnion("status", [
