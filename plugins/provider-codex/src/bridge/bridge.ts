@@ -14,6 +14,7 @@ import {
   type ThreadDelta,
   type ProviderRateLimitState,
   sanitizeInheritedChildProcessEnv,
+  buildShellEnvOverrides,
   BRIDGE_INBOUND_REQUEST_METHODS,
   BRIDGE_JSON_RPC_ERRORS,
   BRIDGE_NOTIFICATION_METHODS,
@@ -337,6 +338,38 @@ const APP_SERVER_LAUNCH_ENV_NAMES = [
   CODEX_HOME_ENV,
 ] as const;
 
+const APP_SERVER_PROCESS_CONTROL_ENV_NAMES = new Set([
+  "PATH",
+  "PATHEXT",
+  "HOME",
+  "USERPROFILE",
+  "HOMEDRIVE",
+  "HOMEPATH",
+  "SYSTEMROOT",
+  "WINDIR",
+  "COMSPEC",
+  "SHELL",
+  "ENV",
+  "BASH_ENV",
+  "ZDOTDIR",
+  "SHELLOPTS",
+  "BASHOPTS",
+  "ELECTRON_RUN_AS_NODE",
+  "PYTHONHOME",
+  "PYTHONPATH",
+  "RUBYOPT",
+  "RUBYLIB",
+  "PERL5OPT",
+  "PERL5LIB",
+  "JAVA_TOOL_OPTIONS",
+  "JDK_JAVA_OPTIONS",
+  "_JAVA_OPTIONS",
+  "SSLKEYLOGFILE",
+  "REQUESTS_CA_BUNDLE",
+  "GRPC_DEFAULT_SSL_ROOTS_FILE_PATH",
+  "AWS_CA_BUNDLE",
+]);
+
 const CODEX_POOL_MODEL_PROVIDER = "omnyo-account-pool";
 
 const LEGACY_POOL_MODEL_PROVIDER_V1 = "bb-account-pool";
@@ -521,11 +554,28 @@ function appServerLaunchEnv(
 function buildAppServerEnv(
   envVars: Readonly<Record<string, string>> | undefined,
 ): NodeJS.ProcessEnv {
-  return withoutBridgeRuntimeEnv(
-    sanitizeInheritedChildProcessEnv({
-      env: appServerLaunchEnv(envVars),
-    }),
-  );
+  const env = appServerLaunchEnv(envVars);
+
+  for (const [name, value] of Object.entries(buildShellEnvOverrides(envVars))) {
+    const normalized = name.toUpperCase();
+
+    if (
+      APP_SERVER_PROCESS_CONTROL_ENV_NAMES.has(normalized) ||
+      normalized.startsWith("LD_") ||
+      normalized.startsWith("DYLD_") ||
+      normalized.startsWith("CODEX_") ||
+      normalized.startsWith("OPENAI_") ||
+      normalized.startsWith("NODE_") ||
+      normalized.startsWith("SSL_") ||
+      normalized.startsWith("OPENSSL_") ||
+      normalized.startsWith("CURL_") ||
+      normalized.endsWith("_PROXY")
+    )
+      continue;
+    env[name] = value;
+  }
+
+  return withoutBridgeRuntimeEnv(sanitizeInheritedChildProcessEnv({ env }));
 }
 
 function isCodexSpawnFailure(error: unknown): boolean {
