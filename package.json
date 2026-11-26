@@ -24,6 +24,7 @@
     "dev:restart-host-daemon": "cross-env NODE_ENV=development node --conditions=source --import tsx packages/scripts/src/commands/request-dev-restart.ts host-daemon",
     "dev:host-daemon": "cross-env NODE_ENV=development dotenv --no-expand -c development -- node --conditions=source --import tsx packages/scripts/src/commands/run-host-daemon.ts",
     "build": "turbo run build --filter=@omnyo/scripts --filter=@omnyo/app --filter=@omnyo/server --filter=@omnyo/host-daemon --filter=@omnyo/cli --filter=omnyo-app",
+    "public:mac-release": "node scripts/public-mac-release.mjs",
     "omnyo-app:prepare": "turbo run build --filter=omnyo-app --output-logs=none --log-prefix=none --summarize=false",
     "start:host-daemon": "cross-env NODE_ENV=production dotenv --no-expand -c production -- pnpm run --silent omnyo-app:prepare && cross-env NODE_ENV=production dotenv --no-expand -c production -- node packages/omnyo-app/dist/omnyo-app.js host-daemon",
     "seed:perf": "node scripts/ensure-native-modules.mjs && cross-env NODE_ENV=development node --conditions=source --import tsx packages/scripts/src/commands/seed-perf-db.ts",

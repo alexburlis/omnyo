@@ -564,31 +564,31 @@ in `apps/web/src/landing/site.ts`. Each publication replaces that asset with the
 bytes of the current versioned ZIP, so the link never changes and the website needs
 no edit or deployment per release.
 
-Publish a public build with one command, from a clean checkout at the release commit
-(`Release private Omnyo <version>`, or `Release private Omnyo <version> (iOS <build>)`
-when that release also shipped an iOS build, with `apps/desktop` and
-`packages/omnyo-app` versions equal):
+Prepare a public build from a clean public Omnyo checkout at the release commit
+(`Release Omnyo <version>`, with `apps/desktop` and `packages/omnyo-app` versions
+equal). Publication requires that exact commit on public main. Use a notary
+credential overlay stored outside the checkout.
 
-    pnpm public:mac-release --plan
-    pnpm public:mac-release --prepare [--output-dir PATH]
-    pnpm public:mac-release [--output-dir PATH]
+    pnpm public:mac-release --plan --credential-overlay PATH
+    pnpm public:mac-release --prepare --credential-overlay PATH [--output-dir PATH]
+    pnpm public:mac-release --credential-overlay PATH [--output-dir PATH]
 
 `--plan` runs the checks and prints every step without running any. `--prepare`
 runs steps 1 to 5 and uploads nothing. With no mode it also publishes. An untagged
 `1.x` version publishes only after the public feed already carries a tagged `1.x`
 bridge build, because installed public apps older than 1.0.0 reject untagged updates
-(`public_feed_not_bridge_capable`; see `docs/private-ship.md`). The steps stop at
+(`public_feed_not_bridge_capable`). The steps stop at
 the first failure:
 
 1. Build and sign the runtime: `OMNYO_RUNTIME_MAC_SIGNING_TEAM=Z7T4C33A35 pnpm exec turbo run build --filter=omnyo-app`.
 2. Build the app with `OMNYO_DESKTOP_RELEASE_CHANNEL=public-beta pnpm run desktop:build`
    and require its app and `omnyo-<numeric version>-arm64.zip` to be new.
-3. Notarize and staple with `scripts/private-ship-notary.mjs` under the credential
-   overlay named in `scripts/private-ship.json`, through `redact-stream`. The result
+3. Notarize and staple with `scripts/public-mac-notary.mjs` using the supplied
+   credential overlay. The child process logs pass through `redact-stream`. The result
    must be `complete`, stapled and `Accepted` for this commit and version.
 4. Check `spctl` and `stapler validate` on the app and on an app extracted from the
    final ZIP.
-5. Write `public-beta-mac.yml` with `desktop:private-update-feed`.
+5. Write `public-beta-mac.yml` with `desktop:public-update-feed`.
 6. Create the `macos` release if it is missing; upload the versioned ZIP (never
    overwritten), copy it to `Omnyo-macOS.zip` and upload that with `--clobber`;
    download both and compare their sha256 with the local ZIP; upload the feed last
