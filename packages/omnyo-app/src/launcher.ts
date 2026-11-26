@@ -66,6 +66,7 @@ import {
   parseClientConfig,
   type ClientConfig,
 } from "@omnyo/config/client-config";
+import { isLoopbackHostname } from "@omnyo/config/loopback";
 import { validateLogLevel } from "@omnyo/config/log-level";
 import {
   parseAppAliasOrigins,
@@ -763,7 +764,7 @@ interface ResolveOmnyoAppRuntimeStateArgs {
   env: NodeJS.ProcessEnv;
   homeDir: string;
   options: LauncherCliOptions;
-  serverUrlMode: "local" | "managed";
+  serverUrlMode: "local" | "managed" | "delegated-cli";
   worktreePolicy?: WorktreeRuntimePolicy;
 }
 
@@ -1123,6 +1124,25 @@ function createEnvFromOptions(
   }
 
   return env;
+}
+
+function managedTerminalProxyUrl(env: NodeJS.ProcessEnv): string | undefined {
+  if (
+    !toOptionalString(env.OMNYO_CLI) ||
+    !toOptionalString(env.OMNYO_THREAD_ID)
+  )
+    return;
+  const value = toOptionalString(env.OMNYO_SERVER_URL);
+
+  if (value === undefined) return;
+  const url = URL.parse(value);
+
+  if (
+    url &&
+    (url.protocol === "http:" || url.protocol === "https:") &&
+    isLoopbackHostname(url.hostname)
+  )
+    return value;
 }
 
 function resolveServerUrl(args: ResolveServerUrlArgs): string {
@@ -1574,15 +1594,29 @@ export async function resolveOmnyoAppRuntimeState(
     };
   }
 
-  const finalEnv = {
+  const proxyUrl =
+    args.serverUrlMode === "delegated-cli"
+      ? managedTerminalProxyUrl(args.env)
+      : undefined;
+
+  const finalEnv: NodeJS.ProcessEnv = {
     ...managedEnv,
-    OMNYO_SERVER_URL: resolveServerUrl({
-      config,
-      defaultServerUrl: initialContext.serverUrl,
-      env: managedEnv,
-      optionServerUrl: args.options.serverUrl,
-    }),
+    OMNYO_SERVER_URL:
+      proxyUrl ??
+      resolveServerUrl({
+        config,
+        defaultServerUrl: initialContext.serverUrl,
+        env: managedEnv,
+        optionServerUrl: args.options.serverUrl,
+      }),
   };
+
+  if (proxyUrl !== undefined) {
+    const headers = toOptionalString(args.env.OMNYO_SERVER_HEADERS);
+
+    if (headers === undefined) delete finalEnv.OMNYO_SERVER_HEADERS;
+    else finalEnv.OMNYO_SERVER_HEADERS = headers;
+  }
 
   return {
     config,
@@ -3071,7 +3105,7 @@ export async function runCli(
     env: process.env,
     homeDir: homedir(),
     options: createDefaultLauncherOptions(),
-    serverUrlMode: "managed",
+    serverUrlMode: "delegated-cli",
   });
 
   assertOmnyoHostArtifacts(runtime.context);

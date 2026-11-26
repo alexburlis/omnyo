@@ -171,6 +171,7 @@ describe("machine Git environment", () => {
     const { env, home } = await gitEnv();
     const config = join(home, "gitconfig");
     const log = join(home, "helpers.log");
+
     for (const [key, name] of [
       ["credential.https://gitlab.example.helper", "local-gitlab"],
       ["credential.https://github.com.helper", "local-github"],
@@ -185,6 +186,7 @@ describe("machine Git environment", () => {
         `!f() { test "$1" = get || exit 0; echo ${name} >> "${log}"; printf 'username=${name}\\npassword=synthetic\\n'; }; f`,
       ]);
     }
+
     for (const [host, username] of [
       ["gitlab.example", "local-gitlab"],
       ["bitbucket.example", "local-default"],
@@ -193,6 +195,7 @@ describe("machine Git environment", () => {
       expect(result.code).toBe(0);
       expect(result.stdout).toContain(`username=${username}\n`);
     }
+
     await writeFile(log, "");
     const github = await fill(env, "protocol=https\nhost=github.com\n\n");
     expect(github.code).toBe(0);
