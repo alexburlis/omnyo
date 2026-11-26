@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { constants, createReadStream } from "node:fs";
 import {
   copyFile,
   mkdir,
@@ -18,6 +18,7 @@ import {
   compareReleaseNumbers,
   parseReleaseVersion,
 } from "../packages/config/src/release-version.mjs";
+import { preparePublicRuntime } from "./public-runtime-checkpoint.mjs";
 
 const PUBLIC_SOURCE_ORIGIN = "https://github.com/alexburlis/omnyo.git";
 
@@ -31,16 +32,21 @@ export const FEED_NAME = "public-beta-mac.yml";
 
 export const SIGNING_TEAM = "Z7T4C33A35";
 
+const RELEASE_RECEIPT = "prepared-release.json";
+
+const NOTARY_RESULT = "notary-result.json";
+
 export const REDACTED_NAMES = [
   "ASC_PRIVATE_KEY_BASE64",
   "ASC_KEY_ID",
   "ASC_ISSUER_ID",
 ];
 
-const USAGE = `Usage: pnpm public:mac-release [--plan | --prepare] --credential-overlay PATH [--output-dir PATH]
+const USAGE = `Usage: pnpm public:mac-release [--plan | --prepare | --promote] [--credential-overlay PATH] [--output-dir PATH]
 
   (no mode)    build, sign, notarize, verify, create the feed and publish
-  --prepare    run the build, notarization, verification and feed steps only
+  --prepare    build, notarize and save the verified archive, feed and receipt
+  --promote    publish an existing prepared archive and feed
   --plan       print the steps without running any of them
   --credential-overlay PATH
                notary credential references outside the checkout
@@ -62,11 +68,11 @@ export function parseArguments(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
 
-    if (argument === "--plan" || argument === "--prepare") {
+    if (["--plan", "--prepare", "--promote"].includes(argument)) {
       if (modeFlag !== null && modeFlag !== argument)
         throw new Error(`${modeFlag} and ${argument} cannot be combined`);
       modeFlag = argument;
-      options.mode = argument === "--plan" ? "plan" : "prepare";
+      options.mode = argument.slice(2);
     } else if (
       argument === "--output-dir" ||
       argument === "--credential-overlay"
@@ -176,6 +182,22 @@ export async function requireBridgePublicFeed({
     throw new Error(
       `Untagged public release ${version} refused before any effect: the published ${FEED_NAME} carries runtime ${published ?? "an unreadable version"}, and installed public apps older than 1.0.0 reject untagged updates. Publish a tagged 1.x bridge build to the public channel first and let users update to it (public_feed_not_bridge_capable).`,
     );
+
+  if (compareReleaseNumbers(published, version) > 0)
+    throw new Error(`Public feed already serves newer version ${published}`);
+}
+
+async function requirePublicMain(effects, sourceCommit) {
+  const ref = "refs/heads/main";
+
+  const remote = (
+    await effects.git(["ls-remote", "--exit-code", "origin", ref])
+  ).trim();
+
+  if (remote !== sourceCommit + "\t" + ref)
+    throw new Error(
+      "Publish requires the exact commit currently on public main",
+    );
 }
 
 export async function preflight({ root, effects, home, options }) {
@@ -201,18 +223,16 @@ export async function preflight({ root, effects, home, options }) {
       `HEAD is not the release commit for ${identity.version}; expected "${releaseCommitSubject(identity.version)}" but found "${subject}"`,
     );
 
-  if (options.mode === "publish") {
-    const ref = "refs/heads/main";
+  if (options.mode === "publish" || options.mode === "promote")
+    await requirePublicMain(effects, sourceCommit);
 
-    const remote = (
-      await effects.git(["ls-remote", "--exit-code", "origin", ref])
-    ).trim();
+  const tools = {
+    op: join(home, "bin/op"),
+    redact: join(home, ".codex/bin/redact-stream"),
+  };
 
-    if (remote !== sourceCommit + "\t" + ref)
-      throw new Error(
-        "Publish requires the exact commit currently on public main",
-      );
-  }
+  if (options.mode === "promote")
+    return { ...identity, sourceCommit, overlay: "", tools };
 
   if (options.credentialOverlay === null)
     throw new Error("--credential-overlay is required");
@@ -233,11 +253,6 @@ export async function preflight({ root, effects, home, options }) {
       "The notary credential overlay must be outside the checkout",
     );
 
-  const tools = {
-    op: join(home, "bin/op"),
-    redact: join(home, ".codex/bin/redact-stream"),
-  };
-
   for (const path of [tools.op, tools.redact, overlay])
     if (!(await effects.exists(path)))
       throw new Error(`Required release input is missing: ${path}`);
@@ -253,17 +268,115 @@ function check(describe, run) {
   return { kind: "check", describe, run };
 }
 
+const archiveName = (identity) => `omnyo-${identity.numericVersion}-arm64.zip`;
+
+function preparedIdentity(identity, repository) {
+  return {
+    schema: 1,
+    sourceCommit: identity.sourceCommit,
+    version: identity.version,
+    protocolVersion: identity.protocolVersion,
+    repository,
+    tag: RELEASE_TAG,
+    channel: "public-beta",
+    teamId: SIGNING_TEAM,
+  };
+}
+
+async function artifactBytes(effects, path) {
+  const [sha256, bytes] = await Promise.all([
+    effects.sha256(path),
+    effects.fileSize(path),
+  ]);
+
+  if (
+    !/^[a-f0-9]{64}$/u.test(sha256) ||
+    !Number.isSafeInteger(bytes) ||
+    bytes < 1
+  )
+    throw new Error(`Invalid release artifact at ${path}`);
+
+  return { sha256, bytes };
+}
+
+function sameBytes(recorded, actual) {
+  return recorded?.sha256 === actual.sha256 && recorded?.bytes === actual.bytes;
+}
+
+async function readNotaryResult(effects, path, identity) {
+  const outcome = JSON.parse(await effects.readText(path));
+
+  if (
+    outcome.status !== "complete" ||
+    outcome.stapled !== true ||
+    outcome.notarization?.status !== "Accepted" ||
+    outcome.sourceCommit !== identity.sourceCommit ||
+    outcome.version !== identity.version ||
+    outcome.protocolVersion !== identity.protocolVersion ||
+    outcome.teamId !== SIGNING_TEAM
+  )
+    throw new Error("Notarization result is not complete and accepted");
+
+  return outcome.archive;
+}
+
+async function verifyPrepared(effects, outputDirectory, identity, repository) {
+  const directory = await effects.realpath(outputDirectory);
+
+  const paths = [
+    RELEASE_RECEIPT,
+    archiveName(identity),
+    FEED_NAME,
+    NOTARY_RESULT,
+  ].map((name) => join(directory, name));
+
+  const [receipt, zip, feed, notarization] = paths;
+
+  const resolved = await Promise.all(
+    paths.map((path) => effects.realpath(path)),
+  );
+
+  if (resolved.some((path, index) => path !== paths[index]))
+    throw new Error(
+      "Prepared release files must be direct files in the output directory",
+    );
+
+  const prepared = JSON.parse(await effects.readText(receipt));
+  const binding = preparedIdentity(identity, repository);
+
+  if (Object.entries(binding).some(([key, value]) => prepared[key] !== value))
+    throw new Error(
+      "Prepared release identity does not match this publication",
+    );
+
+  const [archive, manifest, notarized] = await Promise.all([
+    artifactBytes(effects, zip),
+    artifactBytes(effects, feed),
+    readNotaryResult(effects, notarization, identity),
+  ]);
+
+  if (
+    !sameBytes(prepared.archive, archive) ||
+    !sameBytes(notarized, archive) ||
+    !sameBytes(prepared.feed, manifest)
+  )
+    throw new Error(
+      "Prepared release artifact differs from its recorded bytes",
+    );
+}
+
 export function buildSteps({ root, outputDirectory, identity, repository }) {
   const desktop = join(root, "apps/desktop");
   const app = join(desktop, "release/mac-arm64/Omnyo.app");
-  const zipName = `omnyo-${identity.numericVersion}-arm64.zip`;
+  const zipName = archiveName(identity);
   const zip = join(desktop, "release", zipName);
+  const preparedZip = join(outputDirectory, zipName);
   const alias = join(outputDirectory, ALIAS_ASSET_NAME);
   const feed = join(outputDirectory, FEED_NAME);
   const extracted = join(outputDirectory, "extracted");
   const extractedApp = join(extracted, "Omnyo.app");
   const job = join(outputDirectory, "notary-job.json");
-  const result = join(outputDirectory, "notary-result.json");
+  const result = join(outputDirectory, NOTARY_RESULT);
   const releaseArguments = ["-R", repository];
 
   const downloadUrl = (name) =>
@@ -297,6 +410,11 @@ export function buildSteps({ root, outputDirectory, identity, repository }) {
           },
           timeoutMs: 30 * MINUTE,
         }),
+        check(
+          "snapshot the verified runtime for coordinator staging",
+          (effects) =>
+            effects.prepareRuntime({ root, outputDirectory, identity }),
+        ),
       ],
     },
     {
@@ -361,22 +479,8 @@ export function buildSteps({ root, outputDirectory, identity, repository }) {
           ],
           { cwd: root, timeoutMs: 45 * MINUTE, redact: true },
         ),
-        check(
-          `require a complete accepted stapled ${result}`,
-          async (effects) => {
-            const outcome = JSON.parse(await effects.readText(result));
-
-            if (
-              outcome.status !== "complete" ||
-              outcome.stapled !== true ||
-              outcome.notarization?.status !== "Accepted" ||
-              outcome.sourceCommit !== identity.sourceCommit ||
-              outcome.version !== identity.version
-            )
-              throw new Error(
-                "Notarization result is not complete and accepted",
-              );
-          },
+        check(`require a complete accepted stapled ${result}`, (effects) =>
+          readNotaryResult(effects, result, identity),
         ),
       ],
     },
@@ -434,6 +538,32 @@ export function buildSteps({ root, outputDirectory, identity, repository }) {
           if (!(await effects.exists(feed)))
             throw new Error("The update feed was not written");
         }),
+        check(
+          "save the prepared archive and record its feed and notarization",
+          async (effects) => {
+            await effects.copyFile(zip, preparedZip);
+
+            const [archive, manifest, notarized] = await Promise.all([
+              artifactBytes(effects, preparedZip),
+              artifactBytes(effects, feed),
+              readNotaryResult(effects, result, identity),
+            ]);
+
+            if (!sameBytes(notarized, archive))
+              throw new Error(
+                "Prepared archive differs from the notarized bytes",
+              );
+
+            await effects.writeText(
+              join(outputDirectory, RELEASE_RECEIPT),
+              JSON.stringify({
+                ...preparedIdentity(identity, repository),
+                archive,
+                feed: manifest,
+              }) + "\n",
+            );
+          },
+        ),
       ],
     },
     {
@@ -441,6 +571,23 @@ export function buildSteps({ root, outputDirectory, identity, repository }) {
       title: `Publish to ${repository} release ${RELEASE_TAG}: versioned zip, then ${ALIAS_ASSET_NAME}, then feed`,
       phase: "publish",
       actions: [
+        check(
+          "verify the approved source and prepared artifacts before publication",
+          async (effects) => {
+            await requirePublicMain(effects, identity.sourceCommit);
+            await verifyPrepared(
+              effects,
+              outputDirectory,
+              identity,
+              repository,
+            );
+            await requireBridgePublicFeed({
+              effects,
+              repository,
+              version: identity.version,
+            });
+          },
+        ),
         check(
           `create release ${RELEASE_TAG} if it does not exist`,
           async (effects) => {
@@ -474,12 +621,51 @@ export function buildSteps({ root, outputDirectory, identity, repository }) {
             );
           },
         ),
-        check(`copy ${zip} to ${alias}`, (effects) =>
-          effects.copyFile(zip, alias),
+        check(
+          `upload or reconcile the immutable archive ${zipName}`,
+          async (effects) => {
+            const existing = await effects.downloadSha256(
+              downloadUrl(zipName),
+              {
+                allowMissing: true,
+              },
+            );
+
+            if (existing === null) {
+              await effects.exec(
+                exec(
+                  [
+                    "gh",
+                    "release",
+                    "upload",
+                    RELEASE_TAG,
+                    preparedZip,
+                    ...releaseArguments,
+                  ],
+                  { cwd: root, timeoutMs: 20 * MINUTE },
+                ),
+              );
+            } else if (existing !== (await effects.sha256(preparedZip))) {
+              throw new Error(
+                `Published ${zipName} differs from the local file`,
+              );
+            }
+          },
         ),
-        exec(
-          ["gh", "release", "upload", RELEASE_TAG, zip, ...releaseArguments],
-          { cwd: root, timeoutMs: 20 * MINUTE },
+        verifyDownload(zipName, preparedZip),
+        check(
+          "recheck the release source and feed before updating the stable download",
+          async (effects) => {
+            await requirePublicMain(effects, identity.sourceCommit);
+            await requireBridgePublicFeed({
+              effects,
+              repository,
+              version: identity.version,
+            });
+          },
+        ),
+        check(`copy ${preparedZip} to ${alias}`, (effects) =>
+          effects.copyFile(preparedZip, alias),
         ),
         exec(
           [
@@ -493,8 +679,18 @@ export function buildSteps({ root, outputDirectory, identity, repository }) {
           ],
           { cwd: root, timeoutMs: 20 * MINUTE },
         ),
-        verifyDownload(zipName, zip),
-        verifyDownload(ALIAS_ASSET_NAME, zip),
+        verifyDownload(ALIAS_ASSET_NAME, preparedZip),
+        check(
+          "recheck the release source and feed before updating the feed",
+          async (effects) => {
+            await requirePublicMain(effects, identity.sourceCommit);
+            await requireBridgePublicFeed({
+              effects,
+              repository,
+              version: identity.version,
+            });
+          },
+        ),
         exec(
           [
             "gh",
@@ -514,9 +710,13 @@ export function buildSteps({ root, outputDirectory, identity, repository }) {
 }
 
 export function selectSteps(steps, mode) {
-  return mode === "prepare"
-    ? steps.filter((step) => step.phase === "prepare")
-    : steps;
+  if (mode === "prepare")
+    return steps.filter((step) => step.phase === "prepare");
+
+  if (mode === "promote")
+    return steps.filter((step) => step.phase === "publish");
+
+  return steps;
 }
 
 function quote(value) {
@@ -566,11 +766,12 @@ export async function runRelease({ root, argv, effects, home, repository }) {
   }
 
   const identity = await preflight({ root, effects, home, options });
+  const destination = repository ?? RELEASES_REPOSITORY;
 
-  if (options.mode === "publish")
+  if (options.mode === "publish" || options.mode === "promote")
     await requireBridgePublicFeed({
       effects,
-      repository: repository ?? RELEASES_REPOSITORY,
+      repository: destination,
       version: identity.version,
     });
 
@@ -583,7 +784,7 @@ export async function runRelease({ root, argv, effects, home, repository }) {
       root,
       outputDirectory,
       identity,
-      repository: repository ?? RELEASES_REPOSITORY,
+      repository: destination,
     }),
     options.mode,
   );
@@ -596,14 +797,18 @@ export async function runRelease({ root, argv, effects, home, repository }) {
     return { steps };
   }
 
-  if ((await effects.listDirectory(outputDirectory)).length > 0)
-    throw new Error(
-      `Output directory ${outputDirectory} is not empty; choose another with --output-dir`,
-    );
-
-  await effects.makeDirectory(outputDirectory);
+  if (options.mode !== "promote") {
+    if ((await effects.listDirectory(outputDirectory)).length > 0)
+      throw new Error(
+        `Output directory ${outputDirectory} is not empty; choose another with --output-dir`,
+      );
+    await effects.makeDirectory(outputDirectory);
+  }
 
   const state = {};
+
+  const logPrefix =
+    options.mode === "promote" ? `promote-${effects.now()}-` : "";
 
   for (const [index, step] of steps.entries()) {
     effects.log(`[${index + 1}/${steps.length}] ${step.title}`);
@@ -621,7 +826,7 @@ export async function runRelease({ root, argv, effects, home, repository }) {
       await effects.exec(action, {
         logFile: join(
           outputDirectory,
-          `${String(index + 1).padStart(2, "0")}-${step.id}-${execCount}.log`,
+          `${logPrefix}${String(index + 1).padStart(2, "0")}-${step.id}-${execCount}.log`,
         ),
       });
     }
@@ -630,7 +835,7 @@ export async function runRelease({ root, argv, effects, home, repository }) {
   effects.log(
     options.mode === "prepare"
       ? `Prepared ${identity.version}; nothing was uploaded. Results are in ${outputDirectory}`
-      : `Published ${identity.version} to ${repository ?? RELEASES_REPOSITORY}`,
+      : `Published ${identity.version} to ${destination}`,
   );
 
   return { steps };
@@ -706,7 +911,9 @@ export function createRealEffects({ root, home }) {
     now: () => Date.now(),
     listDirectory: (path) => readdir(path).catch(() => []),
     makeDirectory: (path) => mkdir(path, { recursive: true, mode: 0o700 }),
-    copyFile: (from, to) => copyFile(from, to),
+    copyFile: (from, to) => copyFile(from, to, constants.COPYFILE_FICLONE),
+    prepareRuntime: preparePublicRuntime,
+    fileSize: async (path) => (await stat(path)).size,
     sha256: hashFile,
     downloadText: async (url) => {
       const response = await fetch(url, { redirect: "follow" });
@@ -716,8 +923,10 @@ export function createRealEffects({ root, home }) {
 
       return response.text();
     },
-    downloadSha256: async (url) => {
+    downloadSha256: async (url, { allowMissing = false } = {}) => {
       const response = await fetch(url, { redirect: "follow" });
+
+      if (allowMissing && response.status === 404) return null;
 
       if (!response.ok || response.body === null)
         throw new Error(`Download of ${url} failed with ${response.status}`);
@@ -753,8 +962,8 @@ export function createRealEffects({ root, home }) {
           stdio: ["pipe", sink.fd, sink.fd],
         });
 
-        const filtered = new Promise((resolvePromise, reject) => {
-          filter.once("error", reject);
+        const filtered = new Promise((resolvePromise) => {
+          filter.once("error", () => resolvePromise(null));
           filter.once("close", resolvePromise);
         });
 
@@ -771,7 +980,11 @@ export function createRealEffects({ root, home }) {
           });
         } finally {
           filter.stdin.end();
-          await filtered;
+
+          if ((await filtered) !== 0)
+            throw new Error(
+              `Credential-output redactor failed; see ${logFile}`,
+            );
         }
 
         return outcome;

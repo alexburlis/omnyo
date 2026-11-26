@@ -571,16 +571,25 @@ credential overlay stored outside the checkout.
 
     pnpm public:mac-release --plan --credential-overlay PATH
     pnpm public:mac-release --prepare --credential-overlay PATH [--output-dir PATH]
+    pnpm public:mac-release --promote [--output-dir PATH]
     pnpm public:mac-release --credential-overlay PATH [--output-dir PATH]
 
 `--plan` runs the checks and prints every step without running any. `--prepare`
-runs steps 1 to 5 and uploads nothing. With no mode it also publishes. An untagged
+runs steps 1 to 5 and saves a verified archive, feed and `prepared-release.json`.
+Once the exact build and download channel are approved, `--promote` publishes
+that output directory from the same clean release checkout. It verifies public
+main, the notarization receipt and both file hashes before the first upload.
+With no mode the command prepares and publishes in one run. An untagged
 `1.x` version publishes only after the public feed already carries a tagged `1.x`
 bridge build, because installed public apps older than 1.0.0 reject untagged updates
 (`public_feed_not_bridge_capable`). The steps stop at
 the first failure:
 
-1. Build and sign the runtime: `OMNYO_RUNTIME_MAC_SIGNING_TEAM=Z7T4C33A35 pnpm exec turbo run build --filter=omnyo-app`.
+1. Build and sign the runtime. The publisher verifies its source, protocol and
+   file inventory, copies it to `runtime/` and writes `runtime-prepared.json`.
+   The coordinator operator can start the protected staging procedure from
+   that copy while the Mac package is being prepared. Keep a single compiler
+   lane for the public build.
 2. Build the app with `OMNYO_DESKTOP_RELEASE_CHANNEL=public-beta pnpm run desktop:build`
    and require its app and `omnyo-<numeric version>-arm64.zip` to be new.
 3. Notarize and staple with `scripts/public-mac-notary.mjs` using the supplied
@@ -588,17 +597,24 @@ the first failure:
    must be `complete`, stapled and `Accepted` for this commit and version.
 4. Check `spctl` and `stapler validate` on the app and on an app extracted from the
    final ZIP.
-5. Write `public-beta-mac.yml` with `desktop:public-update-feed`.
-6. Create the `macos` release if it is missing; upload the versioned ZIP (never
-   overwritten), copy it to `Omnyo-macOS.zip` and upload that with `--clobber`;
-   download both and compare their sha256 with the local ZIP; upload the feed last
-   with `--clobber` and compare its download too.
+5. Write `public-beta-mac.yml` with `desktop:public-update-feed`. Save the checked
+   versioned ZIP and the release receipt in the output directory.
+6. Create the `macos` release if it is missing and upload the versioned ZIP.
+   Reconcile an existing ZIP by digest. Compare the published ZIP before
+   replacing `Omnyo-macOS.zip`. Confirm the stable download matches, then
+   upload the feed last and compare its published bytes.
 
-Logs, the notarization job and result, the alias copy, the extracted app and the feed
-go to `--output-dir` (default `~/scratch/omnyo/public-mac-release/<version>`), which
-must be empty or absent. Each step has its own log; the notarization log passes
-through the credential filter, and no step prints credential material. Remove the
-directory after the release is verified.
+The output directory defaults to `~/scratch/omnyo/public-mac-release/<version>`.
+Use an empty directory for preparation and the same directory for promotion.
+If an upload is interrupted, retry promotion with that directory. The publisher
+compares the immutable ZIP before replacing the stable download or feed. Keep
+the output until publication is verified and the coordinator owner finishes
+using the runtime snapshot.
+
+Schedule report-only audits separately from release preparation. Keep any
+audit the operator requires for a specific release in its acceptance criteria.
+See the [release turnaround plan](../../docs/public-release-turnaround.md) for
+phase timing and verification.
 
 The public app uses the exact same internal desktop and bundled runtime version. Runtime inventory/signature checks
 are preserved. Public compilation uses `dist-public-beta`; packaging maps that output to `dist` and

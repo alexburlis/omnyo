@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import test from "node:test";
 import {
   ALIAS_ASSET_NAME,
@@ -20,6 +21,12 @@ const home = "/home/tester";
 const version = "0.46.365+private.1";
 
 const commit = "a".repeat(40);
+
+const archive = "stapled zip bytes";
+
+const zip = "omnyo-0.46.365-arm64.zip";
+
+const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 const publishedFeed = (runtimeVersion) =>
   `version: 0.46.365\nfiles:\n  - url: omnyo-0.46.365-arm64.zip\nomnyoPrivate:\n  appId: dev.omnyo.beta\n  runtimeVersion: ${runtimeVersion}\n  protocolVersion: 254\n`;
@@ -48,12 +55,14 @@ function createEffects({
     [`${home}/bin/op`, ""],
     [`${home}/.codex/bin/redact-stream`, ""],
     ["/overlay.env", ""],
+    [`/repo/apps/desktop/release/${zip}`, archive],
   ]);
 
   const calls = [];
   const logs = [];
   let clock = 1000;
   const hashes = new Map();
+  const uploads = new Map();
 
   const effects = {
     calls,
@@ -91,16 +100,24 @@ function createEffects({
       calls.push(["copy", from, to]);
       files.set(to, files.get(from) ?? "");
     },
-    sha256: async () => "same",
+    prepareRuntime: async ({ outputDirectory }) =>
+      files.set(`${outputDirectory}/runtime-prepared.json`, "{}"),
+    fileSize: async (path) => Buffer.byteLength(files.get(path)),
+    sha256: async (path) => digest(files.get(path)),
     downloadText: async (url) => {
       calls.push(["download-text", url]);
 
       return feed;
     },
-    downloadSha256: async (url) => {
-      calls.push(["download", url]);
+    downloadSha256: async (url, { allowMissing = false } = {}) => {
+      calls.push([allowMissing ? "probe" : "download", url]);
 
-      return hashes.get(url) ?? "same";
+      if (hashes.has(url)) return hashes.get(url);
+
+      if (uploads.has(url)) return uploads.get(url);
+
+      if (allowMissing) return null;
+      throw new Error(`missing published asset ${url}`);
     },
     corrupt: (url) => hashes.set(url, "different"),
     exec: async (action, { allowFailure = false } = {}) => {
@@ -114,12 +131,27 @@ function createEffects({
             stapled: true,
             sourceCommit: commit,
             version,
+            protocolVersion: 254,
+            teamId: "Z7T4C33A35",
             notarization: { id: "id", status: "Accepted" },
+            archive: {
+              sha256: digest(archive),
+              bytes: Buffer.byteLength(archive),
+            },
           }),
         );
 
       if (action.argv.includes("desktop:public-update-feed"))
         files.set(`/out/${FEED_NAME}`, "feed");
+
+      if (action.argv[0] === "gh" && action.argv[2] === "upload") {
+        const file = action.argv[4];
+        const repository = action.argv[action.argv.indexOf("-R") + 1];
+        uploads.set(
+          `https://github.com/${repository}/releases/download/macos/${basename(file)}`,
+          digest(files.get(file)),
+        );
+      }
 
       return { code: allowFailure && effects.releaseMissing ? 1 : 0 };
     },
@@ -151,6 +183,7 @@ test("parses modes and the output directory", () => {
   });
   assert.equal(parseArguments(["--plan"]).mode, "plan");
   assert.equal(parseArguments(["--prepare"]).mode, "prepare");
+  assert.equal(parseArguments(["--promote"]).mode, "promote");
   assert.equal(
     parseArguments(["--prepare", "--output-dir", "/x"]).outputDirectory,
     "/x",
@@ -265,6 +298,19 @@ test("plan prints every step and runs nothing", async () => {
   );
 });
 
+test("refuses to replace a newer public update feed", async () => {
+  const effects = createEffects({ feed: publishedFeed("1.0.184") });
+
+  await assert.rejects(
+    requireBridgePublicFeed({
+      effects,
+      repository: "owner/releases",
+      version: "1.0.183",
+    }),
+    /already serves newer version 1\.0\.184/u,
+  );
+});
+
 test("prepare omits every publish action", async () => {
   const effects = createEffects();
 
@@ -278,10 +324,121 @@ test("prepare omits every publish action", async () => {
     false,
   );
   assert.equal(
-    effects.calls.some(([kind]) => kind === "download" || kind === "copy"),
+    effects.calls.some(([kind]) => kind === "download" || kind === "probe"),
     false,
   );
+  assert.equal(effects.files.get(`/out/${zip}`), archive);
+  const receipt = JSON.parse(effects.files.get("/out/prepared-release.json"));
+  assert.equal(receipt.sourceCommit, commit);
+  assert.equal(receipt.archive.sha256, digest(archive));
+  assert.ok(effects.files.has("/out/runtime-prepared.json"));
   assert.match(effects.logs.at(-1), /nothing was uploaded/u);
+});
+
+test("promotes a prepared build without loading signing credentials or rebuilding", async () => {
+  const effects = createEffects();
+
+  await run(["--prepare"], effects);
+  effects.calls.length = 0;
+
+  await runRelease({
+    root,
+    argv: ["--promote", "--output-dir", "/out"],
+    effects,
+    home,
+    repository: "owner/releases",
+  });
+
+  const executed = effects.calls.filter(([kind]) => kind === "exec");
+  assert.ok(executed.some((call) => call.includes("upload")));
+  assert.ok(executed.every(([, program]) => program === "gh"));
+});
+
+test("refuses a tampered prepared archive before making any publication call", async () => {
+  const effects = createEffects();
+  await run(["--prepare"], effects);
+  effects.calls.length = 0;
+  const scratch = await mkdtemp(join(tmpdir(), "public-mac-prepared-"));
+
+  try {
+    for (const [file, content] of effects.files) {
+      if (file.startsWith("/out/"))
+        await writeFile(join(scratch, basename(file)), content);
+    }
+
+    await writeFile(join(scratch, zip), "changed zip bytes");
+
+    const real = createRealEffects({ root: scratch, home });
+    const readFixture = effects.readText;
+    effects.realpath = real.realpath;
+    effects.sha256 = real.sha256;
+    effects.fileSize = real.fileSize;
+    effects.readText = (path) =>
+      path.startsWith(root + "/") ? readFixture(path) : real.readText(path);
+
+    await assert.rejects(
+      runRelease({
+        root,
+        argv: ["--promote", "--output-dir", scratch],
+        effects,
+        home,
+        repository: "owner/releases",
+      }),
+      /differs from its recorded bytes/u,
+    );
+    assert.equal(
+      effects.calls.some(([kind]) => kind === "exec"),
+      false,
+    );
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
+test("promotion reconciles matching immutable uploads and refuses different bytes", async () => {
+  const effects = createEffects();
+  await run(["--prepare"], effects);
+  await run(["--promote"], effects);
+  effects.calls.length = 0;
+  await run(["--promote"], effects);
+
+  const uploadedZip = () =>
+    effects.calls.some(
+      ([kind, program, , action, , path]) =>
+        kind === "exec" &&
+        program === "gh" &&
+        action === "upload" &&
+        path === `/out/${zip}`,
+    );
+
+  assert.equal(uploadedZip(), false);
+
+  effects.calls.length = 0;
+  effects.corrupt(
+    `https://github.com/owner/releases/releases/download/macos/${zip}`,
+  );
+  await assert.rejects(
+    run(["--promote"], effects),
+    /differs from the local file/u,
+  );
+  assert.equal(
+    effects.calls.some((call) => call.includes("upload")),
+    false,
+  );
+});
+
+test("promotion stops if public main no longer points to the prepared commit", async () => {
+  const effects = createEffects({ remoteCommit: "b".repeat(40) });
+  await run(["--prepare"], effects);
+  effects.calls.length = 0;
+  await assert.rejects(
+    run(["--promote"], effects),
+    /exact commit currently on public main/u,
+  );
+  assert.equal(
+    effects.calls.some(([kind]) => kind === "exec"),
+    false,
+  );
 });
 
 test("refuses a dirty checkout before running anything", async () => {
@@ -361,7 +518,7 @@ test("uploads the versioned zip, then the alias, then the feed", async () => {
     .map((call) => call.find((part) => /\.(zip|yml)$/u.test(part)));
 
   assert.deepEqual(uploads, [
-    "/repo/apps/desktop/release/omnyo-0.46.365-arm64.zip",
+    `/out/${zip}`,
     `/out/${ALIAS_ASSET_NAME}`,
     `/out/${FEED_NAME}`,
   ]);
@@ -376,9 +533,7 @@ test("uploads the versioned zip, then the alias, then the feed", async () => {
   );
 
   const zipUpload = effects.calls.find(
-    (call) =>
-      call.includes("/repo/apps/desktop/release/omnyo-0.46.365-arm64.zip") &&
-      call.includes("upload"),
+    (call) => call.includes(`/out/${zip}`) && call.includes("upload"),
   );
 
   assert.ok(aliasUpload.includes("--clobber"));
@@ -497,6 +652,33 @@ test("passes a notarization child's output through the credential filter", async
 
     assert.match(log, /status=ok/u);
     assert.doesNotMatch(log, /MIIEvQIBADANBgkqhkiG9w0BAQEFAASC/u);
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
+test("a failing credential redactor rejects a successful child", async () => {
+  const scratch = await mkdtemp(join(tmpdir(), "public-mac-release-redactor-"));
+
+  try {
+    const bin = join(scratch, ".codex/bin");
+    await mkdir(bin, { recursive: true });
+    await writeFile(join(bin, "redact-stream"), "#!/bin/sh\nexit 7\n", {
+      mode: 0o700,
+    });
+    await assert.rejects(
+      createRealEffects({ root: scratch, home: scratch }).exec(
+        {
+          argv: [process.execPath, "-e", "process.exit(0)"],
+          cwd: scratch,
+          env: {},
+          timeoutMs: 20000,
+          redact: true,
+        },
+        { logFile: join(scratch, "child.log") },
+      ),
+      /redactor failed/u,
+    );
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }
