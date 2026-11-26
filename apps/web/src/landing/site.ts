@@ -1,9 +1,14 @@
+import {
+  ALIAS_ASSET_NAME,
+  PUBLIC_MAC_RELEASE_URL,
+  RELEASES_REPOSITORY,
+} from "@omnyo/config/public-mac-release";
+
 declare const __SITE_ORIGIN__: string;
 
 export const SITE_URL = __SITE_ORIGIN__;
 
-export const MACOS_DOWNLOAD_URL =
-  "https://github.com/alexburlis/omnyo-releases/releases/download/macos/Omnyo-macOS.zip";
+export const MACOS_DOWNLOAD_URL = PUBLIC_MAC_RELEASE_URL + ALIAS_ASSET_NAME;
 
 export interface PublicMacDownload {
   version: string;
@@ -12,9 +17,9 @@ export interface PublicMacDownload {
 
 export const BB_URL = "https://github.com/get-bb/bb";
 
-export const GITHUB_URL = "https://github.com/alexburlis/omnyo-releases";
+export const REPO_URL = `https://github.com/${RELEASES_REPOSITORY}`;
 
-export const REPO_URL = "https://github.com/alexburlis/omnyo";
+export const GITHUB_URL = `${REPO_URL}/releases`;
 
 export const TERMS_URL = "/terms";
 

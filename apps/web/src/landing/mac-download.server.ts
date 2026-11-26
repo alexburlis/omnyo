@@ -1,6 +1,11 @@
-import { MACOS_DOWNLOAD_URL, type PublicMacDownload } from "./site";
+import {
+  FEED_NAME,
+  PUBLIC_MAC_RELEASE_URL,
+} from "@omnyo/config/public-mac-release";
 
-const feedUrl = new URL("public-beta-mac.yml", MACOS_DOWNLOAD_URL);
+import type { PublicMacDownload } from "./site";
+
+const feedUrl = new URL(FEED_NAME, PUBLIC_MAC_RELEASE_URL);
 
 const feedLifetimeMs = 120_000;
 

@@ -1,9 +1,10 @@
+import { PUBLIC_MAC_RELEASE_URL } from "@omnyo/config/public-mac-release";
+
 import type { DesktopAutoUpdateFeedConfig } from "./desktop-update-provider.js";
 
 export const PUBLIC_BETA_UPDATE_APP_ID = "dev.omnyo.beta";
 
-export const PUBLIC_BETA_UPDATE_URL =
-  "https://github.com/alexburlis/omnyo-releases/releases/download/macos/";
+export const PUBLIC_BETA_UPDATE_URL = PUBLIC_MAC_RELEASE_URL;
 
 export function publicBetaUpdateFeed(): DesktopAutoUpdateFeedConfig {
   return {

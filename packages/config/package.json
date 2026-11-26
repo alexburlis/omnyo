@@ -179,6 +179,10 @@
       "types": "./src/release-version.d.mts",
       "default": "./src/release-version.mjs"
     },
+    "./public-mac-release": {
+      "types": "./src/public-mac-release.d.mts",
+      "default": "./src/public-mac-release.mjs"
+    },
     "./usage-collector-url": {
       "source": "./src/usage-collector-url.ts",
       "types": "./src/usage-collector-url.ts",

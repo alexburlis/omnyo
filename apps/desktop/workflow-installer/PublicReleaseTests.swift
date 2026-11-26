@@ -16,11 +16,15 @@ let valid = """
 
   """
 let release = try PublicRelease(Data(valid.utf8), minimum: "1.0.139")
+precondition(
+  PublicRelease.feed.absoluteString
+    == "https://github.com/alexburlis/omnyo/releases/download/macos/public-beta-mac.yml"
+)
 precondition(release.version == "1.0.139")
 precondition(release.size == 239_818_448)
 precondition(
   release.download.absoluteString
-    == "https://github.com/alexburlis/omnyo-releases/releases/download/macos/omnyo-1.0.139-arm64.zip"
+    == "https://github.com/alexburlis/omnyo/releases/download/macos/omnyo-1.0.139-arm64.zip"
 )
 precondition(release.digest == Data(repeating: 0, count: 64))
 let cases = [
