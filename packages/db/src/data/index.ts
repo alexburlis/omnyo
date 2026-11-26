@@ -647,6 +647,8 @@ export * from "./project-attachment-backfill.js";
 
 export * from "./thread-attention.js";
 
+export * from "./thread-failures.js";
+
 export * from "./daemon-event-receipts.js";
 
 export * from "./submission-receipts.js";

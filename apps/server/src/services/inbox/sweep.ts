@@ -7,7 +7,7 @@ import {
 import { and, eq, isNotNull, lte } from "drizzle-orm";
 import { INBOX_DEFAULT_WAIT_MS, INBOX_FOR_TEXT_MAX } from "@omnyo/domain";
 import type { LoggedPendingInteractionWorkSessionDeps } from "../../types.js";
-import { insertConditions, insertWait } from "./store.js";
+import { findWaitsByKey, insertConditions, insertWait } from "./store.js";
 import {
   settleDueRetryDecisions,
   settleUnclaimedHeldRetries,
@@ -28,10 +28,20 @@ export function convertLegacyCallbacks(
   const converted: string[] = [];
 
   for (const row of db.select().from(threadCallbacks).all()) {
+    const key = `callback:${row.sourceThreadId ?? row.id}`;
+    const latest = findWaitsByKey(db, { threadId: row.threadId, key })[0];
+
+    db.delete(threadCallbacks)
+      .where(eq(threadCallbacks.threadId, row.threadId))
+      .run();
+    converted.push(row.threadId);
+
+    if (latest !== undefined && latest.status !== "closed") continue;
+
     const wait = insertWait(db, {
       threadId: row.threadId,
-      key: `callback:${row.sourceThreadId ?? row.id}`,
-      generation: 1,
+      key,
+      generation: (latest?.generation ?? 0) + 1,
       kind: row.sourceThreadId === null ? "event" : "chat",
       status: "live",
       readiness: "all",
@@ -71,8 +81,6 @@ export function convertLegacyCallbacks(
             afterSeq: row.afterSeq,
           },
     ]);
-    db.delete(threadCallbacks).where(eq(threadCallbacks.threadId, row.threadId)).run();
-    converted.push(row.threadId);
   }
 
   return converted;
@@ -146,7 +154,8 @@ export async function runInboxSweep(
 
   for (const id of await sweepStalledSources(deps, now)) changed.add(id);
 
-  for (const waitId of await sweepCoordinatorVersion(deps, now)) changed.add(waitId);
+  for (const waitId of await sweepCoordinatorVersion(deps, now))
+    changed.add(waitId);
 
   const notify = new Set<string>();
 

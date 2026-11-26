@@ -4,7 +4,12 @@ import {
   threadWaitConditions,
   threadWaits,
 } from "@omnyo/db";
-import { INBOX_CALLER_THREAD_HEADER, type Thread } from "@omnyo/domain";
+import {
+  INBOX_CALLER_THREAD_HEADER,
+  type Thread,
+  type ThreadAttentionSnapshot,
+  type ThreadCallback,
+} from "@omnyo/domain";
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { runInboxSweep } from "../../src/services/inbox/sweep.js";
@@ -12,6 +17,7 @@ import { runQueuedMessageDispatch } from "../../src/services/threads/queued-mess
 import { withTestHarness } from "../helpers/test-app.js";
 import {
   endTurn,
+  ownerRequest,
   ownerSend,
   pendingSubmitCount,
   seedChat,
@@ -65,6 +71,50 @@ function waitsOf(world: InboxWorld, thread: Thread) {
     .from(threadWaits)
     .where(eq(threadWaits.threadId, thread.id))
     .all();
+}
+
+async function attentionOf(
+  world: InboxWorld,
+  thread: Thread,
+): Promise<ThreadAttentionSnapshot> {
+  const response = await world.harness.app.request(
+    `/api/v1/threads/${thread.id}/attention`,
+  );
+
+  expect(response.status).toBe(200);
+
+  return (await response.json()) as ThreadAttentionSnapshot;
+}
+
+function recordAttentionChanges(world: InboxWorld, thread: Thread) {
+  const seen: ThreadCallback[][] = [];
+  world.harness.deps.hub.onThreadChanged((id, changes, metadata) => {
+    if (id === thread.id && changes.includes("interactions-changed"))
+      seen.push(metadata?.attentionItems?.callbacks ?? []);
+  });
+
+  return seen;
+}
+
+function insertLegacyCallback(
+  world: InboxWorld,
+  waiter: Thread,
+  source: Thread,
+  marker: string,
+): void {
+  world.harness.db
+    .insert(threadCallbacks)
+    .values({
+      threadId: waiter.id,
+      id: "legacy-1",
+      sourceThreadId: source.id,
+      sourceTitle: "Source",
+      reason: "the legacy result",
+      createdAt: Date.now(),
+      afterSeq: 0,
+      matchText: marker,
+    })
+    .run();
 }
 
 describe("omnyo callback wait as an alias of omnyo wait --chat", () => {
@@ -176,19 +226,7 @@ describe("omnyo callback wait as an alias of omnyo wait --chat", () => {
       const waiter = seedChat(world);
       const source = seedChat(world);
       const marker = "[callback-wait:0f0e5b9d-5a7e-4c22-9d1f-4d3a8e6b1c2a]";
-      harness.db
-        .insert(threadCallbacks)
-        .values({
-          threadId: waiter.id,
-          id: "legacy-1",
-          sourceThreadId: source.id,
-          sourceTitle: "Source",
-          reason: "the legacy result",
-          createdAt: Date.now(),
-          afterSeq: 0,
-          matchText: marker,
-        })
-        .run();
+      insertLegacyCallback(world, waiter, source, marker);
 
       await runInboxSweep(harness.deps, Date.now());
       const [wait] = waitsOf(world, waiter);
@@ -205,6 +243,187 @@ describe("omnyo callback wait as an alias of omnyo wait --chat", () => {
 
       const delivered = await tell(world, source, waiter, `${marker} done`);
       expect(await delivered.json()).toMatchObject({ delivery: "stored" });
+    });
+  });
+
+  it("drops a legacy row whose waiter already holds an open native wait on the same source", async () => {
+    await withTestHarness(async (harness) => {
+      const world = seedInboxWorld(harness, "host-callback-legacy-collision");
+      const waiter = seedChat(world);
+      const source = seedChat(world);
+      await ownerSend(world, source.id, "Write the report");
+      await startSubmittedTurn(world, source.id);
+      expect((await callbackWait(world, waiter, source)).status).toBe(200);
+      const [native] = waitsOf(world, waiter);
+      insertLegacyCallback(world, waiter, source, "[callback-wait:legacy-1]");
+
+      await runInboxSweep(harness.deps, Date.now());
+
+      expect(harness.db.select().from(threadCallbacks).all()).toEqual([]);
+      expect(waitsOf(world, waiter)).toEqual([native]);
+    });
+  });
+
+  it("converts a legacy row into the next generation after the waiter's earlier native wait closed", async () => {
+    await withTestHarness(async (harness) => {
+      const world = seedInboxWorld(harness, "host-callback-legacy-generation");
+      const waiter = seedChat(world);
+      const source = seedChat(world);
+      await ownerSend(world, source.id, "Write the report");
+      await startSubmittedTurn(world, source.id);
+      expect((await callbackWait(world, waiter, source)).status).toBe(200);
+      const [native] = waitsOf(world, waiter);
+
+      const cleared = await world.harness.app.request(
+        `/api/v1/threads/${waiter.id}/attention`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            [INBOX_CALLER_THREAD_HEADER]: waiter.id,
+          },
+          body: JSON.stringify({ action: "clear", id: native?.id }),
+        },
+      );
+
+      expect(await cleared.json()).toMatchObject({ cleared: true });
+      const marker = "[callback-wait:legacy-1]";
+      insertLegacyCallback(world, waiter, source, marker);
+
+      await runInboxSweep(harness.deps, Date.now());
+
+      expect(harness.db.select().from(threadCallbacks).all()).toEqual([]);
+      expect(
+        waitsOf(world, waiter)
+          .map(({ generation, marker: stored, status }) => ({
+            generation,
+            marker: stored,
+            status,
+          }))
+          .sort((left, right) => left.generation - right.generation),
+      ).toEqual([
+        { generation: 1, marker: native?.marker, status: "closed" },
+        { generation: 2, marker, status: "live" },
+      ]);
+    });
+  });
+});
+
+describe("callback waits in the attention view", () => {
+  it("lists an open callback wait under its wait id and clears it by that id", async () => {
+    await withTestHarness(async (harness) => {
+      const world = seedInboxWorld(harness, "host-callback-view");
+      const waiter = seedChat(world);
+      const source = seedChat(world);
+      await ownerSend(world, source.id, "Write the report");
+      await startSubmittedTurn(world, source.id);
+
+      const registered = await callbackWait(world, waiter, source);
+
+      const { callbackMarker } = (await registered.json()) as {
+        callbackMarker: string;
+      };
+
+      const [wait] = waitsOf(world, waiter);
+
+      const view = await attentionOf(world, waiter);
+      expect(view.callbacks).toEqual([
+        {
+          id: wait?.id,
+          threadId: waiter.id,
+          sourceThreadId: source.id,
+          sourceTitle: expect.any(String),
+          reason: "the migration report",
+          createdAt: wait?.createdAt,
+          afterSeq: expect.any(Number),
+          matchText: callbackMarker,
+          sourceState: "working",
+        },
+      ]);
+
+      const snapshot = await harness.app.request("/api/v1/thread-attention");
+      expect(
+        ((await snapshot.json()) as ThreadAttentionSnapshot).callbacks.map(
+          (callback) => callback.id,
+        ),
+      ).toEqual([wait?.id]);
+
+      const cleared = await harness.app.request(
+        `/api/v1/threads/${waiter.id}/attention`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            [INBOX_CALLER_THREAD_HEADER]: waiter.id,
+          },
+          body: JSON.stringify({ action: "clear", id: wait?.id }),
+        },
+      );
+
+      expect(await cleared.json()).toMatchObject({
+        cleared: true,
+        callbacks: [],
+      });
+      expect((await attentionOf(world, waiter)).callbacks).toEqual([]);
+    });
+  });
+
+  it("tells the waiter once when its source stops working, and again when the wait ends", async () => {
+    await withTestHarness(async (harness) => {
+      const world = seedInboxWorld(harness, "host-callback-forward");
+      const waiter = seedChat(world);
+      const source = seedChat(world);
+      await ownerSend(world, source.id, "Write the report");
+      const sourceTurn = await startSubmittedTurn(world, source.id);
+      await ownerSend(world, waiter.id, "Wait for the report");
+      const waiterTurn = await startSubmittedTurn(world, waiter.id);
+      const registered = await callbackWait(world, waiter, source);
+
+      const { callbackMarker } = (await registered.json()) as {
+        callbackMarker: string;
+      };
+
+      await endTurn(world, waiterTurn, "completed");
+      const seen = recordAttentionChanges(world, waiter);
+
+      await endTurn(world, sourceTurn, "completed");
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(
+        seen.map((callbacks) => callbacks.map((c) => c.sourceState)),
+      ).toEqual([["idle"]]);
+
+      await tell(world, source, waiter, `${callbackMarker} done: 12 tables`);
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(seen.at(-1)).toEqual([]);
+      expect((await attentionOf(world, waiter)).callbacks).toEqual([]);
+    });
+  });
+
+  it("updates a sub-chat's callbacks when the owner cancels its wait from the root's Inbox card", async () => {
+    await withTestHarness(async (harness) => {
+      const world = seedInboxWorld(harness, "host-callback-family");
+      const root = seedChat(world);
+      const child = seedChat(world, { parentThreadId: root.id });
+      const source = seedChat(world);
+      await ownerSend(world, source.id, "Write the report");
+      await startSubmittedTurn(world, source.id);
+      expect((await callbackWait(world, child, source)).status).toBe(200);
+      const [wait] = waitsOf(world, child);
+      const seen = recordAttentionChanges(world, child);
+
+      const cancelled = await ownerRequest(world, "/inbox/act", {
+        action: "cancel-wait",
+        threadId: root.id,
+        waitId: wait?.id,
+      });
+
+      expect(cancelled.status).toBe(200);
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(waitsOf(world, child)[0]?.status).toBe("closed");
+      expect(seen.at(-1)).toEqual([]);
     });
   });
 });

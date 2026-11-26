@@ -135,7 +135,8 @@ source owns running or eligible queued work. Include the returned exact
 `callbackMarker` in its completion request and require its reply through
 `omnyo thread tell CONSUMER --mode auto`. Registration records the dependency;
 it never starts work or schedules a reply. Inspect with `omnyo callback waiting
---self --json`; clear a verified resolved/cancelled dependency with
+--self --json`; each entry's `id` is its wait id. Clear a verified
+resolved/cancelled dependency with
 `omnyo callback clear --self --id EXACT_ID --json`. Human actions require input,
 and Resources and scheduled automations keep their existing completion routes.
 
