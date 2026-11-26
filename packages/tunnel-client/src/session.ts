@@ -178,6 +178,33 @@ export class TunnelSession {
   private lastSentAt: number | null = null;
   lastRemoteActivityAt: number | null = null;
 
+  private readonly onMessage = (data: Buffer, isBinary: boolean): void => {
+    this.bytesReceived += data.byteLength;
+    this.lastReceivedAt = Date.now();
+
+    if (!isBinary) {
+      if (data.toString() === HEARTBEAT_RESPONSE) {
+        this.lastAck = Date.now();
+        this.lastReceivedAckAt = this.lastAck;
+        this.stallGraceSinceAck = false;
+      }
+
+      return;
+    }
+
+    try {
+      this.onFrame(decodeFrame(data));
+    } catch (e) {
+      this.options.log.warn(`tunnel bad frame: ${String(e)}`);
+
+      if (e instanceof InvalidFrameError && e.streamId !== null) {
+        this.closeStream(e.streamId, INVALID_FRAME_REASON);
+      }
+    }
+  };
+
+  private readonly onClose = (): void => this.dispose();
+
   constructor(private readonly options: TunnelSessionOptions) {}
 
   get remoteClients(): number {
@@ -229,34 +256,14 @@ export class TunnelSession {
       this.sendRaw(HEARTBEAT_REQUEST, Buffer.byteLength(HEARTBEAT_REQUEST));
     }, HEARTBEAT_INTERVAL_MS);
 
-    tunnel.on("message", (data: Buffer, isBinary: boolean) => {
-      this.bytesReceived += data.byteLength;
-      this.lastReceivedAt = Date.now();
-
-      if (!isBinary) {
-        if (data.toString() === HEARTBEAT_RESPONSE) {
-          this.lastAck = Date.now();
-          this.lastReceivedAckAt = this.lastAck;
-          this.stallGraceSinceAck = false;
-        }
-
-        return;
-      }
-
-      try {
-        this.onFrame(decodeFrame(data));
-      } catch (e) {
-        this.options.log.warn(`tunnel bad frame: ${String(e)}`);
-
-        if (e instanceof InvalidFrameError && e.streamId !== null) {
-          this.closeStream(e.streamId, INVALID_FRAME_REASON);
-        }
-      }
-    });
-    tunnel.on("close", () => this.dispose());
+    tunnel.on("message", this.onMessage);
+    tunnel.on("close", this.onClose);
   }
 
   dispose(): void {
+    this.options.tunnel.off("message", this.onMessage);
+    this.options.tunnel.off("close", this.onClose);
+
     if (this.heartbeat) clearInterval(this.heartbeat);
 
     for (const s of this.httpStreams.values()) s.abort.abort();

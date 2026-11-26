@@ -930,6 +930,84 @@ describe("omnyo-app launcher", () => {
     expect(readFileSync(cliThreadIdPath, "utf8")).toBe("thr_parent");
   });
 
+  it("uses the managed terminal proxy and its matching headers for the delegated CLI", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "omnyo-cli-proxy-"));
+    const proxy = await startConfigReloadTestServer();
+
+    try {
+      const savedUrl = "https://stored.example.test";
+      const savedHeaders = { "x-fixture-auth": "saved" };
+      writeFileSync(
+        join(dataDir, "config.json"),
+        JSON.stringify({
+          serverUrl: savedUrl,
+          serverHeaders: savedHeaders,
+        }),
+      );
+
+      const env = {
+        OMNYO_DATA_DIR: dataDir,
+        OMNYO_CLI: process.execPath,
+        OMNYO_THREAD_ID: "thr_managed",
+        OMNYO_SERVER_URL: proxy.url,
+      };
+
+      const resolveCli = (sourceEnv: NodeJS.ProcessEnv) =>
+        resolveOmnyoAppRuntimeState({
+          entrypointUrl: import.meta.url,
+          env: sourceEnv,
+          homeDir: dataDir,
+          options: { help: false },
+          serverUrlMode: "delegated-cli",
+        });
+
+      const runtime = await resolveCli(env);
+      expect(runtime.env.OMNYO_SERVER_URL).toBe(proxy.url);
+      expect(runtime.env.OMNYO_SERVER_HEADERS).toBeUndefined();
+
+      const code = await runBundledCliCommand({
+        args: [
+          "-e",
+          "fetch(process.env.OMNYO_SERVER_URL + '/api/v1/system/config/reload', {method: 'POST', headers: JSON.parse(process.env.OMNYO_SERVER_HEADERS ?? '{}')}).then(r => {process.exitCode = r.ok ? 0 : 1})",
+        ],
+        context: runtime.context,
+        env: runtime.env,
+      });
+
+      expect(code).toBe(0);
+      expect(proxy.reloadCount()).toBe(1);
+
+      const scopedHeaders = JSON.stringify({ "x-fixture-auth": "scoped" });
+
+      for (const url of ["http://localhost:1234", "https://[::1]:4321"]) {
+        const scoped = await resolveCli({
+          ...env,
+          OMNYO_SERVER_URL: url,
+          OMNYO_SERVER_HEADERS: scopedHeaders,
+        });
+        expect(scoped.env.OMNYO_SERVER_URL).toBe(url);
+        expect(scoped.env.OMNYO_SERVER_HEADERS).toBe(scopedHeaders);
+      }
+
+      for (const overrides of [
+        { OMNYO_CLI: undefined },
+        { OMNYO_THREAD_ID: undefined },
+        { OMNYO_SERVER_URL: "https://remote.example.test" },
+        { OMNYO_SERVER_URL: "ftp://127.0.0.1" },
+        { OMNYO_SERVER_URL: "invalid" },
+      ]) {
+        const ordinary = await resolveCli({ ...env, ...overrides });
+        expect(ordinary.env.OMNYO_SERVER_URL).toBe(savedUrl);
+        expect(ordinary.env.OMNYO_SERVER_HEADERS).toBe(
+          JSON.stringify(savedHeaders),
+        );
+      }
+    } finally {
+      await proxy.close();
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects an invalid server bind host before launcher startup", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "omnyo-app-invalid-bind-host-"));
 
