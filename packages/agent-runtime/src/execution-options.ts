@@ -39,6 +39,26 @@ export function assertProviderSupportsExecutionOptions(
   }
 }
 
+export function keepRunningTurnApprovals(args: {
+  requested: AgentRuntimeExecutionOptions;
+  running: AgentRuntimeExecutionOptions;
+  steerSource: "user" | "non-user" | undefined;
+}): AgentRuntimeExecutionOptions {
+  if (args.steerSource !== "non-user") return args.requested;
+
+  const {
+    model: _model,
+    serviceTier: _serviceTier,
+    reasoningLevel: _reasoningLevel,
+    promptMode: _promptMode,
+    sessionOptions: _sessionOptions,
+    providerOptions: _providerOptions,
+    ...runningPermissions
+  } = args.running;
+
+  return { ...args.requested, ...runningPermissions };
+}
+
 export function toProviderExecutionContext(
   args: ToProviderExecutionContextArgs,
 ): ProviderExecutionContext {

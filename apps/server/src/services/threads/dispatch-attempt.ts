@@ -832,6 +832,7 @@ async function runDispatchAttempt(
   try {
     await sendThreadMessage(deps, {
       preparation: {
+        author,
         execution,
         attachmentInputs: new Set<PromptInput>(
           args.trigger === "user" && args.source.kind === "inline"

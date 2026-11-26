@@ -172,6 +172,7 @@ function scriptedOptionsFor(
 type JsonRpcId = string | number;
 
 interface ActiveTurn {
+  approvalAfterSteer: (TurnPlan & { approvalKind: ApprovalKind }) | null;
   providerTurnId: string;
   timer: NodeJS.Timeout | null;
 }
@@ -271,6 +272,7 @@ const APPROVAL_KINDS: readonly ApprovalKind[] = [
 ];
 
 interface TurnPlan {
+  approvalAfterSteerKind: ApprovalKind | null;
   approvalKind: ApprovalKind | null;
   delayMs: number;
   questionRequested: boolean;
@@ -315,6 +317,13 @@ function parseTurnPlan(inputText: string): TurnPlan {
   const approvalKind =
     APPROVAL_KINDS.find((kind) => kind === approvalMatch?.[1]) ?? null;
 
+  const approvalAfterSteerMatch =
+    /(?:^|\s)approve_after_steer:([^\s]+)(?:\s|$)/u.exec(inputText);
+
+  const approvalAfterSteerKind =
+    APPROVAL_KINDS.find((kind) => kind === approvalAfterSteerMatch?.[1]) ??
+    null;
+
   const holdMatch = /(?:^|\s)hold_turn(?:\s|$)/u.exec(inputText);
   const failMatch = /(?:^|\s)fail_turn:([^\s]+)(?:\s|$)/u.exec(inputText);
 
@@ -344,6 +353,7 @@ function parseTurnPlan(inputText: string): TurnPlan {
         ? null
         : Number(backgroundTaskSettleAfterMatch[1]),
     approvalKind,
+    approvalAfterSteerKind,
     delayMs: delayMatch?.[1] === undefined ? 0 : Number(delayMatch[1]),
     questionRequested: questionMatch !== null,
     responseText:
@@ -359,6 +369,29 @@ function parseTurnPlan(inputText: string): TurnPlan {
             beforeTurn: prestartFailMatch !== null,
           },
   };
+}
+
+function requestApproval(
+  session: Session,
+  providerTurnId: string,
+  plan: TurnPlan & { approvalKind: ApprovalKind },
+): void {
+  const requestId = sendRequest(
+    BRIDGE_INBOUND_REQUEST_METHODS.interactionRequest,
+    {
+      providerThreadId: session.providerThreadId,
+      threadId: session.threadId,
+      turnId: providerTurnId,
+      payload: approvalPayload(plan.approvalKind, `approval-${providerTurnId}`),
+    },
+  );
+
+  pendingReplies.set(requestId, {
+    kind: "approval",
+    threadId: session.threadId,
+    responseText: plan.responseText,
+    delayMs: plan.delayMs,
+  });
 }
 
 function approvalPayload(
@@ -627,7 +660,14 @@ function beginTurn(args: {
 
   session.turnCount += 1;
   const providerTurnId = `turn-${session.turnCount}`;
-  session.activeTurn = { providerTurnId, timer: null };
+  session.activeTurn = {
+    providerTurnId,
+    timer: null,
+    approvalAfterSteer:
+      plan.approvalAfterSteerKind === null
+        ? null
+        : { ...plan, approvalKind: plan.approvalAfterSteerKind },
+  };
 
   const deltas: ThreadDelta[] = [];
 
@@ -659,7 +699,7 @@ function beginTurn(args: {
     );
   }
 
-  if (plan.holdTurn) {
+  if (plan.holdTurn || plan.approvalAfterSteerKind !== null) {
     emitRecoveryHint(session.threadId, plan.recoverKind);
 
     return;
@@ -683,24 +723,9 @@ function beginTurn(args: {
   }
 
   if (plan.approvalKind !== null) {
-    const requestId = sendRequest(
-      BRIDGE_INBOUND_REQUEST_METHODS.interactionRequest,
-      {
-        providerThreadId: session.providerThreadId,
-        threadId: session.threadId,
-        turnId: providerTurnId,
-        payload: approvalPayload(
-          plan.approvalKind,
-          `approval-${providerTurnId}`,
-        ),
-      },
-    );
-
-    pendingReplies.set(requestId, {
-      kind: "approval",
-      threadId: session.threadId,
-      responseText: plan.responseText,
-      delayMs: plan.delayMs,
+    requestApproval(session, providerTurnId, {
+      ...plan,
+      approvalKind: plan.approvalKind,
     });
 
     return;
@@ -1304,7 +1329,11 @@ const handlers: Record<string, RequestHandler> = {
       completeTurn(session, "completed", "finished before the steer");
       session.turnCount += 1;
       const newTurnId = `turn-${session.turnCount}`;
-      session.activeTurn = { providerTurnId: newTurnId, timer: null };
+      session.activeTurn = {
+        providerTurnId: newTurnId,
+        timer: null,
+        approvalAfterSteer: null,
+      };
       emitDeltas(session.threadId, [
         { kind: "turn.open", providerTurnId: newTurnId },
       ]);
@@ -1320,7 +1349,8 @@ const handlers: Record<string, RequestHandler> = {
       return;
     }
 
-    const providerTurnId = session.activeTurn.providerTurnId;
+    const activeTurn = session.activeTurn;
+    const providerTurnId = activeTurn.providerTurnId;
 
     const acceptSteer = (): void => {
       emitDeltas(session.threadId, [
@@ -1331,6 +1361,12 @@ const handlers: Record<string, RequestHandler> = {
         },
       ]);
       io.sendResult(id, {});
+      const approvalPlan = activeTurn.approvalAfterSteer;
+
+      if (approvalPlan !== null && session.activeTurn === activeTurn) {
+        activeTurn.approvalAfterSteer = null;
+        requestApproval(session, providerTurnId, approvalPlan);
+      }
     };
 
     if (options.steerResponseDelayMs === undefined) {
