@@ -17,13 +17,12 @@ function setup(
   registerCodexAiService(api);
   const [service] = harness.registrations.aiServiceRegistrations;
 
-  if (service?.complete === undefined || service.transcribe === undefined) {
-    throw new Error("Codex did not register a complete and transcribe service");
+  if (service?.complete === undefined) {
+    throw new Error("Codex did not register a text inference service");
   }
 
   return {
     complete: service.complete,
-    transcribe: service.transcribe,
     calls: harness.inspection.experimental_hostRpcCalls,
   };
 }
@@ -82,44 +81,14 @@ describe("Codex AI service", () => {
     ).rejects.toThrow("Overloaded");
     expect(codex.calls).toHaveLength(1);
   });
+});
 
-  it("refuses a recording over 20 MB before calling the host", async () => {
-    const codex = setup(() => ({ ok: true, text: "unused" }));
+it("registers text inference without a voice upload route", () => {
+  const { api, harness } = createFakePluginHost({});
 
-    const audio = new File(
-      [new Uint8Array(20 * 1024 * 1024 + 1)],
-      "long.webm",
-      { type: "audio/webm" },
-    );
+  registerCodexAiService(api);
 
-    await expect(
-      codex.transcribe(audio, {
-        signal: new AbortController().signal,
-        hint: null,
-      }),
-    ).rejects.toThrow("Recordings over 20 MB are too large to transcribe");
-    expect(codex.calls).toEqual([]);
-  });
-
-  it("sends a recording within the limit with Omnyo's voice budget", async () => {
-    const codex = setup(() => ({ ok: true, text: "hello" }));
-
-    const audio = new File([new Uint8Array([1, 2, 3])], "clip.webm", {
-      type: "audio/webm",
-    });
-
-    await expect(
-      codex.transcribe(audio, {
-        signal: new AbortController().signal,
-        hint: "omnyo",
-      }),
-    ).resolves.toBe("hello");
-    expect(codex.calls[0]?.input).toMatchObject({
-      model: "gpt-transcribe",
-      mimeType: "audio/webm",
-      filename: "clip.webm",
-      hint: "omnyo",
-      timeoutMs: 65_000,
-    });
-  });
+  const [service] = harness.registrations.aiServiceRegistrations;
+  expect(service?.complete).toBeTypeOf("function");
+  expect(service?.transcribe).toBeUndefined();
 });

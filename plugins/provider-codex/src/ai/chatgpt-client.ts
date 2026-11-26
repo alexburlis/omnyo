@@ -4,7 +4,6 @@ import { fetchChatGpt, isCloudflareChallenge } from "./chatgpt-fetch.js";
 import type {
   CodexAiCompleteInput,
   CodexAiFailureCode,
-  CodexAiTranscribeInput,
 } from "./host-contract.js";
 import {
   parseJsonValue,
@@ -18,15 +17,9 @@ import { AiServiceFailure } from "./failure.js";
 
 type InferenceCompleteCommand = CodexAiCompleteInput;
 
-type VoiceTranscribeCommand = CodexAiTranscribeInput;
-
 const CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses";
 
-const CHATGPT_TRANSCRIBE_URL = "https://chatgpt.com/backend-api/transcribe";
-
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
-
-const OPENAI_TRANSCRIBE_URL = "https://api.openai.com/v1/audio/transcriptions";
 
 const CODEX_ERROR_TEXT_MAX_BYTES = 4 * 1024;
 
@@ -34,11 +27,7 @@ const CODEX_SSE_RESPONSE_MAX_BYTES = 2 * 1024 * 1024;
 
 const CODEX_SSE_EVENT_MAX_CHARS = 1024 * 1024;
 
-const CODEX_TRANSCRIPTION_RESPONSE_MAX_BYTES = 1024 * 1024;
-
 type ReadOverflowBehavior = "throw" | "truncate";
-
-type CodexRequestOperation = "inference" | "transcription";
 
 interface TimeoutFetchArgs {
   deadline: CodexRequestDeadline;
@@ -89,27 +78,8 @@ interface OpenAiResponsesFetchArgs {
   request: CodexResponsesRequest;
 }
 
-interface TranscriptionFetchArgs {
-  auth: CodexAuthCredentials;
-  command: VoiceTranscribeCommand;
-  deadline: CodexRequestDeadline;
-}
-
-interface ChatGptTranscriptionFetchArgs {
-  auth: CodexChatGptAuthCredentials;
-  command: VoiceTranscribeCommand;
-  deadline: CodexRequestDeadline;
-}
-
-interface OpenAiTranscriptionFetchArgs {
-  auth: CodexOpenAiApiKeyCredentials;
-  command: VoiceTranscribeCommand;
-  deadline: CodexRequestDeadline;
-}
-
 interface CodexHttpErrorArgs {
   deadline: CodexRequestDeadline;
-  operation: CodexRequestOperation;
   response: Response;
 }
 
@@ -484,10 +454,9 @@ function isHtmlResponse(response: Response): boolean {
 
 async function createCodexHttpError({
   deadline,
-  operation,
   response,
 }: CodexHttpErrorArgs): Promise<AiServiceFailure> {
-  const prefix = `Codex ${operation} request failed with HTTP ${response.status}`;
+  const prefix = `Codex inference request failed with HTTP ${response.status}`;
 
   if (isCloudflareChallenge(response)) {
     return new AiServiceFailure(
@@ -789,19 +758,6 @@ function createChatGptResponsesHeaders(
   return headers;
 }
 
-function createChatGptTranscriptionHeaders(
-  auth: CodexChatGptAuthCredentials,
-  cloudflareHeaders: Headers,
-): Headers {
-  const headers = createChatGptHeaders(auth);
-
-  for (const [key, value] of cloudflareHeaders) {
-    headers.set(key, value);
-  }
-
-  return headers;
-}
-
 async function fetchChatGptResponses(
   args: ChatGptResponsesFetchArgs,
 ): Promise<Response> {
@@ -863,7 +819,6 @@ export async function completeCodexInference(
   if (!response.ok) {
     throw await createCodexHttpError({
       deadline,
-      operation: "inference",
       response,
     });
   }
@@ -873,125 +828,4 @@ export async function completeCodexInference(
     maxBytes: CODEX_SSE_RESPONSE_MAX_BYTES,
     maxEventChars: CODEX_SSE_EVENT_MAX_CHARS,
   });
-}
-
-function buildAudioBlob(command: VoiceTranscribeCommand): Blob {
-  const bytes = Buffer.from(command.audioBase64, "base64");
-
-  return new Blob([bytes], {
-    type: command.mimeType,
-  });
-}
-
-function buildTranscriptionFormData(command: VoiceTranscribeCommand): FormData {
-  const formData = new FormData();
-  formData.set("file", buildAudioBlob(command), command.filename);
-  formData.set("model", command.model);
-
-  if (command.hint !== null) {
-    formData.set("prompt", command.hint);
-  }
-
-  return formData;
-}
-
-function parseTranscriptionText(value: JsonValue): string {
-  const object = toJsonObject(value);
-  const text = object ? optionalString(object.text) : null;
-
-  if (text === null) {
-    throw new AiServiceFailure(
-      "invalid_response",
-      "codex_response_invalid",
-      "Codex transcription response did not include transcript text.",
-    );
-  }
-
-  return text;
-}
-
-function parseTranscriptionResponse(rawText: string): JsonValue {
-  try {
-    return parseJsonValue(rawText);
-  } catch {
-    throw new AiServiceFailure(
-      "invalid_response",
-      "codex_response_invalid",
-      "Codex transcription response was not valid JSON.",
-    );
-  }
-}
-
-async function fetchChatGptTranscription(
-  args: ChatGptTranscriptionFetchArgs,
-): Promise<Response> {
-  return runWithTimeout({
-    deadline: args.deadline,
-    work: (signal) =>
-      fetchChatGpt({
-        url: CHATGPT_TRANSCRIBE_URL,
-        init: (headers) => ({
-          method: "POST",
-          headers: createChatGptTranscriptionHeaders(args.auth, headers),
-          body: buildTranscriptionFormData(args.command),
-          signal,
-        }),
-      }),
-  });
-}
-
-async function fetchOpenAiTranscription(
-  args: OpenAiTranscriptionFetchArgs,
-): Promise<Response> {
-  return runWithTimeout({
-    deadline: args.deadline,
-    work: (signal) =>
-      fetch(OPENAI_TRANSCRIBE_URL, {
-        method: "POST",
-        headers: createOpenAiHeaders(args.auth),
-        body: buildTranscriptionFormData(args.command),
-        signal,
-      }),
-  });
-}
-
-async function fetchTranscription(
-  args: TranscriptionFetchArgs,
-): Promise<Response> {
-  return args.auth.type === "chatgpt"
-    ? fetchChatGptTranscription({
-        auth: args.auth,
-        command: args.command,
-        deadline: args.deadline,
-      })
-    : fetchOpenAiTranscription({
-        auth: args.auth,
-        command: args.command,
-        deadline: args.deadline,
-      });
-}
-
-export async function transcribeCodexVoice(
-  command: VoiceTranscribeCommand,
-  signal: AbortSignal,
-): Promise<string> {
-  const deadline = createCodexRequestDeadline(command.timeoutMs, signal);
-  const auth = await readCodexAuthCredentials();
-  const response = await fetchTranscription({ auth, command, deadline });
-
-  if (!response.ok) {
-    throw await createCodexHttpError({
-      deadline,
-      operation: "transcription",
-      response,
-    });
-  }
-
-  const responseText = await readLimitedResponseText(response, {
-    deadline,
-    maxBytes: CODEX_TRANSCRIPTION_RESPONSE_MAX_BYTES,
-    overflowBehavior: "throw",
-  });
-
-  return parseTranscriptionText(parseTranscriptionResponse(responseText));
 }

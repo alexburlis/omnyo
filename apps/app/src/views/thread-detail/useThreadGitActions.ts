@@ -1,176 +1,78 @@
-import { createElement, useCallback, useRef, type ReactNode } from "react";
-import { appToast } from "@/components/ui/app-toast";
-import { AppToastCommitDescription } from "@/components/ui/app-toast-descriptions";
+import { useCallback, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { Environment, Thread, WorkspaceStatus } from "@omnyo/domain";
-import type { CommitActionResponse } from "@omnyo/server-contract";
 import { useDialogState } from "@omnyo/shared-ui/use-dialog-state";
 import type { ThreadGitActionDialogTarget } from "@/components/dialogs/ThreadGitActionDialog";
+import { appToast } from "@/components/ui/app-toast";
+import { runThreadMessageSend } from "@/hooks/mutations/thread-runtime-mutations";
 import { getMutationErrorMessage } from "@/lib/mutation-errors";
-import type { RequestEnvironmentActionMutationLike } from "./threadDetailMutationTypes";
-
-interface EnqueueGitActionParams {
-  run: QueuedGitActionRunner;
-}
-
-interface RunQueuedGitActionParams {
-  toastId: string | number;
-}
-
-type QueuedGitActionRunner = (
-  params: RunQueuedGitActionParams,
-) => Promise<void>;
-
-interface ShowGitActionErrorToastParams {
-  error: unknown;
-  toastId: string | number;
-}
-
-interface ShowGitActionSuccessToastParams {
-  response: CommitActionResponse;
-  toastId: string | number;
-}
+import { sdk } from "@/lib/sdk";
 
 interface UseThreadGitActionsParams {
   environment?: Environment;
-  requestEnvironmentAction: RequestEnvironmentActionMutationLike;
   thread?: Thread;
   workspaceStatus?: WorkspaceStatus;
 }
 
-function renderGitActionDescription(response: CommitActionResponse): ReactNode {
-  return createElement(AppToastCommitDescription, {
-    commitSha: response.commitSha,
-    commitSubject: response.commitSubject,
-  });
-}
-
-function showGitActionSuccessToast({
-  response,
-  toastId,
-}: ShowGitActionSuccessToastParams): void {
-  appToast.success("Commit created", {
-    id: toastId,
-    description: renderGitActionDescription(response),
-  });
-}
-
-function showGitActionErrorToast({
-  error,
-  toastId,
-}: ShowGitActionErrorToastParams): void {
-  const title = "Commit failed";
-
-  const message = getMutationErrorMessage({
-    error,
-    fallbackMessage: "Failed to start git action",
-    lifecycleOperation: "commit",
-  });
-
-  const description = message === title ? undefined : message;
-
-  appToast.error(title, {
-    id: toastId,
-    ...(description ? { description } : {}),
-  });
-}
-
 export function useThreadGitActions({
   environment,
-  requestEnvironmentAction,
   thread,
   workspaceStatus,
 }: UseThreadGitActionsParams) {
+  const queryClient = useQueryClient();
   const threadGitActionDialog = useDialogState<ThreadGitActionDialogTarget>();
-  const gitActionQueueRef = useRef<Promise<void>>(Promise.resolve());
-  const queuedGitActionCountRef = useRef(0);
-  const workspaceWorkingTree = workspaceStatus?.workingTree;
-  const isArchivedThread = thread?.archivedAt != null;
+  const pendingThreadIds = useRef(new Set<string>());
+
+  const threadId =
+    thread?.archivedAt === null && thread.deletedAt === null
+      ? thread.id
+      : undefined;
 
   const canCommit =
-    Boolean(thread) &&
-    Boolean(workspaceStatus) &&
-    Boolean(environment) &&
-    !isArchivedThread &&
-    workspaceWorkingTree?.hasUncommittedChanges === true;
-
-  const enqueueGitAction = useCallback(
-    ({ run }: EnqueueGitActionParams): Promise<void> => {
-      const isQueuedBehindGitAction = queuedGitActionCountRef.current > 0;
-      queuedGitActionCountRef.current += 1;
-
-      const toastId = appToast.loading(
-        isQueuedBehindGitAction ? "Commit queued" : "Creating commit",
-      );
-
-      const runQueuedGitAction = async (): Promise<void> => {
-        if (isQueuedBehindGitAction) {
-          appToast.loading("Creating commit", { id: toastId });
-        }
-
-        await run({ toastId });
-      };
-
-      const queuedAction = gitActionQueueRef.current.then(
-        runQueuedGitAction,
-        runQueuedGitAction,
-      );
-
-      gitActionQueueRef.current = queuedAction
-        .catch(() => undefined)
-        .finally(() => {
-          queuedGitActionCountRef.current -= 1;
-        });
-
-      return queuedAction;
-    },
-    [],
-  );
-
-  const runCommitThread = useCallback(
-    async ({ toastId }: RunQueuedGitActionParams) => {
-      const attachedEnvironmentId = thread?.environmentId;
-
-      if (!thread || !attachedEnvironmentId) {
-        appToast.dismiss(toastId);
-
-        return;
-      }
-
-      try {
-        const response = await requestEnvironmentAction.mutateAsync({
-          id: attachedEnvironmentId,
-          action: "commit",
-        });
-
-        if (response.action !== "commit") {
-          throw new Error("Expected commit action response.");
-        }
-
-        showGitActionSuccessToast({
-          response,
-          toastId,
-        });
-      } catch (nextError) {
-        showGitActionErrorToast({
-          error: nextError,
-          toastId,
-        });
-      }
-    },
-    [requestEnvironmentAction, thread],
-  );
+    threadId !== undefined &&
+    environment !== undefined &&
+    workspaceStatus?.workingTree?.hasUncommittedChanges === true;
 
   const handleCommitThread = useCallback(async () => {
-    if (!thread?.environmentId) {
-      return;
+    const pending = pendingThreadIds.current;
+
+    if (!canCommit || threadId === undefined || pending.has(threadId)) return;
+    pending.add(threadId);
+
+    try {
+      const result = await runThreadMessageSend({
+        queryClient,
+        transport: sdk.threads.send,
+        request: {
+          id: threadId,
+          mode: "queue-if-active",
+          messageSource: { kind: "script", label: "Omnyo · Commit changes" },
+          input: [
+            {
+              type: "text",
+              text: "Review the workspace changes and create a local Git commit for the changes that belong to this chat. Leave unrelated changes alone and keep the commit local.",
+              mentions: [],
+            },
+          ],
+        },
+      });
+
+      appToast.success(
+        result.delivery === "sent"
+          ? "Commit request sent"
+          : "Commit request queued",
+      );
+    } catch (error) {
+      appToast.error(
+        getMutationErrorMessage({
+          error,
+          fallbackMessage: "Could not send the commit request.",
+        }),
+      );
+    } finally {
+      pending.delete(threadId);
     }
+  }, [canCommit, queryClient, threadId]);
 
-    await enqueueGitAction({ run: runCommitThread });
-  }, [enqueueGitAction, runCommitThread, thread?.environmentId]);
-
-  return {
-    canCommit,
-    handleCommitThread,
-    threadGitActionDialog,
-  };
+  return { canCommit, handleCommitThread, threadGitActionDialog };
 }

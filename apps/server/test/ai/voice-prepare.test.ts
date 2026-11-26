@@ -59,6 +59,28 @@ function registerVoice(
 }
 
 describe("voice input prepare", () => {
+  it("prepares local dictation for a saved Codex voice selection", async () => {
+    await withTestHarness({}, async (harness) => {
+      const prepare = vi.fn(async () => {});
+      registerFakeAiService(harness.deps.aiServices, {
+        id: "local-voice",
+        pluginId: "local-voice",
+        displayName: "Dictation by Paraspeech",
+        transcribe: async () => "Local transcript",
+        prepare,
+      });
+      setAiServiceSelection(harness.db, "voice", {
+        mode: "service",
+        pluginId: "provider-codex",
+        serviceId: "codex",
+      });
+
+      const response = await postPrepare(harness);
+      expect(response.status).toBe(200);
+      await vi.waitFor(() => expect(prepare).toHaveBeenCalledTimes(1));
+    });
+  });
+
   it("starts the selected service's prepare once and answers without waiting", async () => {
     await withTestHarness({}, async (harness) => {
       const info = vi.spyOn(harness.deps.logger, "info");

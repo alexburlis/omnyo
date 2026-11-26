@@ -95,7 +95,7 @@ it("stores a completion assessment after consecutive admission timeouts without 
 
     const runtime = createFakePluginHost({
       pluginId: "omnyo--composer-predictions",
-      settings: { enabled: true, cliPath: "codex" },
+      settings: { enabled: true, provider: "codex" },
       sdk: {
         threads: {
           get: sdk.threads.get,

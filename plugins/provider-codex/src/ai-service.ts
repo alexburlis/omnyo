@@ -1,4 +1,3 @@
-import { Buffer } from "node:buffer";
 import type { PluginApi, PluginAiServiceStatus } from "@omnyo/plugin-sdk";
 import {
   codexAiHostContract,
@@ -8,13 +7,7 @@ import {
 
 const CODEX_TEXT_MODELS = ["gpt-6-luna", "gpt-5.6-luna"] as const;
 
-const CODEX_TRANSCRIPTION_MODEL = "gpt-transcribe";
-
 const COMPLETE_TIMEOUT_MS = 5_000;
-
-const TRANSCRIBE_TIMEOUT_MS = 65_000;
-
-const TRANSCRIBE_MAX_BYTES = 20 * 1024 * 1024;
 
 const HOST_CALL_GRACE_MS = 1_000;
 
@@ -72,36 +65,6 @@ export function registerCodexAiService(api: PluginApi): void {
       if (last === null) throw new Error("Codex did not answer");
 
       return textOrThrow(last);
-    },
-    async transcribe(audio, { signal, hint }) {
-      if (audio.size > TRANSCRIBE_MAX_BYTES) {
-        throw new Error(
-          `Recordings over ${TRANSCRIBE_MAX_BYTES / (1024 * 1024)} MB are too large to transcribe`,
-        );
-      }
-
-      const hostId = await requirePrimaryHostId();
-
-      return textOrThrow(
-        await host.call(
-          "codex.ai.transcribe",
-          {
-            model: CODEX_TRANSCRIPTION_MODEL,
-            audioBase64: Buffer.from(await audio.arrayBuffer()).toString(
-              "base64",
-            ),
-            mimeType: audio.type || "application/octet-stream",
-            filename: audio.name || "voice-input",
-            hint,
-            timeoutMs: TRANSCRIBE_TIMEOUT_MS,
-          },
-          {
-            hostId,
-            signal,
-            timeoutMs: TRANSCRIBE_TIMEOUT_MS + HOST_CALL_GRACE_MS,
-          },
-        ),
-      );
     },
     async status(): Promise<PluginAiServiceStatus> {
       const hostId = await primaryHostId();

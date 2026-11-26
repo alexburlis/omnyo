@@ -59,10 +59,15 @@ export function ownsNextStep(work: WorkOwners): boolean {
 }
 
 export function omitsRequiredReply(
-  state: Pick<PredictionState, "status" | "text">,
+  state: Pick<PredictionState, "status" | "text" | "sameChat">,
   work: WorkOwners,
 ): boolean {
-  return state.status === "ready" && state.text === null && !ownsNextStep(work);
+  return (
+    state.sameChat !== true &&
+    state.status === "ready" &&
+    state.text === null &&
+    !ownsNextStep(work)
+  );
 }
 
 function suggestionBlocker(

@@ -4,10 +4,7 @@ import path from "node:path";
 import type { JsonValue } from "@omnyo/plugin-sdk";
 import type { JsonObject } from "@omnyo/plugin-sdk/provider-bridge";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  completeCodexInference,
-  transcribeCodexVoice,
-} from "./chatgpt-client.js";
+import { completeCodexInference } from "./chatgpt-client.js";
 import { resetChatGptCloudflareCookiesForTests } from "./chatgpt-fetch.js";
 
 type FetchMock = ReturnType<typeof vi.fn<typeof fetch>>;
@@ -215,16 +212,6 @@ function textBodyFromInit(init: RequestInit | undefined): string {
 
   if (typeof body !== "string") {
     throw new Error("Expected request body to be a string");
-  }
-
-  return body;
-}
-
-function formDataBodyFromInit(init: RequestInit | undefined): FormData {
-  const body = init?.body;
-
-  if (!(body instanceof FormData)) {
-    throw new Error("Expected request body to be FormData");
   }
 
   return body;
@@ -712,7 +699,7 @@ describe("Codex ChatGPT client", () => {
     expect(thrown?.message.length).toBeLessThan(700);
   });
 
-  it("retries ChatGPT transcription once with allowed Cloudflare cookies", async () => {
+  it("retries ChatGPT inference once with allowed Cloudflare cookies", async () => {
     const homeDir = await makeTempHome();
 
     const accessToken = createAccessToken({
@@ -737,18 +724,15 @@ describe("Codex ChatGPT client", () => {
         }),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ text: "hello world" }), {
-          status: 200,
-        }),
+        sseResponse([
+          { type: "response.output_text.delta", delta: "hello world" },
+        ]),
       );
 
-    const result = await transcribeCodexVoice(
+    const result = await completeCodexInference(
       {
-        model: "gpt-4o-mini-transcribe",
-        audioBase64: Buffer.from("audio").toString("base64"),
-        mimeType: "audio/webm",
-        filename: "prompt.webm",
-        hint: null,
+        model: "gpt-5.1-codex-mini",
+        prompt: "Write a greeting.",
         timeoutMs: 30000,
       },
       new AbortController().signal,
@@ -795,20 +779,17 @@ describe("Codex ChatGPT client", () => {
     let thrown: Error | null = null;
 
     try {
-      await transcribeCodexVoice(
+      await completeCodexInference(
         {
-          model: "gpt-4o-mini-transcribe",
-          audioBase64: Buffer.from("audio").toString("base64"),
-          mimeType: "audio/webm",
-          filename: "prompt.webm",
-          hint: null,
+          model: "gpt-5.1-codex-mini",
+          prompt: "Write a greeting.",
           timeoutMs: 30000,
         },
         new AbortController().signal,
       );
     } catch (error) {
       if (!(error instanceof Error)) {
-        throw new Error("Expected Error from challenged transcription");
+        throw new Error("Expected Error from challenged inference");
       }
 
       thrown = error;
@@ -818,7 +799,7 @@ describe("Codex ChatGPT client", () => {
     expect(thrown).toMatchObject({
       detailCode: "codex_service_unavailable",
       message:
-        "Codex transcription request failed with HTTP 403: chatgpt.com answered with a Cloudflare challenge that Omnyo cannot solve. Retry or list other services with omnyo settings ai-services show.",
+        "Codex inference request failed with HTTP 403: chatgpt.com answered with a Cloudflare challenge that Omnyo cannot solve. Retry or list other services with omnyo settings ai-services show.",
     });
   });
 
@@ -844,61 +825,22 @@ describe("Codex ChatGPT client", () => {
     );
 
     await expect(
-      transcribeCodexVoice(
+      completeCodexInference(
         {
-          model: "gpt-4o-mini-transcribe",
-          audioBase64: Buffer.from("audio").toString("base64"),
-          mimeType: "audio/webm",
-          filename: "prompt.webm",
-          hint: null,
+          model: "gpt-5.1-codex-mini",
+          prompt: "Write a greeting.",
           timeoutMs: 30000,
         },
         new AbortController().signal,
       ),
     ).rejects.toMatchObject({
       detailCode: "codex_request_failed",
-      message: "Codex transcription request failed with HTTP 403",
+      message: "Codex inference request failed with HTTP 403",
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("transcribes voice with Codex API key auth from ~/.codex/auth.json", async () => {
-    const homeDir = await makeTempHome();
-    await writeCodexApiKeyAuth({
-      homeDir,
-      apiKey: "sk-codex-api-key",
-    });
-    const fetchMock = setupFetchMock();
-    fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ text: "hello openai" }), {
-        status: 200,
-      }),
-    );
-
-    const result = await transcribeCodexVoice(
-      {
-        model: "gpt-4o-mini-transcribe",
-        audioBase64: Buffer.from("audio").toString("base64"),
-        mimeType: "audio/webm",
-        filename: "prompt.webm",
-        hint: "context",
-        timeoutMs: 30000,
-      },
-      new AbortController().signal,
-    );
-
-    expect(result).toBe("hello openai");
-    const [url, init] = requiredFetchCall(fetchMock, 0);
-    expect(url).toBe("https://api.openai.com/v1/audio/transcriptions");
-    const headers = headersFromInit(init);
-    expect(headers.get("authorization")).toBe("Bearer sk-codex-api-key");
-    expect(headers.get("cookie")).toBeNull();
-    const body = formDataBodyFromInit(init);
-    expect(body.get("model")).toBe("gpt-4o-mini-transcribe");
-    expect(body.get("prompt")).toBe("context");
-  });
-
-  it("reports ChatGPT transcription rate limits with the nested provider message", async () => {
+  it("reports ChatGPT inference rate limits with the nested provider message", async () => {
     const homeDir = await makeTempHome();
 
     const accessToken = createAccessToken({
@@ -917,7 +859,7 @@ describe("Codex ChatGPT client", () => {
         JSON.stringify({
           detail: {
             detail:
-              "Transcription is temporarily unavailable. Please try again later.",
+              "Inference is temporarily unavailable. Please try again later.",
           },
         }),
         {
@@ -927,13 +869,10 @@ describe("Codex ChatGPT client", () => {
     );
 
     await expect(
-      transcribeCodexVoice(
+      completeCodexInference(
         {
-          model: "gpt-4o-mini-transcribe",
-          audioBase64: Buffer.from("audio").toString("base64"),
-          mimeType: "audio/webm",
-          filename: "prompt.webm",
-          hint: null,
+          model: "gpt-5.1-codex-mini",
+          prompt: "Write a greeting.",
           timeoutMs: 30000,
         },
         new AbortController().signal,
@@ -941,42 +880,7 @@ describe("Codex ChatGPT client", () => {
     ).rejects.toMatchObject({
       detailCode: "codex_rate_limited",
       message:
-        "Codex transcription request failed with HTTP 429: Transcription is temporarily unavailable. Please try again later.",
-    });
-  });
-
-  it("rejects oversized Codex transcription responses", async () => {
-    const homeDir = await makeTempHome();
-    await writeCodexApiKeyAuth({
-      homeDir,
-      apiKey: "sk-codex-api-key",
-    });
-    const fetchMock = setupFetchMock();
-    fetchMock.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          text: "x".repeat(1024 * 1024),
-        }),
-        {
-          status: 200,
-        },
-      ),
-    );
-
-    await expect(
-      transcribeCodexVoice(
-        {
-          model: "gpt-4o-mini-transcribe",
-          audioBase64: Buffer.from("audio").toString("base64"),
-          mimeType: "audio/webm",
-          filename: "prompt.webm",
-          hint: null,
-          timeoutMs: 30000,
-        },
-        new AbortController().signal,
-      ),
-    ).rejects.toMatchObject({
-      detailCode: "codex_response_too_large",
+        "Codex inference request failed with HTTP 429: Inference is temporarily unavailable. Please try again later.",
     });
   });
 });

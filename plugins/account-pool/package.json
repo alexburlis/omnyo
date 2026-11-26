@@ -19,7 +19,7 @@
   },
   "omnyo": {
     "name": "Account Pooler [EXPERIMENTAL]",
-    "description": "Routes Claude and Codex API traffic across provider account pools.",
+    "description": "Routes Claude and Codex API traffic across provider account pools. Experimental. We’re unaware of account bans from using this plugin. Provider terms do not clearly address every use of these features. Use at your own risk.",
     "branding": {
       "icon": "Layers"
     },

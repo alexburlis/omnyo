@@ -11,7 +11,7 @@ Start a thread, pick Codex, and let it write and review code in your repository 
 - Question cards for the questions Codex asks while it keeps working. Your answer reaches Codex as a message.
 - Codex skills from your home directory and project, listed next to Omnyo skills.
 - Health, usage, and install status on each host, with an install or update action.
-- A Codex AI service for inference and voice that other Omnyo features can use.
+- A Codex AI service for text inference that other Omnyo features can use.
 
 ## Settings
 
