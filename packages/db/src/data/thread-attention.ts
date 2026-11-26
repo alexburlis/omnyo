@@ -1,4 +1,15 @@
-import { and, eq, inArray, isNull, or, exists, placeholder } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  exists,
+  inArray,
+  isNull,
+  like,
+  ne,
+  or,
+  type SQL,
+} from "drizzle-orm";
 import {
   threadQuestionSchema,
   threadQuestionAnsweredBySchema,
@@ -7,22 +18,19 @@ import {
   type ThreadAttention,
   type ThreadCallback,
 } from "@omnyo/domain";
-import {
-  prepareCachedQuery,
-  type DbConnection,
-  type DbQueryConnection,
-} from "../connection.js";
+import type { DbConnection } from "../connection.js";
 import {
   threadQuestions,
-  threadCallbacks,
   threads,
+  threadWaits,
+  threadWaitConditions,
+  threadProducers,
+  threadOwnerInputs,
   queuedThreadMessages,
   pendingInteractions,
 } from "../schema.js";
 import { listActiveBackgroundTaskCountsByThreadIds } from "./events.js";
-import { getThread } from "./threads.js";
-import { getActivePendingInteractionForThread } from "./pending-interactions.js";
-import { listQueuedThreadMessages } from "./queued-thread-messages.js";
+import { listRetryingFailures } from "./thread-failures.js";
 
 export function toThreadQuestion(
   row: typeof threadQuestions.$inferSelect,
@@ -68,99 +76,128 @@ export function listThreadQuestions(
     .map((row) => toThreadQuestion(row.question));
 }
 
-const prepareGetRequiredOpenThreadQuestion = (db: DbQueryConnection) =>
-  db
-    .select({ id: threadQuestions.id })
-    .from(threadQuestions)
+type CallbackRow = Omit<ThreadCallback, "sourceState">;
+
+function selectCallbackRows(
+  db: DbConnection,
+  scope: SQL | undefined,
+): CallbackRow[] {
+  const seen = new Set<string>();
+
+  return db
+    .select({
+      id: threadWaits.id,
+      threadId: threadWaits.threadId,
+      reason: threadWaits.forText,
+      createdAt: threadWaits.createdAt,
+      matchText: threadWaits.marker,
+      kind: threadWaitConditions.kind,
+      target: threadWaitConditions.target,
+      label: threadWaitConditions.label,
+      afterSeq: threadWaitConditions.afterSeq,
+    })
+    .from(threadWaits)
+    .innerJoin(
+      threadWaitConditions,
+      eq(threadWaitConditions.waitId, threadWaits.id),
+    )
+    .innerJoin(threads, eq(threads.id, threadWaits.threadId))
     .where(
       and(
-        eq(threadQuestions.threadId, placeholder("threadId")),
-        eq(threadQuestions.state, "open"),
-        eq(threadQuestions.mode, "required"),
+        scope,
+        like(threadWaits.key, "callback:%"),
+        inArray(threadWaits.status, ["live", "evaluating"]),
+        eq(threadWaitConditions.state, "pending"),
+        inArray(threadWaitConditions.kind, ["chat", "event"]),
+        isNull(threads.deletedAt),
+        isNull(threads.archivedAt),
       ),
     )
-    .limit(1)
-    .prepare();
+    .orderBy(asc(threadWaits.createdAt), asc(threadWaits.id))
+    .all()
+    .flatMap((row) => {
+      if (seen.has(row.id)) return [];
+      seen.add(row.id);
 
-export function getCallbackSourceState(
-  db: DbConnection,
-  sourceThreadId: string | null,
-): ThreadCallback["sourceState"] {
-  if (sourceThreadId === null) return "unverified";
-  const source = getThread(db, sourceThreadId);
-
-  if (source === null || source.deletedAt !== null) return "unavailable";
-
-  if (source.archivedAt !== null) return "archived";
-
-  if (
-    getActivePendingInteractionForThread(db, sourceThreadId) !== null ||
-    prepareCachedQuery(db, prepareGetRequiredOpenThreadQuestion).get({
-      threadId: sourceThreadId,
-    }) !== undefined
-  )
-    return "needs-input";
-
-  if (source.status === "error") return "error";
-
-  if (
-    ["active", "starting", "stopping"].includes(source.status) ||
-    listActiveBackgroundTaskCountsByThreadIds(db, {
-      threadIds: [sourceThreadId],
-    }).some((row) => row.activeBackgroundAgentCount > 0) ||
-    listNativeWorkerOwners(db, [sourceThreadId]).has(sourceThreadId)
-  )
-    return "working";
-  const queue = listQueuedThreadMessages(db, sourceThreadId);
-  const pending = queue.filter((entry) => entry.failureReason === null);
-
-  if (
-    pending.some(
-      (entry) =>
-        entry.waitingOn !== null &&
-        queuedMessageWaitingOnSchema.parse(JSON.parse(entry.waitingOn)).kind ===
-          "interaction",
-    )
-  )
-    return "needs-input";
-
-  return pending.length > 0 ? "waiting" : "idle";
+      return [
+        {
+          id: row.id,
+          threadId: row.threadId,
+          sourceThreadId: row.kind === "chat" ? row.target : null,
+          sourceTitle: row.label,
+          reason: row.reason,
+          createdAt: row.createdAt,
+          afterSeq: row.afterSeq ?? 0,
+          matchText: row.matchText,
+        },
+      ];
+    });
 }
 
-export function toThreadCallback(
+function callbackRowsForThreads(
   db: DbConnection,
-  row: typeof threadCallbacks.$inferSelect,
-): ThreadCallback {
-  const source =
-    row.sourceThreadId === null ? null : getThread(db, row.sourceThreadId);
+  ids: readonly string[],
+): CallbackRow[] {
+  const rows: CallbackRow[] = [];
 
-  return {
-    ...row,
-    sourceTitle: source?.title ?? source?.titleFallback ?? row.sourceTitle,
-    sourceState: getCallbackSourceState(db, row.sourceThreadId),
-  };
+  for (let start = 0; start < ids.length; start += 400)
+    rows.push(
+      ...selectCallbackRows(
+        db,
+        inArray(threadWaits.threadId, ids.slice(start, start + 400)),
+      ),
+    );
+
+  return rows;
 }
 
 export function listThreadCallbacks(
   db: DbConnection,
   threadId?: string,
 ): ThreadCallback[] {
-  return db
-    .select({ callback: threadCallbacks })
-    .from(threadCallbacks)
-    .innerJoin(threads, eq(threads.id, threadCallbacks.threadId))
-    .where(
+  return classifyCallbackRows(
+    db,
+    threadId === undefined
+      ? selectCallbackRows(db, undefined)
+      : callbackRowsForThreads(db, [threadId]),
+  );
+}
+
+export function listThreadCallbacksByThread(
+  db: DbConnection,
+  ids: readonly string[],
+): Map<string, ThreadCallback[]> {
+  const result = new Map<string, ThreadCallback[]>(ids.map((id) => [id, []]));
+
+  for (const callback of classifyCallbackRows(
+    db,
+    callbackRowsForThreads(db, ids),
+  ))
+    result.get(callback.threadId)?.push(callback);
+
+  return result;
+}
+
+export function listCallbackWaiterIds(
+  db: DbConnection,
+  sourceThreadIds: readonly string[],
+): string[] {
+  const waiters = new Set<string>();
+
+  for (let start = 0; start < sourceThreadIds.length; start += 400)
+    for (const row of selectCallbackRows(
+      db,
       and(
-        threadId === undefined
-          ? undefined
-          : eq(threadCallbacks.threadId, threadId),
-        isNull(threads.deletedAt),
-        isNull(threads.archivedAt),
+        eq(threadWaitConditions.kind, "chat"),
+        inArray(
+          threadWaitConditions.target,
+          sourceThreadIds.slice(start, start + 400),
+        ),
       ),
-    )
-    .orderBy(threadCallbacks.createdAt)
-    .all()
-    .map((row) => toThreadCallback(db, row.callback));
+    ))
+      waiters.add(row.threadId);
+
+  return [...waiters];
 }
 
 export function readThreadAttention(
@@ -219,8 +256,6 @@ export function readThreadAttentionFacts(
     ids.map((id) => [id, { questions: [], callbacks: [] }]),
   );
 
-  const callbacks: Array<typeof threadCallbacks.$inferSelect> = [];
-
   for (let start = 0; start < ids.length; start += 400) {
     const batch = ids.slice(start, start + 400);
 
@@ -236,16 +271,21 @@ export function readThreadAttentionFacts(
       .all()) {
       result.get(row.threadId)?.questions.push(toThreadQuestion(row));
     }
-
-    callbacks.push(
-      ...db
-        .select()
-        .from(threadCallbacks)
-        .where(inArray(threadCallbacks.threadId, batch))
-        .all(),
-    );
   }
 
+  for (const callback of classifyCallbackRows(
+    db,
+    callbackRowsForThreads(db, ids),
+  ))
+    result.get(callback.threadId)?.callbacks.push(callback);
+
+  return result;
+}
+
+function classifyCallbackRows(
+  db: DbConnection,
+  callbacks: readonly CallbackRow[],
+): ThreadCallback[] {
   const sourceIds = [
     ...new Set(
       callbacks.flatMap((callback) =>
@@ -257,7 +297,8 @@ export function readThreadAttentionFacts(
   const sources = new Map<string, typeof threads.$inferSelect>();
   const needsInput = new Set<string>();
   const working = new Set<string>();
-  const queued = new Set<string>();
+  const waiting = new Set<string>();
+  const retrying = new Set<string>();
 
   for (let start = 0; start < sourceIds.length; start += 400) {
     const batch = sourceIds.slice(start, start + 400);
@@ -307,7 +348,7 @@ export function readThreadAttentionFacts(
         ),
       )
       .all()) {
-      queued.add(row.threadId);
+      waiting.add(row.threadId);
 
       if (
         row.waitingOn !== null &&
@@ -328,9 +369,51 @@ export function readThreadAttentionFacts(
         working.add(row.threadId);
 
     for (const id of listNativeWorkerOwners(db, batch)) working.add(id);
+
+    for (const row of db
+      .select({ threadId: threadWaits.threadId })
+      .from(threadWaits)
+      .where(
+        and(
+          inArray(threadWaits.threadId, batch),
+          inArray(threadWaits.status, ["live", "evaluating", "dispatched"]),
+          or(
+            isNull(threadWaits.proposalKind),
+            ne(threadWaits.proposalKind, "archive"),
+          ),
+        ),
+      )
+      .all())
+      waiting.add(row.threadId);
+
+    for (const row of db
+      .select({ threadId: threadProducers.threadId })
+      .from(threadProducers)
+      .where(
+        and(
+          inArray(threadProducers.threadId, batch),
+          eq(threadProducers.status, "active"),
+        ),
+      )
+      .all())
+      waiting.add(row.threadId);
+
+    for (const row of db
+      .select({ threadId: threadOwnerInputs.threadId })
+      .from(threadOwnerInputs)
+      .where(
+        and(
+          inArray(threadOwnerInputs.threadId, batch),
+          inArray(threadOwnerInputs.state, ["running", "owed", "handed-off"]),
+        ),
+      )
+      .all())
+      waiting.add(row.threadId);
+
+    for (const id of listRetryingFailures(db, batch).keys()) retrying.add(id);
   }
 
-  for (const row of callbacks) {
+  return callbacks.map((row) => {
     const source =
       row.sourceThreadId === null ? undefined : sources.get(row.sourceThreadId);
 
@@ -343,23 +426,21 @@ export function readThreadAttentionFacts(
             ? "archived"
             : needsInput.has(source.id)
               ? "needs-input"
-              : source.status === "error"
+              : source.status === "error" && !retrying.has(source.id)
                 ? "error"
                 : ["active", "starting", "stopping"].includes(source.status) ||
                     working.has(source.id)
                   ? "working"
-                  : queued.has(source.id)
+                  : waiting.has(source.id) || retrying.has(source.id)
                     ? "waiting"
                     : "idle";
 
-    result.get(row.threadId)?.callbacks.push({
+    return {
       ...row,
       sourceState,
       sourceTitle: source?.title ?? source?.titleFallback ?? row.sourceTitle,
-    });
-  }
-
-  return result;
+    };
+  });
 }
 
 export function listNativeWorkerOwners(

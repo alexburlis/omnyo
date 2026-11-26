@@ -4,11 +4,11 @@ import {
   advanceThreadHistoryRewriteRevision,
   advanceThreadWorkObligationRevision,
   installedPlugins,
+  listRetryingFailures,
   pendingInteractions,
   queuedThreadMessages,
   readStoredThreadWork,
   readThreadAttentionFacts,
-  threadFailures,
   threadPluginMetadata,
   threadWaitConditions,
   threadWaits,
@@ -412,42 +412,6 @@ function inboxWaitActor(
   };
 }
 
-function readRetryingFailures(
-  db: DbConnection,
-  ids: readonly string[],
-): Map<string, { id: string; reason: string }> {
-  const latest = new Map<
-    string,
-    { id: string; reason: string; state: string }
-  >();
-
-  for (let offset = 0; offset < ids.length; offset += 400) {
-    for (const row of db
-      .select({
-        id: threadFailures.id,
-        threadId: threadFailures.threadId,
-        state: threadFailures.state,
-        reason: threadFailures.reason,
-      })
-      .from(threadFailures)
-      .where(
-        and(
-          inArray(threadFailures.threadId, ids.slice(offset, offset + 400)),
-          ne(threadFailures.state, "resolved"),
-        ),
-      )
-      .orderBy(asc(threadFailures.createdAt), asc(sql`rowid`))
-      .all())
-      latest.set(row.threadId, row);
-  }
-
-  return new Map(
-    [...latest]
-      .filter(([, row]) => row.state === "held" || row.state === "deciding")
-      .map(([threadId, row]) => [threadId, { id: row.id, reason: row.reason }]),
-  );
-}
-
 function readInboxWaits(
   db: DbConnection,
   ids: readonly string[],
@@ -544,7 +508,7 @@ export function buildThreadWorkSummaries(
   const stored = readStoredThreadWork(db, ids);
   const maintenanceBases = readMaintenanceBases(db, ids);
   const inboxWaits = readInboxWaits(db, ids);
-  const retryingFailures = readRetryingFailures(db, ids);
+  const retryingFailures = listRetryingFailures(db, ids);
 
   const archiveCandidates = [...stored.entries()].flatMap(
     ([threadId, state]) => {
@@ -705,54 +669,6 @@ export function buildThreadWorkSummaries(
         label: "A pending permission or question needs your answer.",
         kind: "permission",
       });
-
-    for (const callback of attention?.callbacks ?? []) {
-      const actor = {
-        kind: "thread" as const,
-        id: callback.sourceThreadId,
-        label: callback.sourceTitle || "Source chat",
-      };
-
-      if (callback.sourceThreadId === null)
-        evidence.waits.push({
-          id: callback.id,
-          reason: callback.reason,
-          actor: {
-            kind: "external",
-            id: null,
-            label: callback.sourceTitle || "External dependency",
-          },
-        });
-      else if (
-        callback.sourceState === "working" ||
-        callback.sourceState === "waiting"
-      )
-        evidence.activity.push({
-          id: callback.id,
-          kind: "agent",
-          label: `${actor.label} is ${callback.sourceState === "working" ? "working" : "queued"} and will return a result.`,
-          phase: callback.sourceState === "working" ? "running" : "queued",
-          actor,
-        });
-      else if (callback.sourceState === "needs-input")
-        evidence.waits.push({
-          id: callback.id,
-          reason: `${actor.label} is waiting for input before it can return a result.`,
-          actor,
-        });
-      else if (
-        ["error", "archived", "unavailable"].includes(callback.sourceState)
-      )
-        evidence.failures.push({
-          code: "callback-failed",
-          text: `${actor.label} ${callback.sourceState === "error" ? "failed" : "is unavailable"} before the awaited result was recorded.`,
-          sourceId: callback.sourceThreadId,
-        });
-      else {
-        evidence.coverageComplete = false;
-        evidence.unknownReason = `${actor.label} has no verified running owner or recorded return result.`;
-      }
-    }
 
     evidence.waits.push(...(inboxWaits.get(source.id) ?? []));
 

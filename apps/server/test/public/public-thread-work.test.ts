@@ -7,7 +7,6 @@ import {
   getThread,
   publishThreadWork,
   setPendingInteractionResolving,
-  threadCallbacks,
   threadFailures,
   threads,
 } from "@omnyo/db";
@@ -32,6 +31,10 @@ import {
 } from "../helpers/seed.js";
 import { textInput } from "../helpers/prompt-input.js";
 import { writeReceipt } from "../../src/services/inbox/engine.js";
+import {
+  insertConditions,
+  insertWait,
+} from "../../src/services/inbox/store.js";
 import {
   createAllowOnceResolution,
   createCommandApprovalPayload,
@@ -205,29 +208,52 @@ describe("shared thread work API", () => {
       );
 
       expect(opened.status).toBe(200);
-      harness.db
-        .insert(threadCallbacks)
-        .values({
-          threadId: waiter.id,
-          id: "callback-required-source",
-          sourceThreadId: source.id,
-          sourceTitle: "Source chat",
-          reason: "Await the source result",
-          createdAt: Date.now(),
+      const now = Date.now();
+
+      const callback = insertWait(harness.db, {
+        threadId: waiter.id,
+        key: `callback:${source.id}`,
+        generation: 1,
+        kind: "chat",
+        status: "live",
+        readiness: "all",
+        createdBy: "agent",
+        automationId: null,
+        ownerAccepted: false,
+        forText: "Await the source result",
+        resumeText: null,
+        marker: "[omnyo wait callback-required-source]",
+        deadline: now + 60_000,
+        chainStartAt: now,
+        nextCheckAt: null,
+        checkIntervalMs: null,
+        reminderAt: null,
+        questionId: null,
+        questionRevision: null,
+        coversReceiptIds: [],
+        proposalKind: null,
+        afterWaitId: null,
+        now,
+      });
+
+      insertConditions(harness.db, callback.id, [
+        {
+          key: `chat:${source.id}`,
+          kind: "chat",
+          target: source.id,
+          label: "Source chat",
           afterSeq: 0,
-          matchText: "[callback-required-source]",
-        })
-        .run();
+        },
+      ]);
 
       const waiting = await read(harness, waiter.id);
       expect(waiting.requiredInput).toEqual([]);
       expect(waiting.primary.label).toBe("waiting");
-      expect(waiting.waits).toContainEqual(
+      expect(waiting.waits.filter((wait) => wait.id === callback.id)).toEqual([
         expect.objectContaining({
-          id: "callback-required-source",
           actor: { kind: "thread", id: source.id, label: "Source chat" },
         }),
-      );
+      ]);
 
       const snapshot = inboxSnapshotSchema.parse(
         await (await harness.app.request("/api/v1/inbox")).json(),

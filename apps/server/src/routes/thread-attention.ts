@@ -1,11 +1,13 @@
-import { eq, inArray, or } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import {
   threadCallbacks,
   threads,
+  listCallbackWaiterIds,
   listThreadQuestions,
   listThreadCallbacks,
-  toThreadCallback,
+  listThreadCallbacksByThread,
 } from "@omnyo/db";
+import type { ThreadCallback, ThreadChangeKind } from "@omnyo/domain";
 import {
   publicApiRoutes,
   typedRoutes,
@@ -22,6 +24,7 @@ import {
   threadAttentionSnapshot,
 } from "../services/interactions/thread-attention.js";
 import { inboxActorFromHeaders } from "../services/inbox/actor.js";
+import { familyIdsOf } from "../services/inbox/family.js";
 import { adoptLegacyAttention } from "../services/interactions/thread-attention-adoption.js";
 
 export function registerThreadAttentionRoutes(app: Hono, deps: AppDeps): void {
@@ -57,13 +60,64 @@ export function registerThreadAttentionRoutes(app: Hono, deps: AppDeps): void {
   post(publicApiRoutes.attention.adopt, (context, payload) =>
     context.json({ imported: adoptLegacyAttention(deps, payload.pluginId) }),
   );
+  forwardCallbackSourceChanges(deps);
+  reconcileThreadCallbacks(deps);
+}
+
+const CALLBACK_STATE_CHANGES: ReadonlySet<ThreadChangeKind> = new Set([
+  "thread-created",
+  "thread-deleted",
+  "interactions-changed",
+  "status-changed",
+  "title-changed",
+  "execution-changed",
+  "queue-changed",
+  "work-changed",
+  "archived-changed",
+  "parent-changed",
+]);
+
+const fingerprint = (callbacks: readonly ThreadCallback[]): string =>
+  callbacks
+    .map(
+      (callback) =>
+        `${callback.id}\0${callback.sourceState}\0${callback.sourceTitle}`,
+    )
+    .join("\n");
+
+function forwardCallbackSourceChanges(deps: AppDeps): void {
   let notifying = false;
-  const forwardedSourceStates = new Map<string, string>();
-  deps.hub.onThreadChanged((id) => {
+  const forwarded = new Map<string, string>();
+
+  deps.hub.onThreadChanged((id, changes, metadata) => {
     if (notifying) return;
     notifying = true;
 
     try {
+      if (
+        deps.db
+          .select({ id: threadCallbacks.id })
+          .from(threadCallbacks)
+          .where(eq(threadCallbacks.threadId, id))
+          .get() !== undefined
+      )
+        reconcileThreadCallbacks(deps, id);
+
+      if (
+        !changes.some((change) => CALLBACK_STATE_CHANGES.has(change)) &&
+        metadata?.backgroundActivityChanged !== true
+      )
+        return;
+
+      const pushed = metadata?.attentionItems?.callbacks;
+
+      if (changes.includes("interactions-changed") && pushed !== undefined) {
+        const own = pushed.filter((callback) => callback.threadId === id);
+
+        if (own.length > 0) forwarded.set(id, fingerprint(own));
+        else forwarded.delete(id);
+      }
+
       const changed = deps.db
         .select({
           lifecycleOwnerThreadId: threads.lifecycleOwnerThreadId,
@@ -73,53 +127,39 @@ export function registerThreadAttentionRoutes(app: Hono, deps: AppDeps): void {
         .where(eq(threads.id, id))
         .get();
 
+      const family = changes.includes("work-changed")
+        ? familyIdsOf(deps.db, id)
+        : [id];
+
       const sources =
         changed?.originPluginId === "workflows" &&
         changed.lifecycleOwnerThreadId !== null
-          ? [id, changed.lifecycleOwnerThreadId]
-          : [id];
+          ? [...family, changed.lifecycleOwnerThreadId]
+          : family;
 
-      const waits = deps.db
-        .select()
-        .from(threadCallbacks)
-        .where(
-          or(
-            eq(threadCallbacks.threadId, id),
-            inArray(threadCallbacks.sourceThreadId, sources),
-          ),
-        )
-        .all();
+      const waiters = new Set([
+        ...family,
+        ...listCallbackWaiterIds(deps.db, sources),
+      ]);
 
-      const own = new Set(
-        waits
-          .filter((wait) => wait.threadId === id)
-          .map((wait) => `${id}:${wait.id}`),
-      );
+      for (const [waiterId, callbacks] of listThreadCallbacksByThread(deps.db, [
+        ...waiters,
+      ])) {
+        const next = fingerprint(callbacks);
 
-      if (own.size > 0) reconcileThreadCallbacks(deps, id);
+        if ((forwarded.get(waiterId) ?? "") === next) continue;
 
-      for (const key of forwardedSourceStates.keys())
-        if (key.startsWith(`${id}:`) && !own.has(key))
-          forwardedSourceStates.delete(key);
-
-      for (const wait of waits) {
-        if (wait.threadId === id) continue;
-        const callback = toThreadCallback(deps.db, wait);
-        const key = `${wait.threadId}:${wait.id}`;
-        const state = `${callback.sourceState}\0${callback.sourceTitle}`;
-
-        if (forwardedSourceStates.get(key) === state) continue;
-        forwardedSourceStates.set(key, state);
-        notifyThreadAttentionChanged(deps, wait.threadId);
+        if (next === "") forwarded.delete(waiterId);
+        else forwarded.set(waiterId, next);
+        notifyThreadAttentionChanged(deps, waiterId);
       }
     } catch (cause) {
       deps.logger.error(
         { err: cause, threadId: id },
-        "Native callback reconciliation failed",
+        "Native callback forwarding failed",
       );
     } finally {
       notifying = false;
     }
   });
-  reconcileThreadCallbacks(deps);
 }

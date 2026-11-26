@@ -7,7 +7,6 @@ import {
   getThread,
   migrate,
   noopNotifier,
-  readThreadAttention,
   threadCallbacks,
   unarchiveThread,
   upsertHost,
@@ -63,9 +62,7 @@ describe("archive callback waits", () => {
             matchText: `marker-${thread.id}`,
           })
           .run();
-      expect(
-        readThreadAttention(db, [consumer.id]).get(consumer.id)?.kind,
-      ).toBe("callback-waiting");
+      expect(db.select().from(threadCallbacks).all()).toHaveLength(3);
       const notifyThread = vi.fn<typeof noopNotifier.notifyThread>();
       archiveThread(db, { ...noopNotifier, notifyThread }, consumer.id);
 
@@ -87,18 +84,12 @@ describe("archive callback waits", () => {
 
       for (const threadId of [consumer.id, child.id]) {
         expect(getThread(db, threadId)?.archivedAt).not.toBeNull();
-        expect(readThreadAttention(db, [threadId]).get(threadId)?.kind).toBe(
-          "none",
-        );
       }
 
       expect(getThread(db, source.id)?.archivedAt).toBeNull();
       expect(getThread(db, source.id)?.status).toBe("active");
       unarchiveThread(db, noopNotifier, consumer.id);
       unarchiveThread(db, noopNotifier, child.id);
-      expect(
-        readThreadAttention(db, [consumer.id, child.id]).get(consumer.id)?.kind,
-      ).toBe("none");
       expect(
         db
           .select()

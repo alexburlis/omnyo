@@ -15,14 +15,82 @@ import {
   threadCallbacks,
   pluginSettings,
   adoptLegacyThreadAttention,
-  getCallbackSourceState,
   createQueuedThreadMessage,
   queuedThreadMessages,
   listNativeWorkerOwners,
   listThreadCallbacks,
   listThreadQuestions,
+  readThreadAttentionFacts,
   threads,
+  threadFailures,
+  threadOwnerInputs,
+  threadProducers,
+  threadWaitConditions,
+  threadWaits,
+  type DbConnection,
 } from "../../src/index.js";
+
+function insertCallbackWait(
+  db: DbConnection,
+  args: { id: string; waiterId: string; sourceId: string | null },
+): void {
+  const now = Date.now();
+  db.insert(threadWaits)
+    .values({
+      id: args.id,
+      threadId: args.waiterId,
+      key: `callback:${args.sourceId ?? args.id}`,
+      generation: 1,
+      kind: args.sourceId === null ? "event" : "chat",
+      status: "live",
+      readiness: "all",
+      createdBy: "agent",
+      automationId: null,
+      ownerAccepted: false,
+      forText: "Verify result",
+      resumeText: null,
+      marker: `[omnyo wait ${args.id}]`,
+      deadline: now + 60_000,
+      chainStartAt: now,
+      nextCheckAt: null,
+      checkIntervalMs: null,
+      checkCount: 0,
+      reminderAt: null,
+      reminderReceiptId: null,
+      questionId: null,
+      questionRevision: null,
+      coversReceiptIds: "[]",
+      proposalKind: null,
+      proposalReceiptId: null,
+      afterWaitId: null,
+      dispatchKey: null,
+      dispatchQueuedMessageId: null,
+      dispatchRequestId: null,
+      closedReason: null,
+      createdAt: now,
+      updatedAt: now,
+      closedAt: null,
+    })
+    .run();
+  db.insert(threadWaitConditions)
+    .values({
+      waitId: args.id,
+      conditionKey:
+        args.sourceId === null
+          ? `event:legacy-${args.id}`
+          : `chat:${args.sourceId}`,
+      kind: args.sourceId === null ? "event" : "chat",
+      target: args.sourceId ?? `legacy:${args.id}`,
+      label: "Source label",
+      state: "pending",
+      afterSeq: args.sourceId === null ? null : 7,
+      result: null,
+      metAt: null,
+      stallWokenAt: null,
+      stallReceiptId: null,
+    })
+    .run();
+}
 
 describe("native attention adoption", () => {
   it("adopts only missing visual preferences once after an earlier callback adoption", () => {
@@ -301,9 +369,13 @@ describe("native attention adoption", () => {
       db.delete(threadCallbacks)
         .where(eq(threadCallbacks.id, "generation-1"))
         .run();
-      expect(listThreadCallbacks(db, source.id)).toMatchObject([
-        { id: "external-1", sourceThreadId: null, sourceState: "unverified" },
-      ]);
+      expect(
+        db
+          .select()
+          .from(threadCallbacks)
+          .where(eq(threadCallbacks.id, "external-1"))
+          .get(),
+      ).toMatchObject({ threadId: source.id, sourceThreadId: null });
       db.delete(threadCallbacks)
         .where(eq(threadCallbacks.id, "external-1"))
         .run();
@@ -324,7 +396,7 @@ describe("native attention adoption", () => {
     }
   });
 
-  it("projects eligible queues, human waits and worker ownership from native records", () => {
+  it("projects owed callback waits and classifies their sources the same way in both readers", () => {
     const db = createConnection(":memory:");
     migrate(db);
     const host = upsertHost(db, noopNotifier, { name: "test" });
@@ -334,15 +406,61 @@ describe("native attention adoption", () => {
       source: { type: "local_path", hostId: host.id, path: "/tmp" },
     });
 
-    const source = createThread(db, noopNotifier, {
-      projectId: project.id,
-      providerId: "codex",
-      status: "idle",
+    const create = (status: "idle" | "active") =>
+      createThread(db, noopNotifier, {
+        projectId: project.id,
+        providerId: "codex",
+        status,
+      });
+
+    const waiter = create("idle");
+    const source = create("idle");
+    const external = create("idle");
+    insertCallbackWait(db, {
+      id: "wait-1",
+      waiterId: waiter.id,
+      sourceId: source.id,
+    });
+    insertCallbackWait(db, {
+      id: "wait-2",
+      waiterId: external.id,
+      sourceId: null,
     });
 
+    const state = () => {
+      const listed = listThreadCallbacks(db, waiter.id);
+      const facts = readThreadAttentionFacts(db, [waiter.id]).get(waiter.id);
+      expect(facts?.callbacks).toEqual(listed);
+
+      return listed.map((callback) => callback.sourceState);
+    };
+
     try {
-      expect(getCallbackSourceState(db, null)).toBe("unverified");
-      expect(getCallbackSourceState(db, source.id)).toBe("idle");
+      expect(listThreadCallbacks(db, waiter.id)).toEqual([
+        {
+          id: "wait-1",
+          threadId: waiter.id,
+          sourceThreadId: source.id,
+          sourceTitle: expect.any(String),
+          reason: "Verify result",
+          createdAt: expect.any(Number),
+          afterSeq: 7,
+          matchText: "[omnyo wait wait-1]",
+          sourceState: "idle",
+        },
+      ]);
+      expect(listThreadCallbacks(db, external.id)).toMatchObject([
+        {
+          id: "wait-2",
+          sourceThreadId: null,
+          sourceTitle: "Source label",
+          sourceState: "unverified",
+        },
+      ]);
+      expect(listThreadCallbacks(db).map((callback) => callback.id)).toEqual([
+        "wait-1",
+        "wait-2",
+      ]);
 
       const queue = createQueuedThreadMessage(db, noopNotifier, {
         threadId: source.id,
@@ -357,17 +475,76 @@ describe("native attention adoption", () => {
         systemNotice: null,
       });
 
-      expect(getCallbackSourceState(db, source.id)).toBe("waiting");
+      expect(state()).toEqual(["waiting"]);
       db.update(queuedThreadMessages)
         .set({ waitingOn: JSON.stringify({ kind: "interaction" }) })
         .where(eq(queuedThreadMessages.id, queue.id))
         .run();
-      expect(getCallbackSourceState(db, source.id)).toBe("needs-input");
+      expect(state()).toEqual(["needs-input"]);
       db.update(queuedThreadMessages)
         .set({ failureReason: "Fixture failure" })
         .where(eq(queuedThreadMessages.id, queue.id))
         .run();
-      expect(getCallbackSourceState(db, source.id)).toBe("idle");
+      expect(state()).toEqual(["idle"]);
+
+      insertCallbackWait(db, {
+        id: "wait-3",
+        waiterId: source.id,
+        sourceId: external.id,
+      });
+      expect(state()).toEqual(["waiting"]);
+      db.update(threadWaits)
+        .set({ status: "closed" })
+        .where(eq(threadWaits.id, "wait-3"))
+        .run();
+      expect(state()).toEqual(["idle"]);
+
+      const now = Date.now();
+      db.insert(threadProducers)
+        .values({
+          id: "producer-1",
+          threadId: source.id,
+          kind: "goal",
+          pluginId: "pursue",
+          label: "Goal",
+          status: "active",
+          heldTurnId: null,
+          heldSummary: null,
+          heldUntil: null,
+          endedReason: null,
+          createdAt: now,
+          updatedAt: now,
+          endedAt: null,
+        })
+        .run();
+      expect(state()).toEqual(["waiting"]);
+      db.update(threadProducers)
+        .set({ status: "ended" })
+        .where(eq(threadProducers.id, "producer-1"))
+        .run();
+      expect(state()).toEqual(["idle"]);
+
+      db.insert(threadOwnerInputs)
+        .values({
+          id: "input-1",
+          threadId: source.id,
+          kind: "message",
+          state: "owed",
+          requestId: null,
+          queuedMessageId: null,
+          turnId: null,
+          receiptId: null,
+          producerId: null,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+      expect(state()).toEqual(["waiting"]);
+      db.update(threadOwnerInputs)
+        .set({ state: "covered" })
+        .where(eq(threadOwnerInputs.id, "input-1"))
+        .run();
+      expect(state()).toEqual(["idle"]);
 
       const worker = createThread(db, noopNotifier, {
         projectId: project.id,
@@ -379,7 +556,7 @@ describe("native attention adoption", () => {
       });
 
       expect(listNativeWorkerOwners(db, [source.id]).has(source.id)).toBe(true);
-      expect(getCallbackSourceState(db, source.id)).toBe("working");
+      expect(state()).toEqual(["working"]);
       db.update(threads)
         .set({ status: "idle" })
         .where(eq(threads.id, worker.id))
@@ -391,17 +568,68 @@ describe("native attention adoption", () => {
         .set({ status: "error" })
         .where(eq(threads.id, source.id))
         .run();
-      expect(getCallbackSourceState(db, source.id)).toBe("error");
+      expect(state()).toEqual(["error"]);
+      db.insert(threadFailures)
+        .values({
+          id: "failure-1",
+          threadId: source.id,
+          turnId: null,
+          requestId: null,
+          waitId: null,
+          state: "held",
+          reason: "Rate limited",
+          decisionDeadline: null,
+          retryQueuedMessageId: null,
+          receiptId: null,
+          incidentKey: null,
+          incidentLabel: null,
+          resetAt: null,
+          resolvedBy: null,
+          createdAt: now,
+          updatedAt: now,
+          resolvedAt: null,
+        })
+        .run();
+      expect(state()).toEqual(["waiting"]);
+      db.update(threadFailures)
+        .set({ state: "actionable" })
+        .where(eq(threadFailures.id, "failure-1"))
+        .run();
+      expect(state()).toEqual(["error"]);
       db.update(threads)
         .set({ archivedAt: Date.now() })
         .where(eq(threads.id, source.id))
         .run();
-      expect(getCallbackSourceState(db, source.id)).toBe("archived");
+      expect(state()).toEqual(["archived"]);
       db.update(threads)
         .set({ deletedAt: Date.now() })
         .where(eq(threads.id, source.id))
         .run();
-      expect(getCallbackSourceState(db, source.id)).toBe("unavailable");
+      expect(state()).toEqual(["unavailable"]);
+
+      db.update(threadWaitConditions)
+        .set({ state: "met" })
+        .where(eq(threadWaitConditions.waitId, "wait-1"))
+        .run();
+      expect(listThreadCallbacks(db, waiter.id)).toEqual([]);
+      db.update(threadWaitConditions)
+        .set({ state: "pending" })
+        .where(eq(threadWaitConditions.waitId, "wait-1"))
+        .run();
+      db.update(threadWaits)
+        .set({ status: "dispatched" })
+        .where(eq(threadWaits.id, "wait-1"))
+        .run();
+      expect(listThreadCallbacks(db, waiter.id)).toEqual([]);
+      db.update(threadWaits)
+        .set({ status: "live" })
+        .where(eq(threadWaits.id, "wait-1"))
+        .run();
+      db.update(threads)
+        .set({ archivedAt: Date.now() })
+        .where(eq(threads.id, waiter.id))
+        .run();
+      expect(listThreadCallbacks(db, waiter.id)).toEqual([]);
     } finally {
       db.$client.close();
     }
