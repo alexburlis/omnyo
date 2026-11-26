@@ -103,6 +103,29 @@ const attentionCalls = (host: FakePluginHost) =>
   host.harness.sdk.callsTo("experimental_attention.command");
 
 describe("Codex async questions", () => {
+  it("writes the cursor only when a new event row moved it", async () => {
+    const rows: ReturnType<typeof questionRow>[] = [];
+    const host = createHost(rows);
+    const kvSet = vi.spyOn(host.api.storage.kv, "set");
+
+    try {
+      await notify(host);
+      await notify(host);
+      expect(kvSet).not.toHaveBeenCalled();
+      rows.push(questionRow(7));
+      await notify(host);
+      await vi.waitFor(() =>
+        expect(host.harness.pendingInteractions).toHaveLength(1),
+      );
+      await notify(host);
+      expect(kvSet.mock.calls).toEqual([
+        [`async-question-cursor:${THREAD_ID}`, 7],
+      ]);
+    } finally {
+      await host.harness.dispose();
+    }
+  });
+
   it("retries a failed history scan on the next stream without advancing its cursor or duplicating the question", async () => {
     const rows = [questionRow(5)];
     const host = createHost(rows);

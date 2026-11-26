@@ -1965,10 +1965,13 @@ describe("thread command dispatch", () => {
     });
     harness.threadControls.setActiveTurn("thread-1", "turn-1");
 
+    const steerTurn = vi.spyOn(harness.runtime, "steerTurn");
+
     const result = await dispatchCommand(
       {
         bridgeLaunch: DISPATCH_TEST_BRIDGE_LAUNCH,
         type: "turn.submit",
+        steerSource: "non-user",
         environmentId: "env-1",
         threadId: "thread-1",
         requestId: nextClientRequestId(),
@@ -2003,6 +2006,9 @@ describe("thread command dispatch", () => {
     );
 
     expect(result).toEqual({ trace: { spans: [] } });
+    expect(steerTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ steerSource: "non-user" }),
+    );
     expect(harness.runtimeState.steeredTurnId).toBe("turn-1");
     expect(harness.manager.listActiveThreads()).toEqual([
       {

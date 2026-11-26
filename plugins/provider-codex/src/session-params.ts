@@ -6,12 +6,12 @@ import {
   type ReasoningLevel,
   type RuntimePermissionPolicy,
   type ServiceTier,
-  buildShellEnvOverrides,
   experimental_compareVersions as compareVersions,
   experimental_versionFrom as versionFrom,
 } from "@omnyo/plugin-sdk/provider-bridge";
 import fs from "node:fs";
 import path from "node:path";
+import { z } from "zod";
 import type { ReasoningEffort as CodexReasoningEffort } from "./generated/codex-app-server/schema/ReasoningEffort.js";
 import type { JsonValue } from "./generated/codex-app-server/schema/serde_json/JsonValue.js";
 import type { SandboxPolicy } from "./generated/codex-app-server/schema/v2/SandboxPolicy.js";
@@ -33,20 +33,34 @@ export type CodexSessionOptions = {
   envVars?: Record<string, string>;
 } & RuntimePermissionPolicy;
 
-interface CodexPermissionSettings {
+export type CodexSandboxControl =
+  | {
+      kind: "sandbox";
+      workspaceNetworkAccess: boolean;
+      allowedSandboxModes?: readonly CodexSandboxMode[];
+    }
+  | {
+      kind: "profile";
+      workspaceProfile: string;
+      workspaceAllowed: boolean;
+      fullAccessAllowed: boolean;
+    };
+
+interface CodexApprovalSettings {
   approvalPolicy: AskForApproval;
   approvalsReviewer: ApprovalsReviewer;
-  sandbox: CodexSandboxMode;
-  sandboxPolicy: SandboxPolicy;
 }
 
-export interface CodexThreadPermissionSettings {
-  approvalPolicy: AskForApproval;
-  approvalsReviewer: ApprovalsReviewer;
-  sandbox: CodexSandboxMode;
-}
+type CodexPermissionSettings = CodexApprovalSettings &
+  ({ sandboxPolicy: SandboxPolicy } | { permissions: string });
+
+export type CodexThreadPermissionSettings = CodexApprovalSettings &
+  ({ sandbox: CodexSandboxMode } | { permissions: string });
+
+const CODEX_FULL_ACCESS_PROFILE = ":danger-full-access";
 
 export type OmnyoThreadStartParams = ThreadStartParams & {
+  permissions?: string | null;
   experimentalRawEvents?: boolean;
   dynamicTools?: DynamicToolSpec[];
   daybreakEnabled?: boolean;
@@ -61,6 +75,7 @@ export type OmnyoThreadForkParams = {
   approvalPolicy?: AskForApproval | null;
   approvalsReviewer?: ApprovalsReviewer | null;
   sandbox?: CodexSandboxMode | null;
+  permissions?: string | null;
   config?: { [key in string]?: JsonValue } | null;
   baseInstructions?: string | null;
   developerInstructions?: string | null;
@@ -71,10 +86,131 @@ interface ToCodexPermissionSettingsArgs {
   additionalWorkspaceWriteRoots: readonly string[];
   gitWritableRoots: readonly string[];
   options: CodexSessionOptions;
+  sandboxControl: CodexSandboxControl;
+}
+
+const CODEX_WORKSPACE_NETWORK_CONFIG_KEY =
+  "sandbox_workspace_write.network_access";
+
+export const codexSandboxConfigSchema = z.object({
+  config: z.object({
+    default_permissions: z.string().nullish(),
+    sandbox_workspace_write: z
+      .object({ network_access: z.boolean().nullish() })
+      .nullish(),
+  }),
+  origins: z.record(z.string(), z.unknown()),
+});
+
+export const codexSandboxRequirementsSchema = z.object({
+  requirements: z
+    .object({
+      allowedPermissionProfiles: z.record(z.string(), z.boolean()).nullish(),
+      allowedPermissions: z.array(z.string()).nullish(),
+      allowedSandboxModes: z
+        .array(z.enum(["read-only", "workspace-write", "danger-full-access"]))
+        .nullish(),
+      defaultPermissions: z.string().nullish(),
+      network: z.record(z.string(), z.unknown()).nullish(),
+    })
+    .nullable(),
+});
+
+export const codexPermissionProfileListSchema = z.object({
+  nextCursor: z.string().nullish(),
+  data: z.array(
+    z.object({ id: z.string(), allowed: z.boolean().default(true) }),
+  ),
+});
+
+interface CodexSandboxSettings {
+  config: z.infer<typeof codexSandboxConfigSchema>;
+  requirements: z.infer<typeof codexSandboxRequirementsSchema>;
+}
+
+export function codexWorkspaceProfile(
+  args: CodexSandboxSettings,
+): string | null {
+  const requirements = args.requirements.requirements;
+
+  const profile =
+    requirements?.defaultPermissions ?? args.config.config.default_permissions;
+
+  if (profile === CODEX_FULL_ACCESS_PROFILE) return ":workspace";
+
+  return (
+    profile ??
+    (requirements?.allowedPermissionProfiles != null ||
+    requirements?.allowedPermissions != null
+      ? ":workspace"
+      : null)
+  );
+}
+
+export function resolveCodexSandboxControl(
+  args: CodexSandboxSettings & {
+    profiles: z.infer<typeof codexPermissionProfileListSchema> | null;
+  },
+): CodexSandboxControl {
+  const workspaceProfile = codexWorkspaceProfile(args);
+  const requirements = args.requirements.requirements;
+
+  if (workspaceProfile === null) {
+    return {
+      kind: "sandbox",
+      workspaceNetworkAccess: resolveCodexWorkspaceNetworkAccess(args),
+      ...(requirements?.allowedSandboxModes == null
+        ? {}
+        : { allowedSandboxModes: requirements.allowedSandboxModes }),
+    };
+  }
+
+  const profileAllowed = (id: string): boolean =>
+    args.profiles?.data.some(
+      (profile) => profile.id === id && profile.allowed,
+    ) === true &&
+    requirements?.allowedPermissionProfiles?.[id] !== false &&
+    (requirements?.allowedPermissions == null ||
+      requirements.allowedPermissions.includes(id));
+
+  return {
+    kind: "profile",
+    workspaceProfile,
+    workspaceAllowed: profileAllowed(workspaceProfile),
+    fullAccessAllowed:
+      profileAllowed(CODEX_FULL_ACCESS_PROFILE) &&
+      (requirements?.allowedSandboxModes == null ||
+        requirements.allowedSandboxModes.includes("danger-full-access")),
+  };
+}
+
+function resolveCodexWorkspaceNetworkAccess(
+  args: CodexSandboxSettings,
+): boolean {
+  const configured = args.config.config.sandbox_workspace_write?.network_access;
+  const requirements = args.requirements.requirements;
+
+  const managedPermissions =
+    requirements !== null &&
+    (requirements.allowedPermissionProfiles != null ||
+      requirements.allowedPermissions != null ||
+      requirements.defaultPermissions != null ||
+      requirements.network != null);
+
+  if (managedPermissions) {
+    return configured ?? false;
+  }
+
+  if (CODEX_WORKSPACE_NETWORK_CONFIG_KEY in args.config.origins) {
+    return configured ?? false;
+  }
+
+  return true;
 }
 
 interface BuildCodexConfigArgs {
   supportsAgentsEnabled: boolean;
+  sandboxControl: CodexSandboxControl;
   additionalWorkspaceWriteRoots: readonly string[];
   gitWritableRoots: readonly string[];
   options?: CodexSessionOptions;
@@ -163,11 +299,12 @@ export function resolveCodexInstructionOverrides(
 
 function toWorkspaceWriteCodexSandboxPolicy(
   writableRoots: readonly string[],
+  networkAccess: boolean,
 ): SandboxPolicy {
   return {
     type: "workspaceWrite",
     writableRoots: [...writableRoots],
-    networkAccess: true,
+    networkAccess,
     excludeTmpdirEnvVar: false,
     excludeSlashTmp: false,
   };
@@ -558,32 +695,105 @@ function toCodexApprovalsReviewer(
   return options.approvalReviewer === "automatic" ? "auto_review" : "user";
 }
 
-export function toCodexThreadPermissionSettings(
+function toCodexApprovalSettings(
   options: CodexSessionOptions,
-): CodexThreadPermissionSettings {
-  const permissionPolicy = options;
-
-  switch (permissionPolicy.permissionScope) {
+): CodexApprovalSettings {
+  switch (options.permissionScope) {
     case "workspace":
       return {
-        approvalPolicy: toWorkspaceApprovalPolicy(permissionPolicy),
+        approvalPolicy: toWorkspaceApprovalPolicy(options),
         approvalsReviewer: toCodexApprovalsReviewer(options),
-        sandbox: "workspace-write",
       };
     case "full":
       return {
         approvalPolicy: "never",
         approvalsReviewer: toCodexApprovalsReviewer(options),
-        sandbox: "danger-full-access",
       };
   }
+}
+
+function toCodexPermissionProfile(
+  options: CodexSessionOptions,
+  control: Extract<CodexSandboxControl, { kind: "profile" }>,
+): string {
+  if (options.permissionScope === "workspace") {
+    if (!control.workspaceAllowed)
+      throw new Error(
+        `Codex permission profile "${control.workspaceProfile}" is unavailable or denied by this machine's requirements.`,
+      );
+
+    return control.workspaceProfile;
+  }
+
+  if (!control.fullAccessAllowed) {
+    throw new Error(
+      `Codex requirements on this machine do not allow full access (${CODEX_FULL_ACCESS_PROFILE}).`,
+    );
+  }
+
+  return CODEX_FULL_ACCESS_PROFILE;
+}
+
+function assertCodexSandboxAllowed(
+  options: CodexSessionOptions,
+  control: Extract<CodexSandboxControl, { kind: "sandbox" }>,
+): void {
+  const mode =
+    options.permissionScope === "workspace"
+      ? "workspace-write"
+      : "danger-full-access";
+
+  if (
+    control.allowedSandboxModes !== undefined &&
+    !control.allowedSandboxModes.includes(mode)
+  ) {
+    throw new Error(
+      `Codex requirements on this machine do not allow the requested sandbox mode "${mode}".`,
+    );
+  }
+}
+
+export function toCodexThreadPermissionSettings(
+  options: CodexSessionOptions,
+  control: CodexSandboxControl,
+): CodexThreadPermissionSettings {
+  const approvals = toCodexApprovalSettings(options);
+
+  if (control.kind === "profile") {
+    return {
+      ...approvals,
+      permissions: toCodexPermissionProfile(options, control),
+    };
+  }
+
+  assertCodexSandboxAllowed(options, control);
+
+  return {
+    ...approvals,
+    sandbox:
+      options.permissionScope === "workspace"
+        ? "workspace-write"
+        : "danger-full-access",
+  };
 }
 
 export function toCodexPermissionSettings(
   args: ToCodexPermissionSettingsArgs,
 ): CodexPermissionSettings {
+  const approvals = toCodexApprovalSettings(args.options);
+  const control = args.sandboxControl;
+
+  if (control.kind === "profile") {
+    return {
+      ...approvals,
+      permissions: toCodexPermissionProfile(args.options, control),
+    };
+  }
+
+  assertCodexSandboxAllowed(args.options, control);
+
   return {
-    ...toCodexThreadPermissionSettings(args.options),
+    ...approvals,
     sandboxPolicy:
       args.options.permissionScope === "workspace"
         ? toWorkspaceWriteCodexSandboxPolicy(
@@ -591,6 +801,7 @@ export function toCodexPermissionSettings(
               args.gitWritableRoots,
               args.additionalWorkspaceWriteRoots,
             ),
+            control.workspaceNetworkAccess,
           )
         : { type: "dangerFullAccess" },
   };
@@ -677,21 +888,14 @@ export function toCodexUserInput(
   return [...chunks, ...selected.values()];
 }
 
-function buildShellEnvironmentPolicyConfig(
-  envVars?: Record<string, string>,
-): Record<string, string> | undefined {
-  if (!envVars) {
-    return undefined;
-  }
-
-  const config: Record<string, string> = {};
-
-  for (const [key, value] of Object.entries(buildShellEnvOverrides(envVars))) {
-    config[`shell_environment_policy.set.${key}`] = value;
-  }
-
-  return Object.keys(config).length > 0 ? config : undefined;
-}
+const OMNYO_CONTEXT_ENV_NAMES = [
+  "OMNYO_PROJECT_ID",
+  "OMNYO_ENVIRONMENT_ID",
+  "OMNYO_THREAD_STORAGE",
+  "OMNYO_CLI",
+  "OMNYO_SERVER_URL",
+  "OMNYO_HOST_DAEMON_PORT",
+] as const;
 
 const CODEX_AGENTS_ENABLED_MINIMUM_VERSION = "0.145.0";
 
@@ -713,17 +917,15 @@ export function buildCodexConfig(
 ): { [key in string]?: JsonValue } | undefined {
   const config: { [key in string]?: JsonValue } = {};
 
-  if (args.threadId) {
+  for (const name of OMNYO_CONTEXT_ENV_NAMES) {
+    const value = args.options?.envVars?.[name];
+
+    if (value !== undefined)
+      config[`shell_environment_policy.set.${name}`] = value;
+  }
+
+  if (args.threadId)
     config["shell_environment_policy.set.OMNYO_THREAD_ID"] = args.threadId;
-  }
-
-  const shellEnvironmentConfig = buildShellEnvironmentPolicyConfig(
-    args.options?.envVars,
-  );
-
-  if (shellEnvironmentConfig) {
-    Object.assign(config, shellEnvironmentConfig);
-  }
 
   if (args.options?.reasoningLevel) {
     config["model_reasoning_effort"] = toCodexReasoningEffort(
@@ -744,7 +946,10 @@ export function buildCodexConfig(
   config["memories.use_memories"] = args.options?.memoryEnabled ?? true;
   config["memories.generate_memories"] = args.options?.memoryEnabled ?? true;
 
-  if (args.options?.permissionScope === "workspace") {
+  if (
+    args.options?.permissionScope === "workspace" &&
+    args.sandboxControl.kind === "sandbox"
+  ) {
     const writableRoots = combineWorkspaceWriteRoots(
       args.gitWritableRoots,
       args.additionalWorkspaceWriteRoots,

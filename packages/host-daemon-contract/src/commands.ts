@@ -421,6 +421,7 @@ const turnSubmitCommandSchema = hostDaemonThreadTargetSchema
     requestId: clientTurnRequestIdSchema,
     input: z.array(promptInputSchema).min(1),
     inputGroups: z.array(z.array(promptInputSchema).min(1)).min(1).optional(),
+    steerSource: z.enum(["user", "non-user"]).optional(),
     options: runtimeThreadExecutionOptionsSchema,
     bridgeLaunch: hostDaemonBridgeLaunchSchema,
     resumeContext: turnResumeContextSchema,

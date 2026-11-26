@@ -1,5 +1,6 @@
 import {
   createQueuedThreadMessageInTransaction,
+  getThread,
   getPendingCoalescedQueuedThreadMessage,
   updateCoalescedQueuedThreadMessageInTransaction,
   type QueuedThreadMessageRow,
@@ -31,11 +32,20 @@ export interface PostCoalescedSystemNoticeArgs<State> {
 export function postCoalescedSystemNotice<State>(
   deps: Pick<AppDeps, "db" | "hub">,
   args: PostCoalescedSystemNoticeArgs<State>,
-): QueuedThreadMessageRow & { sendAt: number } {
+): (QueuedThreadMessageRow & { sendAt: number }) | null {
   const sendAt = Date.now() + args.windowMs;
 
-  const { created, row } = deps.db.transaction(
+  const result = deps.db.transaction(
     (tx) => {
+      const thread = getThread(tx, args.threadId);
+
+      if (
+        thread === null ||
+        thread.archivedAt !== null ||
+        thread.deletedAt !== null
+      )
+        return null;
+
       const pending = getPendingCoalescedQueuedThreadMessage(tx, {
         coalesceKey: args.coalesceKey,
         now: Date.now(),
@@ -88,6 +98,9 @@ export function postCoalescedSystemNotice<State>(
     },
     { behavior: "immediate" },
   );
+
+  if (result === null) return null;
+  const { created, row } = result;
 
   if (created) emitPluginMessageQueued(toThreadQueuedMessage(row));
   deps.hub.notifyThread(args.threadId, ["queue-changed"]);

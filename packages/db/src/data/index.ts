@@ -545,6 +545,7 @@ export {
   clearQueuedThreadMessageWaitingOn,
   createQueuedThreadMessage,
   createQueuedThreadMessageInTransaction,
+  QueuedMessageThreadUnavailableError,
   getPendingCoalescedQueuedThreadMessage,
   updateCoalescedQueuedThreadMessageInTransaction,
   listReadySystemNoticesOnBusyThreads,
@@ -594,6 +595,7 @@ export type {
   QueuedThreadMessageGroupClaimPolicy,
   QueuedThreadMessageGroupEligibility,
   QueuedThreadMessageRow,
+  QueuedMessageThreadUnavailableReason,
   ReorderQueuedThreadMessageResult,
   SetQueuedThreadMessageGroupBoundaryResult,
 } from "./queued-thread-messages.js";

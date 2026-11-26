@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   parsePageToShellMessage,
   parseNativeShellHandshake,
+  parseShellToPageEvent,
+  parseAppPath,
   type NativeShellHandshake,
 } from "../src/index.js";
 
@@ -30,6 +32,7 @@ describe("parsePageToShellMessage", () => {
   it("accepts every message kind the contract defines", () => {
     const cases: unknown[] = [
       { type: "ready", path: "/threads/thr_1" },
+      { type: "capabilities", capabilities: ["navigate"] },
       { type: "title", title: "Omnyo", path: "/" },
       { type: "haptic", kind: "impact-medium" },
       { type: "badge", count: 0 },
@@ -57,6 +60,20 @@ describe("parsePageToShellMessage", () => {
       reason: "message was not a string",
     });
     expect(parsePageToShellMessage("not json").ok).toBe(false);
+  });
+
+  it("keeps known page capabilities and drops newer ones", () => {
+    expect(
+      parsePageToShellMessage(
+        json({
+          type: "capabilities",
+          capabilities: ["navigate", "picture-in-picture"],
+        }),
+      ),
+    ).toEqual({
+      ok: true,
+      message: { type: "capabilities", capabilities: ["navigate"] },
+    });
   });
 
   it("drops a message type an older shell does not know", () => {
@@ -138,6 +155,39 @@ describe("parsePageToShellMessage", () => {
         }),
       ).ok,
     ).toBe(false);
+  });
+});
+
+describe("parseShellToPageEvent", () => {
+  it("accepts in-app navigation paths including queries", () => {
+    for (const path of [
+      "/",
+      "/projects/p1/threads/thr_1",
+      "/?initialPrompt=hello",
+    ]) {
+      expect(parseShellToPageEvent({ type: "navigate", path })).toEqual({
+        type: "navigate",
+        path,
+      });
+      expect(parseAppPath(path)).toBe(path);
+    }
+  });
+
+  it("rejects external and malformed navigation requests", () => {
+    for (const path of [
+      "",
+      "threads/thr_1",
+      "//evil.example/",
+      "https://evil.example/",
+      "/\\evil.example/",
+      "/\t/evil.example/",
+      "/\n/evil.example/",
+      "/\u0000evil.example/",
+      "/".repeat(4097),
+    ]) {
+      expect(parseShellToPageEvent({ type: "navigate", path })).toBeNull();
+      expect(parseAppPath(path)).toBeNull();
+    }
   });
 });
 
