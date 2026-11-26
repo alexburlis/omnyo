@@ -1021,7 +1021,9 @@ describe("shared thread work API", () => {
         const { thread } = seedThreadFixture(harness, {
           thread: { status: "error" },
         });
+
         const now = Date.now();
+
         harness.db
           .insert(threadFailures)
           .values({

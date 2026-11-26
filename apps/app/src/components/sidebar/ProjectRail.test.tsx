@@ -143,23 +143,35 @@ function inbox(): HTMLElement {
   return screen.getByRole("button", { name: /^Inbox/u });
 }
 
-function badge(button: HTMLElement) {
-  const element =
-    button.querySelector<HTMLElement>("[data-rail-tile-badge]") ??
-    button.parentElement?.querySelector<HTMLElement>(
-      "[data-rail-tile-badge]",
-    ) ??
-    null;
+function badges(button: HTMLElement) {
+  const scope = button.parentElement ?? button;
 
-  return element === null
-    ? null
-    : {
-        count: element.textContent,
-        kind: element.dataset.railTileBadge,
-        failedColor: element.classList.contains("bg-destructive"),
-        needsColor: element.classList.contains("bg-attention"),
-      };
+  return [...scope.querySelectorAll<HTMLElement>("[data-rail-tile-badge]")].map(
+    (element) => ({
+      count: element.textContent,
+      kind: element.dataset.railTileBadge,
+      side: element.classList.contains("-left-0.5") ? "left" : "right",
+      failedColor: element.classList.contains("bg-destructive"),
+      needsColor: element.classList.contains("bg-attention"),
+    }),
+  );
 }
+
+const failedBadge = (count: string) => ({
+  count,
+  kind: "failed",
+  side: "right",
+  failedColor: true,
+  needsColor: false,
+});
+
+const needsBadge = (count: string) => ({
+  count,
+  kind: "needs",
+  side: "left",
+  failedColor: false,
+  needsColor: true,
+});
 
 beforeEach(() => {
   navigation = railAttentionFixtureCatalog();
@@ -196,52 +208,44 @@ describe("ProjectRail", () => {
     );
   });
 
-  it("opens the counted project attention chats directly from the rail badge", async () => {
+  it("opens only the chats each project badge counts", async () => {
     renderRail();
 
+    expect(
+      screen.getByRole("button", {
+        name: "Show Attention in omnyo-private: 1 needs you",
+      }),
+    ).toBeTruthy();
+
     fireEvent.click(
-      screen.getByRole("button", { name: /^Show Attention in omnyo-private/u }),
+      screen.getByRole("button", {
+        name: "Show Attention in omnyo-private: 1 failed",
+      }),
     );
 
     const list = await screen.findByRole("dialog", {
       name: "Attention in omnyo-private",
     });
 
-    const links = within(list).getAllByRole("link");
-    expect(links).toHaveLength(2);
-    const [first] = links;
-
-    if (first === undefined) throw new Error("Expected an attention chat");
-    const href = first.getAttribute("href");
-    expect(href).toMatch(/^\/projects\/proj_omnyo\/threads\//u);
-    fireEvent.click(first);
-    expect(screen.getByTestId("location").textContent).toBe(href);
+    expect(
+      within(list)
+        .getAllByRole("link")
+        .map((link) => link.getAttribute("href")),
+    ).toEqual(["/projects/proj_omnyo/threads/thr_omnyo_failed_read"]);
   });
 
-  it("badges failed plus needs-you roots from the shared fixture, red when any failed", () => {
+  it("badges failed roots in red on the right and needs-you roots in yellow on the left", () => {
     renderRail();
 
-    expect(badge(tile("proj_omnyo"))).toEqual({
-      count: "2",
-      kind: "failed",
-      failedColor: true,
-      needsColor: false,
-    });
-    expect(badge(tile("proj_web"))?.count).toBe("2");
-    expect(badge(tile("proj_ops"))).toBeNull();
-    expect(badge(tile("proj_empty"))).toBeNull();
-    expect(badge(tile("proj_personal"))).toEqual({
-      count: "1",
-      kind: "needs",
-      failedColor: false,
-      needsColor: true,
-    });
-    expect(badge(inbox())).toEqual({
-      count: "5",
-      kind: "failed",
-      failedColor: true,
-      needsColor: false,
-    });
+    expect(badges(tile("proj_omnyo"))).toEqual([
+      failedBadge("1"),
+      needsBadge("1"),
+    ]);
+    expect(badges(tile("proj_web"))).toEqual([failedBadge("2")]);
+    expect(badges(tile("proj_ops"))).toEqual([]);
+    expect(badges(tile("proj_empty"))).toEqual([]);
+    expect(badges(tile("proj_personal"))).toEqual([needsBadge("1")]);
+    expect(badges(inbox())).toEqual([failedBadge("3"), needsBadge("2")]);
   });
 
   it("keeps optional input out of the Inbox badge and retains ready-to-archive counts in its tooltip", async () => {
@@ -283,7 +287,7 @@ describe("ProjectRail", () => {
     };
     renderRail();
 
-    expect(badge(inbox())?.count).toBe("5");
+    expect(badges(inbox())).toEqual([failedBadge("3"), needsBadge("2")]);
     expect(document.querySelector("[data-inbox-triage]")).toBeNull();
     expect(inbox().getAttribute("aria-label")).toBe(
       "Inbox, 2 need you, 3 failed, 2 unread, 2 ready to archive, 7 running",
@@ -343,7 +347,7 @@ describe("ProjectRail", () => {
     expect(runningBar?.querySelector("svg")).toBeNull();
     expect(runningBar?.classList.contains("bg-success")).toBe(true);
     expect(document.querySelector("[data-rail-tile-unread]")).toBeNull();
-    expect(badge(tile("proj_web"))?.kind).toBe("failed");
+    expect(badges(tile("proj_web"))[0]?.kind).toBe("failed");
 
     fireEvent.click(tile("proj_web"));
 

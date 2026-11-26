@@ -205,10 +205,6 @@ export function inboxTriageLabel(
   return parts.join(", ");
 }
 
-export function railAttentionBadgeCount(counts: RailAttentionCounts): number {
-  return counts.failed + counts.needs;
-}
-
 export function isRailAttentionQuiet(counts: RailAttentionCounts): boolean {
   return counts.failed + counts.needs + counts.running + counts.fresh === 0;
 }

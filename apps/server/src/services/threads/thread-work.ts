@@ -412,7 +412,6 @@ function inboxWaitActor(
   };
 }
 
-// Mirrors the Inbox's choice of a thread's latest unresolved failure.
 function readRetryingFailures(
   db: DbConnection,
   ids: readonly string[],
@@ -805,8 +804,6 @@ export function buildThreadWorkSummaries(
 
     const retrying = retryingFailures.get(source.id);
 
-    // The Inbox files a failure whose automatic retry is still pending under
-    // Waiting, so work agrees: only an actionable failure counts as Failed.
     if (source.status === "error" && retrying !== undefined)
       evidence.waits.push({
         id: retrying.id,
