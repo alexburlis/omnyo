@@ -32,6 +32,12 @@ describe("PluginSlotMount", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
   });
 
+  beforeEach(() => {
+    vi.spyOn(HTMLLinkElement.prototype, "sheet", "get").mockReturnValue(
+      new CSSStyleSheet(),
+    );
+  });
+
   afterEach(() => {
     cleanup();
     resetPluginCssForTest();

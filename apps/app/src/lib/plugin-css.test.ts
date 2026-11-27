@@ -12,10 +12,22 @@ import {
 
 const DEMO_STYLESHEET = 'link[data-omnyo-plugin-css="demo"]';
 
-function dispatchLinkEvent(selector: string, type: "load" | "error"): void {
+function dispatchLinkEvent(
+  selector: string,
+  type: "load" | "error",
+  parsed = true,
+): void {
+  if (type === "load" && parsed) mockParsedStylesheet();
+
   act(() => {
     document.head.querySelector(selector)?.dispatchEvent(new Event(type));
   });
+}
+
+function mockParsedStylesheet() {
+  vi.spyOn(HTMLLinkElement.prototype, "sheet", "get").mockReturnValue(
+    new CSSStyleSheet(),
+  );
 }
 
 function useMountedPluginCssReady(pluginId: string): boolean {
@@ -49,6 +61,19 @@ describe("usePluginCssStatus", () => {
     expect(result.current).toBe(false);
     dispatchLinkEvent(DEMO_STYLESHEET, "error");
     expect(result.current).toBe(false);
+    dispatchLinkEvent(DEMO_STYLESHEET, "load");
+    expect(result.current).toBe(true);
+  });
+
+  it("keeps a plugin hidden when a load event has no attached stylesheet", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    applyPluginCss("demo", "/demo.css?h=1");
+    const { result } = renderHook(() => useMountedPluginCssReady("demo"));
+
+    dispatchLinkEvent(DEMO_STYLESHEET, "load", false);
+
+    expect(result.current).toBe(false);
+    expect(document.head.querySelector(DEMO_STYLESHEET)).not.toBeNull();
     dispatchLinkEvent(DEMO_STYLESHEET, "load");
     expect(result.current).toBe(true);
   });

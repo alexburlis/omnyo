@@ -6,7 +6,15 @@ import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { act, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, type Mock, vi } from "vitest";
+import {
+  beforeEach,
+  afterEach,
+  describe,
+  expect,
+  it,
+  type Mock,
+  vi,
+} from "vitest";
 import {
   installForeignDomMutationGuard,
   uninstallForeignDomMutationGuardForTest,
@@ -83,6 +91,12 @@ function contentScriptModule(
 ): Record<string, unknown> {
   return { default: definePluginApp(setup) };
 }
+
+beforeEach(() => {
+  vi.spyOn(HTMLLinkElement.prototype, "sheet", "get").mockReturnValue(
+    new CSSStyleSheet(),
+  );
+});
 
 afterEach(() => {
   vi.restoreAllMocks();

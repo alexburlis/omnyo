@@ -154,28 +154,8 @@ function activateStylesheet(
   link.href = url;
   link.setAttribute(CSS_MARKER, pluginId);
   record.pendingStylesheet = link;
-  link.onload = () => {
-    if (record.pendingStylesheet !== link || record.url !== url) {
-      link.remove();
 
-      if (record.pendingStylesheet === link) record.pendingStylesheet = null;
-
-      return;
-    }
-
-    if (link.sheet !== null) {
-      normalizePluginStylesheet(link.sheet, pluginId);
-      dropHostDuplicatePluginRules(link.sheet, pluginId, hostStylesheets());
-    }
-
-    previous?.remove();
-    record.stylesheet = link;
-    record.pendingStylesheet = null;
-    record.loadedUrl = url;
-    settle(url);
-  };
-
-  link.onerror = () => {
+  const fail = () => {
     link.remove();
 
     if (record.pendingStylesheet !== link || record.url !== url) return;
@@ -189,6 +169,34 @@ function activateStylesheet(
     }
 
     record.failed = true;
+    settle(url);
+  };
+
+  link.onerror = fail;
+  link.onload = () => {
+    if (record.pendingStylesheet !== link || record.url !== url) {
+      link.remove();
+
+      if (record.pendingStylesheet === link) record.pendingStylesheet = null;
+
+      return;
+    }
+
+    const sheet = link.sheet;
+
+    if (sheet === null) {
+      fail();
+
+      return;
+    }
+
+    normalizePluginStylesheet(sheet, pluginId);
+    dropHostDuplicatePluginRules(sheet, pluginId, hostStylesheets());
+
+    previous?.remove();
+    record.stylesheet = link;
+    record.pendingStylesheet = null;
+    record.loadedUrl = url;
     settle(url);
   };
 
