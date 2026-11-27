@@ -124,14 +124,13 @@ function PrivacyRoute() {
       <LegalHeading section={SECTIONS.apps} />
 
       <p>
-        The macOS public beta, the only Omnyo app you can download here, is
-        intended to keep usage collection and automatic crash reports off.
-        Earlier beta packages contained production collector configuration; a
-        beta connected to an older host daemon needs that daemon updated too.
-        The updated implementation disables these purposes across the
-        coordinator, browser and enrolled hosts. Downloading source changes does
-        not update an already installed app or host. To find and install
-        updates, it downloads them from{" "}
+        The macOS public beta is intended to keep usage collection and automatic
+        crash reports off. Earlier beta packages contained production collector
+        configuration; a beta connected to an older host daemon needs that
+        daemon updated too. The updated implementation disables these purposes
+        across the coordinator, browser and enrolled hosts. Downloading source
+        changes does not update an already installed app or host. To find and
+        install updates, it downloads them from{" "}
         <a href={GITHUB_URL}>our releases on GitHub</a>, so GitHub receives your
         IP address with each update check. The rest of this section covers
         builds we give out directly.
