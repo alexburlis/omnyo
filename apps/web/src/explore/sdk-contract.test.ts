@@ -11,7 +11,6 @@ import {
   readExplorePromptText,
 } from "../../../../packages/sdk/src/explore";
 import {
-  EXPLORE_KINDS,
   exploreKey,
   filterExploreItems,
   normalizeExploreQuery,
@@ -115,30 +114,63 @@ describe("web emitter and SDK reader", () => {
     });
   });
 
-  it("filters identically on the site and in the SDK", () => {
-    const queries = [
-      "",
-      "review",
-      "  RELEASE notes ",
-      "schedule agent",
-      "browser",
-      "x".repeat(120),
-      "bb",
-      "omnyo",
-    ];
-
-    for (const kind of [undefined, ...EXPLORE_KINDS]) {
-      for (const query of queries) {
-        expect(
-          sdkFilter(catalog.items, { kind, query }).map(exploreKey),
-          `${kind ?? "all"} ${query}`,
-        ).toEqual(
-          filterExploreItems(catalog.items, { kind, query }).map(exploreKey),
-        );
-        expect(sdkNormalize(query)).toBe(normalizeExploreQuery(query));
-      }
-    }
-  });
+  it.each([
+    {
+      kind: undefined,
+      query: "  \t ",
+      normalized: "",
+      keys: [
+        "workflow/weekly-content-feed",
+        "prompt/review-a-product-update",
+        "skill/product-update-review",
+        "skill/customer-lab",
+        "plugin/browser-automation",
+        "guide/run-an-agent-on-a-schedule",
+      ],
+    },
+    {
+      kind: undefined,
+      query: "  RELEASE \n notes ",
+      normalized: "release notes",
+      keys: ["prompt/review-a-product-update", "skill/product-update-review"],
+    },
+    {
+      kind: "skill",
+      query: "",
+      normalized: "",
+      keys: ["skill/product-update-review", "skill/customer-lab"],
+    },
+    {
+      kind: "guide",
+      query: "schedule agent",
+      normalized: "schedule agent",
+      keys: ["guide/run-an-agent-on-a-schedule"],
+    },
+    {
+      kind: "guide",
+      query: "browser",
+      normalized: "browser",
+      keys: [],
+    },
+    {
+      kind: "plugin",
+      query: `${"BROWSER ".repeat(10)}unmatched`,
+      normalized: "browser ".repeat(10).trim(),
+      keys: ["plugin/browser-automation"],
+    },
+  ] as const)(
+    "filters $kind with query $query",
+    ({ kind, query, normalized, keys }) => {
+      expect(normalizeExploreQuery(query)).toBe(normalized);
+      expect(sdkNormalize(query)).toBe(normalized);
+      expect(
+        filterExploreItems(catalog.items, { kind, query }).map(exploreKey),
+      ).toEqual(keys);
+      expect(sdkFilter(catalog.items, { kind, query }).map(exploreKey)).toEqual(
+        keys,
+      );
+    },
+  );
 
   it("reads the catalog and exact prompt bytes through a public request", async () => {
     const requests: { url: string; init?: RequestInit }[] = [];

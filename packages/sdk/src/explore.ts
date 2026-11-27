@@ -1,18 +1,22 @@
+import {
+  EXPLORE_KINDS,
+  EXPLORE_QUERY_MAX_LENGTH,
+  filterExploreItems as filterCatalogItems,
+  normalizeExploreQuery,
+  type ExploreCta,
+  type ExploreItem,
+  type ExploreKind,
+  type ExplorePreview,
+} from "@omnyo/domain/explore-catalog";
 import { z } from "zod";
+
+export { EXPLORE_KINDS, EXPLORE_QUERY_MAX_LENGTH, normalizeExploreQuery };
+
+export type { ExploreCta, ExploreItem, ExploreKind, ExplorePreview };
 
 export const OMNYO_EXPLORE_ORIGIN = "https://omnyohq.com";
 
 export const EXPLORE_SCHEMA_VERSION = 2;
-
-export const EXPLORE_KINDS = [
-  "prompt",
-  "workflow",
-  "skill",
-  "plugin",
-  "guide",
-] as const;
-
-export const EXPLORE_QUERY_MAX_LENGTH = 80;
 
 const CATALOG_MAX_ITEMS = 500;
 
@@ -29,40 +33,6 @@ const PATH_MAX_LENGTH = 200;
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 
 const PATH_FORBIDDEN_PATTERN = /[\s\\]/u;
-
-export type ExploreKind = (typeof EXPLORE_KINDS)[number];
-
-export interface ExplorePreview {
-  path: string;
-  alt: string;
-  width: number;
-  height: number;
-}
-
-export type ExploreCta =
-  | { kind: "copy-prompt"; label: string; textPath: string }
-  | { kind: "get-workflow"; label: string; path: string }
-  | { kind: "get-skill-pack"; label: string; path: string }
-  | {
-      kind: "find-in-omnyo";
-      label: string;
-      pluginId: string;
-      marketplace: string;
-      install: string;
-    }
-  | { kind: "read-guide"; label: string; path: string };
-
-export interface ExploreItem {
-  kind: ExploreKind;
-  slug: string;
-  title: string;
-  summary: string;
-  publisher: string;
-  tags: string[];
-  path: string;
-  preview: ExplorePreview | null;
-  cta: ExploreCta;
-}
 
 export interface ExploreCatalog {
   schemaVersion: 1 | typeof EXPLORE_SCHEMA_VERSION;
@@ -647,32 +617,11 @@ export function parseExploreCatalog(value: unknown): ExploreCatalog {
   return { schemaVersion, items };
 }
 
-export function normalizeExploreQuery(raw: string): string {
-  return raw
-    .replace(/\s+/gu, " ")
-    .trim()
-    .slice(0, EXPLORE_QUERY_MAX_LENGTH)
-    .trim()
-    .toLowerCase();
-}
-
 export function filterExploreItems(
   items: readonly ExploreItem[],
   filter: { kind?: ExploreKind; query?: string },
 ): ExploreItem[] {
-  const terms = normalizeExploreQuery(filter.query ?? "")
-    .split(" ")
-    .filter(Boolean);
-
-  return items.filter((item) => {
-    if (filter.kind !== undefined && item.kind !== filter.kind) return false;
-
-    const haystack = [item.title, item.summary, ...item.tags]
-      .join(" ")
-      .toLowerCase();
-
-    return terms.every((term) => haystack.includes(term));
-  });
+  return filterCatalogItems(items, filter);
 }
 
 export function parseExploreKey(

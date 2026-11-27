@@ -1,14 +1,21 @@
+import {
+  EXPLORE_KINDS,
+  normalizeExploreQuery,
+  type ExploreKind,
+} from "@omnyo/domain/explore-catalog";
+
 import { SITE_URL } from "../landing/site";
 
-export const EXPLORE_KINDS = [
-  "prompt",
-  "workflow",
-  "skill",
-  "plugin",
-  "guide",
-] as const;
-
-export type ExploreKind = (typeof EXPLORE_KINDS)[number];
+export {
+  EXPLORE_KINDS,
+  EXPLORE_QUERY_MAX_LENGTH,
+  filterExploreItems,
+  normalizeExploreQuery,
+  type ExploreCta,
+  type ExploreItem,
+  type ExploreKind,
+  type ExplorePreview,
+} from "@omnyo/domain/explore-catalog";
 
 export const EXPLORE_KIND_LABELS: Record<
   ExploreKind,
@@ -20,8 +27,6 @@ export const EXPLORE_KIND_LABELS: Record<
   plugin: { one: "Plugin", many: "Plugins" },
   guide: { one: "Guide", many: "Guides" },
 };
-
-export const EXPLORE_QUERY_MAX_LENGTH = 80;
 
 export const explorePath = "/explore";
 
@@ -41,38 +46,6 @@ export const exploreSkillFilePath = (slug: string, sha256: string) =>
   `${exploreSkillPath(slug)}/file/${sha256}`;
 
 export const canonicalExploreUrl = (path: string) => `${SITE_URL}${path}`;
-
-export type ExploreCta =
-  | { kind: "copy-prompt"; label: string; textPath: string }
-  | { kind: "get-workflow"; label: string; path: string }
-  | { kind: "get-skill-pack"; label: string; path: string }
-  | {
-      kind: "find-in-omnyo";
-      label: string;
-      pluginId: string;
-      marketplace: string;
-      install: string;
-    }
-  | { kind: "read-guide"; label: string; path: string };
-
-export interface ExplorePreview {
-  path: string;
-  alt: string;
-  width: number;
-  height: number;
-}
-
-export interface ExploreItem {
-  kind: ExploreKind;
-  slug: string;
-  title: string;
-  summary: string;
-  publisher: string;
-  tags: string[];
-  path: string;
-  preview: ExplorePreview | null;
-  cta: ExploreCta;
-}
 
 export interface ExploreItemKey {
   kind: ExploreKind;
@@ -99,15 +72,6 @@ export function isExploreKind(value: unknown): value is ExploreKind {
   );
 }
 
-export function normalizeExploreQuery(raw: string): string {
-  return raw
-    .replace(/\s+/gu, " ")
-    .trim()
-    .slice(0, EXPLORE_QUERY_MAX_LENGTH)
-    .trim()
-    .toLowerCase();
-}
-
 export function validateExploreSearch(
   search: Record<string, unknown>,
 ): ExploreSearch {
@@ -120,24 +84,6 @@ export function validateExploreSearch(
     ...(isExploreKind(search.type) ? { type: search.type } : {}),
     ...(raw ? { q: raw } : {}),
   };
-}
-
-export function filterExploreItems<
-  Item extends Pick<ExploreItem, "kind" | "title" | "summary" | "tags">,
->(items: readonly Item[], filter: { kind?: ExploreKind; query?: string }) {
-  const terms = normalizeExploreQuery(filter.query ?? "")
-    .split(" ")
-    .filter(Boolean);
-
-  return items.filter((item) => {
-    if (filter.kind !== undefined && item.kind !== filter.kind) return false;
-
-    const haystack = [item.title, item.summary, ...item.tags]
-      .join(" ")
-      .toLowerCase();
-
-    return terms.every((term) => haystack.includes(term));
-  });
 }
 
 export function exploreSearchHref(search: ExploreSearch): string {

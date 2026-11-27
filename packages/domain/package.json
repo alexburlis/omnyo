@@ -15,6 +15,11 @@
       "types": "./src/site-usage.ts",
       "default": "./src/site-usage.ts"
     },
+    "./explore-catalog": {
+      "source": "./src/explore-catalog.ts",
+      "types": "./src/explore-catalog.ts",
+      "default": "./src/explore-catalog.ts"
+    },
     ".": {
       "source": "./src/index.ts",
       "types": "./src/index.ts",

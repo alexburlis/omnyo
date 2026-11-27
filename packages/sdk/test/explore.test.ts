@@ -404,9 +404,12 @@ describe("filterExploreItems", () => {
   });
 
   it("preserves catalog order", () => {
-    expect(keys(filterExploreItems(items, { query: "e" }))).toEqual(
-      keys(items),
-    );
+    expect(keys(filterExploreItems(items, { query: "e" }))).toEqual([
+      "workflow/weekly-content-feed",
+      "prompt/review-a-product-update",
+      "plugin/browser-automation",
+      "guide/run-an-agent-on-a-schedule",
+    ]);
   });
 });
 
