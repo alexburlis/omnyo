@@ -874,6 +874,34 @@ describe("omnyo updates app command output", () => {
     ]);
   });
 
+  it("omnyo updates app cancel stops an idle-only update waiting for idle", async () => {
+    const cancel = vi.fn(async () => appUpdateStatus(privateUpdate));
+    stubServerApi({
+      "v1.system.app-update.$get": vi.fn(async () =>
+        appUpdateStatus({
+          ...privateUpdate,
+          activity: {
+            code: null,
+            output: [],
+            phase: "preparing",
+            startedAt: "2026-11-27T14:26:27.312Z",
+            step: "Waiting for idle",
+            targetVersion: "0.46.20+private.1",
+          },
+          installsWhenIdle: true,
+        }),
+      ),
+      "v1.system.app-update.cancel.$post": cancel,
+    });
+
+    await runCommand(["updates", "app", "cancel"], register);
+
+    expect(cancel).toHaveBeenCalled();
+    expect(collectLogPayloads(vi.mocked(console.log))).toEqual([
+      "Cancelled the Omnyo update. Waiting messages send now.",
+    ]);
+  });
+
   it("omnyo updates app cancel reports when no update is waiting", async () => {
     const cancel = vi.fn(async () => appUpdateStatus(privateUpdate));
     stubServerApi({

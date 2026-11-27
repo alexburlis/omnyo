@@ -603,7 +603,7 @@ function registerAppUpdateCommands(
         const sdk = createCliOmnyoSdk(getUrl());
         const status = await sdk.system.appUpdate();
 
-        if (status.activity.phase !== "draining") {
+        if (status.activity.phase !== "draining" && !status.installsWhenIdle) {
           if (outputJson(opts, status)) return;
           console.log("No Omnyo update is waiting to restart.");
 
