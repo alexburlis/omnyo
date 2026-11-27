@@ -170,6 +170,8 @@ await writeFile(
   ) + "\n",
 );
 
+await mkdir(join(root, "docs/evidence"), { recursive: true });
+
 await writeFile(
   join(root, "docs/evidence", acceptance ? "acceptance-package.json" : "runtime-package.json"),
   JSON.stringify(receipt, null, 2) + "\n",
