@@ -19,12 +19,7 @@ import {
   type BridgeRecording,
 } from "./recording.js";
 
-export const FIRST_PARTY_BRIDGE_MODULES: Readonly<
-  Record<
-    string,
-    { modulePath: string; legacyModulePaths?: string[]; pluginId: string }
-  >
-> = {
+export const FIRST_PARTY_BRIDGE_MODULES = {
   codex: {
     modulePath: "plugins/provider-codex/src/bridge/bridge.ts",
     pluginId: "provider-codex",
@@ -38,12 +33,23 @@ export const FIRST_PARTY_BRIDGE_MODULES: Readonly<
     legacyModulePaths: ["plugins/provider-acp/src/bridge/bridge.ts"],
     pluginId: "provider-acp",
   },
+  "acp-next": {
+    modulePath: "plugins/provider-acp-next/src/host.ts",
+    pluginId: "omnyo--provider-acp-next",
+  },
   pi: {
     modulePath: "plugins/provider-pi/src/host.ts",
     legacyModulePaths: ["plugins/provider-pi/src/bridge/bridge.ts"],
     pluginId: "provider-pi",
   },
-};
+} satisfies Readonly<
+  Record<
+    string,
+    { modulePath: string; legacyModulePaths?: string[]; pluginId: string }
+  >
+>;
+
+type FirstPartyBridgeFamily = keyof typeof FIRST_PARTY_BRIDGE_MODULES;
 
 const BRIDGE_WORKER_ENTRY =
   "packages/provider-bridge-protocol/src/bridge-worker-entry.ts";
@@ -56,7 +62,7 @@ export class UnreplayableProviderError extends Error {
 }
 
 type FirstPartyReplayProfile = ReplayProviderProfile & {
-  bridgeFamily: keyof typeof FIRST_PARTY_BRIDGE_MODULES;
+  bridgeFamily: FirstPartyBridgeFamily;
 };
 
 export function resolveReplayProfile(
@@ -300,14 +306,14 @@ function resolveModulePath(
 export function resolveBridgeLaunch(
   checkoutRoot: string,
   providerId: string,
+  bridgeFamily = resolveReplayProfile(providerId).bridgeFamily,
 ): ProviderBridgeLaunch {
   const root = resolve(checkoutRoot);
-  const profile = resolveReplayProfile(providerId);
-  const defaults = FIRST_PARTY_BRIDGE_MODULES[profile.bridgeFamily];
+  const entry = FIRST_PARTY_BRIDGE_MODULES[bridgeFamily];
 
   return resolveProviderBridgeLaunch({
-    modulePath: join(root, resolveModulePath(root, defaults)),
-    pluginId: defaults.pluginId,
+    modulePath: join(root, resolveModulePath(root, entry)),
+    pluginId: entry.pluginId,
     bootstrapPath: join(root, BRIDGE_WORKER_ENTRY),
     cwd: root,
   });
@@ -316,9 +322,10 @@ export function resolveBridgeLaunch(
 export function firstPartyReplayBridge(
   providerId: string,
   checkoutRoot: string,
+  bridgeFamily?: FirstPartyBridgeFamily,
 ): { launch: ProviderBridgeLaunch; profile: ReplayProviderProfile } {
   return {
-    launch: resolveBridgeLaunch(checkoutRoot, providerId),
+    launch: resolveBridgeLaunch(checkoutRoot, providerId, bridgeFamily),
     profile: resolveReplayProfile(providerId),
   };
 }
@@ -326,6 +333,7 @@ export function firstPartyReplayBridge(
 export interface FirstPartyRecordedConformanceOptions {
   servesProvider: (providerId: string) => boolean;
   label: string;
+  bridgeFamily?: FirstPartyBridgeFamily;
 }
 
 export interface FirstPartyRecordedConformanceRun {
@@ -351,7 +359,11 @@ export async function runFirstPartyRecordedConformance(
     onStderr: (text) => process.stderr.write(`[bridge] ${text}`),
     recordingsRoot: COMMITTED_RECORDINGS_ROOT,
     bridge: (cell) =>
-      firstPartyReplayBridge(cell.provider, RECORDINGS_CHECKOUT_ROOT),
+      firstPartyReplayBridge(
+        cell.provider,
+        RECORDINGS_CHECKOUT_ROOT,
+        options.bridgeFamily,
+      ),
   });
 
   const results = replays.flatMap((replay) => checkRecordedCellReplay(replay));

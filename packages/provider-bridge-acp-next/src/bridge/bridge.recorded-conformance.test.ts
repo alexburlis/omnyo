@@ -4,7 +4,8 @@ import { runFirstPartyRecordedConformance } from "@omnyo/provider-bridge-protoco
 it("reproduces every recorded matrix cell", async () => {
   const run = await runFirstPartyRecordedConformance({
     servesProvider: (providerId) => providerId.startsWith("acp-"),
-    label: "acp",
+    label: "acp-next",
+    bridgeFamily: "acp-next",
   });
 
   expect(run.cells.length).toBeGreaterThan(0);
