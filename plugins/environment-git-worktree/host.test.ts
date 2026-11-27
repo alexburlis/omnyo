@@ -123,6 +123,63 @@ function progressText(harness: ReturnType<typeof createHarness>): string {
     .join("\n");
 }
 
+async function addLibrarySubmodule(
+  root: string,
+  sourcePath: string,
+): Promise<void> {
+  const library = join(root, "library");
+  await mkdir(library);
+  await git(library, "init", "--initial-branch=main");
+  await writeFile(join(library, "lib.txt"), "library\n");
+  await git(library, "add", ".");
+  await git(library, "commit", "-m", "library");
+  await git(
+    sourcePath,
+    "-c",
+    "protocol.file.allow=always",
+    "submodule",
+    "add",
+    library,
+    "lib",
+  );
+  await git(sourcePath, "commit", "-m", "add submodule");
+}
+
+async function inHiddenIndexWorktree(
+  prepareSource: (paths: { root: string; sourcePath: string }) => Promise<void>,
+  check: (worktree: string, remove: () => Promise<unknown>) => Promise<void>,
+): Promise<void> {
+  const { root, sourcePath, dataDir } = await createSourceRepository();
+  await prepareSource({ root, sourcePath });
+  const harness = createHarness(dataDir);
+  let removals = 0;
+
+  try {
+    const created = await harness.experimental_call(
+      "create",
+      createInput({
+        operationId: "create-hidden-index",
+        sourcePath,
+        pathKey: "hidden-index",
+        branchName: "omnyo/hidden-index",
+      }),
+    );
+
+    if (created.status !== "created") throw new Error(created.message);
+
+    await check(created.path, () =>
+      harness.experimental_call("remove", {
+        operationId: `remove-hidden-index-${(removals += 1)}`,
+        pathKey: "hidden-index",
+        path: created.path,
+      }),
+    );
+    expect(existsSync(created.path)).toBe(false);
+  } finally {
+    await harness.experimental_dispose();
+  }
+}
+
 afterEach(async () => {
   await Promise.all(
     temporaryRoots
@@ -505,6 +562,201 @@ describe("worktree host entry", () => {
     } finally {
       await harness.experimental_dispose();
     }
+  });
+
+  it.each(["assume-unchanged", "skip-worktree", "core.ignoreStat"])(
+    "keeps worktrees whose index hides edited files from status: %s",
+    async (state) => {
+      await inHiddenIndexWorktree(
+        async ({ sourcePath }) => {
+          if (state === "core.ignoreStat")
+            await git(sourcePath, "config", "core.ignoreStat", "true");
+        },
+        async (worktree, remove) => {
+          const file = join(worktree, "README.md");
+
+          if (state === "assume-unchanged")
+            await git(
+              worktree,
+              "update-index",
+              "--assume-unchanged",
+              "README.md",
+            );
+          else if (state === "skip-worktree")
+            await git(worktree, "update-index", "--skip-worktree", "README.md");
+          await writeFile(file, "hidden work\n");
+
+          expect(
+            await git(
+              worktree,
+              "status",
+              "--porcelain",
+              "--untracked-files=all",
+              "--ignored",
+            ),
+          ).toBe("");
+          expect(await remove()).toMatchObject({
+            status: "failed",
+            message: expect.stringContaining("hides in README.md ("),
+          });
+          expect(await readFile(file, "utf8")).toBe("hidden work\n");
+
+          await writeFile(file, "hello\n");
+          expect(await remove()).toEqual({ status: "removed" });
+        },
+      );
+    },
+  );
+
+  it("removes a clean sparse worktree whose excluded files are absent", async () => {
+    await inHiddenIndexWorktree(
+      async ({ sourcePath }) => {
+        await mkdir(join(sourcePath, "excluded"), { recursive: true });
+        await writeFile(join(sourcePath, "excluded", "file.txt"), "outside\n");
+        await git(sourcePath, "add", ".");
+        await git(sourcePath, "commit", "-m", "add excluded file");
+      },
+      async (worktree, remove) => {
+        await git(
+          worktree,
+          "sparse-checkout",
+          "set",
+          "--no-cone",
+          "/README.md",
+        );
+
+        expect(existsSync(join(worktree, "excluded", "file.txt"))).toBe(false);
+        expect(await git(worktree, "ls-files", "-v", "excluded")).toBe(
+          "S excluded/file.txt\n",
+        );
+        expect(await remove()).toEqual({ status: "removed" });
+      },
+    );
+  });
+
+  it("removes unchanged hidden files whose committed bytes Git would convert", async () => {
+    await inHiddenIndexWorktree(
+      async ({ sourcePath }) => {
+        await writeFile(join(sourcePath, "win.txt"), "a\r\nb\r\n");
+        await git(sourcePath, "add", "win.txt");
+        await git(sourcePath, "commit", "-m", "add crlf file");
+        await writeFile(join(sourcePath, ".gitattributes"), "* text=auto\n");
+        await git(sourcePath, "add", ".gitattributes");
+        await git(sourcePath, "commit", "-m", "normalize line endings");
+      },
+      async (worktree, remove) => {
+        await git(worktree, "update-index", "--assume-unchanged", "win.txt");
+
+        expect(await readFile(join(worktree, "win.txt"), "utf8")).toBe(
+          "a\r\nb\r\n",
+        );
+        expect(await remove()).toEqual({ status: "removed" });
+      },
+    );
+  });
+
+  it("refuses removal while a hidden symlink points somewhere new", async () => {
+    await inHiddenIndexWorktree(
+      async ({ sourcePath }) => {
+        await symlink("README.md", join(sourcePath, "link"));
+        await git(sourcePath, "add", "link");
+        await git(sourcePath, "commit", "-m", "add link");
+      },
+      async (worktree, remove) => {
+        const link = join(worktree, "link");
+        await git(worktree, "update-index", "--assume-unchanged", "link");
+        await rm(link);
+        await symlink("elsewhere.md", link);
+
+        expect(await remove()).toMatchObject({
+          status: "failed",
+          message: expect.stringContaining("hides in link ("),
+        });
+
+        await rm(link);
+        await symlink("README.md", link);
+        expect(await remove()).toEqual({ status: "removed" });
+      },
+    );
+  });
+
+  it("finds one edit among many hidden files that Git converts on checkout", async () => {
+    const names = Array.from(
+      { length: 300 },
+      (_, index) =>
+        `files/${"n".repeat(40)}-${String(index).padStart(3, "0")}.txt`,
+    );
+
+    const last = names.at(-1) ?? "";
+
+    await inHiddenIndexWorktree(
+      async ({ sourcePath }) => {
+        await mkdir(join(sourcePath, "files"));
+        await Promise.all(
+          names.map((name) => writeFile(join(sourcePath, name), "line\n")),
+        );
+        await git(sourcePath, "add", "files");
+        await git(sourcePath, "commit", "-m", "add many files");
+        await git(sourcePath, "config", "core.autocrlf", "true");
+        await git(sourcePath, "config", "core.ignoreStat", "true");
+      },
+      async (worktree, remove) => {
+        expect(await readFile(join(worktree, last), "utf8")).toBe("line\r\n");
+        await writeFile(join(worktree, last), "edited\r\n");
+
+        expect(await remove()).toMatchObject({
+          status: "failed",
+          message: expect.stringContaining(`hides in ${last} (`),
+        });
+
+        await writeFile(join(worktree, last), "line\r\n");
+        expect(await remove()).toEqual({ status: "removed" });
+      },
+    );
+  });
+
+  it("removes an ignoreStat worktree with an uninitialized submodule", async () => {
+    await inHiddenIndexWorktree(
+      async ({ root, sourcePath }) => {
+        await addLibrarySubmodule(root, sourcePath);
+        await git(sourcePath, "config", "core.ignoreStat", "true");
+      },
+      async (worktree, remove) => {
+        expect(await git(worktree, "ls-files", "-v", "lib")).toBe("h lib\n");
+        expect(await readdir(join(worktree, "lib"))).toEqual([]);
+        expect(await remove()).toEqual({ status: "removed" });
+      },
+    );
+  });
+
+  it("keeps files left inside an uninitialized submodule folder", async () => {
+    await inHiddenIndexWorktree(
+      ({ root, sourcePath }) => addLibrarySubmodule(root, sourcePath),
+      async (worktree, remove) => {
+        const notes = join(worktree, "lib", "notes.txt");
+        await writeFile(notes, "user work\n");
+
+        expect(
+          await git(
+            worktree,
+            "status",
+            "--porcelain",
+            "--untracked-files=all",
+            "--ignored",
+          ),
+        ).toBe("");
+        expect(await remove()).toMatchObject({
+          status: "failed",
+          message: expect.stringContaining(
+            "uninitialized submodule folder lib",
+          ),
+        });
+        expect(await readFile(notes, "utf8")).toBe("user work\n");
+
+        await rm(notes);
+        expect(await remove()).toEqual({ status: "removed" });
+      },
+    );
   });
 
   it.each(["main", "release", "origin/main", "refs/heads/main"])(

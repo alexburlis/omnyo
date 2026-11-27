@@ -119,7 +119,7 @@ async function readRegularFile(
   }
 }
 
-async function verifyInParallel<T>(
+export async function verifyInParallel<T>(
   entries: readonly T[],
   verify: (entry: T) => Promise<void>,
 ) {

@@ -8,6 +8,9 @@ import {
   selectAdoptableWorktrees,
   type GitWorktreeEntry,
 } from "./worktree-list.js";
+import { verifyInParallel } from "./missing-registration.js";
+import { createHash } from "node:crypto";
+import { createReadStream, type Stats } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -794,7 +797,181 @@ async function assertNoWorktreeLocalState(
     );
   }
 
+  const unreported = await findUnreportedChanges(workspacePath, options);
+
+  if (unreported.submodules.length > 0) {
+    throw new WorkspaceError(
+      "worktree_submodule_files",
+      `Cannot remove ${workspacePath}: preserve the files inside the uninitialized submodule folder ${describeFiles(unreported.submodules)} first.`,
+    );
+  }
+
+  if (unreported.hidden.length > 0) {
+    throw new WorkspaceError(
+      "worktree_hidden_changes",
+      `Cannot remove ${workspacePath}: preserve the changes Git status hides in ${describeFiles(unreported.hidden)} (assume-unchanged or skip-worktree) first.`,
+    );
+  }
+
   return directory;
+}
+
+const INDEX_LISTING_OUTPUT_BYTES = 256 * 1024 * 1024;
+
+const HASH_OBJECT_ARGUMENT_CHARS = 8_000;
+
+function describeFiles(files: readonly string[]): string {
+  return files.length > 1
+    ? `${files[0]} and ${files.length - 1} more`
+    : (files[0] ?? "");
+}
+
+function gitBlobHash(blob: string, content: Buffer): string {
+  return createHash(blob.length === 40 ? "sha1" : "sha256")
+    .update(`blob ${content.length}\0`)
+    .update(content)
+    .digest("hex");
+}
+
+async function rawFileBlobHash(
+  file: string,
+  size: number,
+  blob: string,
+): Promise<string | null> {
+  const hash = createHash(blob.length === 40 ? "sha1" : "sha256").update(
+    `blob ${size}\0`,
+  );
+
+  let length = 0;
+
+  for await (const chunk of createReadStream(file)) {
+    const bytes = chunk as Buffer;
+    hash.update(bytes);
+    length += bytes.length;
+  }
+
+  return length === size ? hash.digest("hex") : null;
+}
+
+function lstatIfPresent(file: string): Promise<Stats | null> {
+  return fs.lstat(file).catch((error: unknown) => {
+    if (
+      error instanceof Error &&
+      "code" in error &&
+      (error.code === "ENOENT" || error.code === "ENOTDIR")
+    )
+      return null;
+    throw error;
+  });
+}
+
+async function findUnreportedChanges(
+  workspacePath: string,
+  options: GitProcessOptions & { cwd: string; signal?: AbortSignal },
+): Promise<{ hidden: string[]; submodules: string[] }> {
+  const listing = await runGit(["ls-files", "-s", "-v", "-z"], {
+    ...options,
+    maxOutputBytes: INDEX_LISTING_OUTPUT_BYTES,
+  });
+
+  const entries = listing.stdout.split("\0").flatMap((entry) => {
+    const tab = entry.indexOf("\t");
+
+    if (tab < 0) return [];
+    const [tag = "", mode = "", blob = ""] = entry.slice(0, tab).split(" ");
+    const file = entry.slice(tab + 1);
+    const submodule = mode === "160000";
+
+    return submodule || /^[a-zS]$/u.test(tag)
+      ? [{ file, mode, blob, submodule }]
+      : [];
+  });
+
+  const hidden = new Set<string>();
+  const submodules = new Set<string>();
+
+  const present = (
+    await Promise.all(
+      entries.map(async (entry) => {
+        if (entry.file.includes("�")) {
+          (entry.submodule ? submodules : hidden).add(entry.file);
+
+          return null;
+        }
+
+        const stat = await lstatIfPresent(path.join(workspacePath, entry.file));
+
+        return stat === null ? null : { ...entry, stat };
+      }),
+    )
+  ).filter((entry) => entry !== null);
+
+  const regular: { file: string; blob: string }[] = [];
+
+  await verifyInParallel(
+    present,
+    async ({ file, mode, blob, submodule, stat }) => {
+      throwIfProvisionAborted(options.signal);
+      const absolute = path.join(workspacePath, file);
+
+      if (submodule) {
+        const names = stat.isDirectory() ? await fs.readdir(absolute) : null;
+
+        if (names === null || (names.length > 0 && !names.includes(".git")))
+          submodules.add(file);
+      } else if (
+        mode === "120000" &&
+        (stat.isSymbolicLink() || stat.isFile())
+      ) {
+        const target = stat.isSymbolicLink()
+          ? await fs.readlink(absolute, { encoding: "buffer" })
+          : await fs.readFile(absolute);
+
+        const portable =
+          stat.isSymbolicLink() && process.platform === "win32"
+            ? Buffer.from(target.toString("utf8").replaceAll("\\", "/"))
+            : target;
+
+        if (gitBlobHash(blob, portable) !== blob) hidden.add(file);
+      } else if ((mode === "100644" || mode === "100755") && stat.isFile()) {
+        if ((await rawFileBlobHash(absolute, stat.size, blob)) !== blob)
+          regular.push({ file, blob });
+      } else {
+        hidden.add(file);
+      }
+    },
+  );
+
+  const batches: (typeof regular)[] = [];
+  let chars = 0;
+  regular.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
+
+  for (const entry of regular) {
+    const batch = batches.at(-1);
+
+    if (batch && chars + entry.file.length <= HASH_OBJECT_ARGUMENT_CHARS) {
+      batch.push(entry);
+      chars += entry.file.length + 1;
+    } else {
+      batches.push([entry]);
+      chars = entry.file.length + 1;
+    }
+  }
+
+  for (const batch of batches) {
+    const hashes = (
+      await runGit(
+        ["hash-object", "--", ...batch.map(({ file }) => file)],
+        options,
+      )
+    ).stdout.split("\n");
+
+    batch.forEach(({ file, blob }, index) => {
+      if (hashes[index] !== blob) hidden.add(file);
+    });
+  }
+
+  return { hidden: [...hidden].sort(), submodules: [...submodules].sort() };
 }
 
 export async function removeWorktree(args: RemoveWorktreeArgs): Promise<void> {

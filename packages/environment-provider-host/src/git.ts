@@ -31,6 +31,7 @@ export interface RunGitOptions extends GitProcessOptions {
   allowFailure?: boolean;
   env?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
+  maxOutputBytes?: number;
 }
 
 export type GitRepositoryState = "not_git" | "no_commits" | "has_commits";
@@ -98,7 +99,7 @@ function resolveGitProcessEnv(options: RunGitOptions): NodeJS.ProcessEnv {
   };
 }
 
-function createGitOutputBuffer(): GitOutputBuffer {
+function createGitOutputBuffer(maxBytes: number): GitOutputBuffer {
   const chunks: Buffer[] = [];
   let size = 0;
 
@@ -106,7 +107,7 @@ function createGitOutputBuffer(): GitOutputBuffer {
     append(chunk: Buffer): boolean {
       size += chunk.length;
 
-      if (size > MAX_OUTPUT_BYTES) {
+      if (size > maxBytes) {
         return false;
       }
 
@@ -145,8 +146,9 @@ function runGitAdmitted(
   options: RunGitOptions,
 ): Promise<GitCommandResult> {
   return new Promise<GitCommandResult>((resolve, reject) => {
-    const stdout = createGitOutputBuffer();
-    const stderr = createGitOutputBuffer();
+    const maxOutputBytes = options.maxOutputBytes ?? MAX_OUTPUT_BYTES;
+    const stdout = createGitOutputBuffer(maxOutputBytes);
+    const stderr = createGitOutputBuffer(maxOutputBytes);
     let settled = false;
     let timedOut = false;
     let overflowed = false;
@@ -255,7 +257,7 @@ function runGitAdmitted(
         fail(
           new WorkspaceError(
             "git_command_failed",
-            `${describeCommand(args)} produced more than ${MAX_OUTPUT_BYTES} bytes of output`,
+            `${describeCommand(args)} produced more than ${maxOutputBytes} bytes of output`,
           ),
         );
 
