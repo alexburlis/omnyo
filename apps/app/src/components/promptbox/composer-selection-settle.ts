@@ -1,5 +1,9 @@
-import { useEffect, useRef, useState } from "react";
-import type { PermissionMode, ReasoningLevel, ServiceTier } from "@omnyo/domain";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type {
+  PermissionMode,
+  ReasoningLevel,
+  ServiceTier,
+} from "@omnyo/domain";
 import type { ExperimentalComposerSelection } from "@omnyo/plugin-sdk";
 import type { ModelPickerSelection } from "@/components/pickers/model-picker-selection";
 
@@ -13,9 +17,31 @@ export function setComposerSelectionSettleTimeoutForTest(
   settleTimeoutOverrideMs = timeoutMs;
 }
 
-export function resolveComposerSelectionDeadline(now = Date.now()): number {
-  return (
-    now + (settleTimeoutOverrideMs ?? COMPOSER_SELECTION_SETTLE_TIMEOUT_MS)
+export function useQueuedComposerSelection(
+  apply: (
+    selection: ExperimentalComposerSelection,
+    deadline: number,
+  ) => Promise<ExperimentalComposerSelection>,
+): (
+  selection: ExperimentalComposerSelection,
+) => Promise<ExperimentalComposerSelection> {
+  const pending = useRef<Promise<unknown>>(Promise.resolve());
+
+  return useCallback(
+    (selection) => {
+      const run = () =>
+        apply(
+          selection,
+          Date.now() +
+            (settleTimeoutOverrideMs ?? COMPOSER_SELECTION_SETTLE_TIMEOUT_MS),
+        );
+
+      const result = pending.current.then(run, run);
+      pending.current = result;
+
+      return result;
+    },
+    [apply],
   );
 }
 
@@ -150,6 +176,112 @@ export interface ExecutionSelectionState {
   serviceTier: ServiceTier | undefined;
   supportsServiceTier: boolean;
   permissionMode: PermissionMode;
+}
+
+export interface CommittedExecutionSelectionState
+  extends CommittedComposerState, ExecutionSelectionState {
+  providerIds: readonly string[];
+  changeProvider(providerId: string): void;
+  changeModel(model: string): void;
+  changeReasoning(level: ReasoningLevel): void;
+  changeServiceTier(tier: ServiceTier | undefined): void;
+  changeExecution(selection: ModelPickerSelection): void;
+  changePermissionMode(mode: PermissionMode): void;
+}
+
+export async function applyComposerExecutionSelection<
+  State extends CommittedExecutionSelectionState,
+>(
+  controller: CommittedComposerStateController<State>,
+  state: State,
+  deadline: number,
+  selection: ExperimentalComposerSelection,
+  policy: {
+    locks?: { provider?: boolean; execution?: boolean };
+    changeModel?(state: State, model: string): void;
+  } = {},
+): Promise<State> {
+  const locks = policy.locks;
+
+  const settle = async (requireSettled: boolean) => {
+    state = await waitForSettledComposerState(
+      controller,
+      deadline,
+      requireSettled,
+    );
+  };
+
+  const ensureSettled = async () => {
+    if (state.isSettled) return;
+    state = await waitUntilComposerStateSettled(controller, deadline);
+  };
+
+  if (selection.providerId !== undefined) await ensureSettled();
+
+  const tuple = readExecutionTuple(selection, state.providerIds);
+
+  if (
+    tuple !== null &&
+    !locks?.execution &&
+    (!locks?.provider || tuple.providerId === state.selectedProviderId)
+  ) {
+    state.changeExecution(tuple);
+    await settle(true);
+  } else {
+    if (
+      selection.providerId !== undefined &&
+      !locks?.provider &&
+      selection.providerId !== state.selectedProviderId &&
+      state.providerIds.includes(selection.providerId)
+    ) {
+      state.changeProvider(selection.providerId);
+      await settle(true);
+    }
+
+    const providerMatches =
+      selection.providerId === undefined ||
+      selection.providerId === state.selectedProviderId;
+
+    if (providerMatches && !locks?.execution && selection.model !== undefined) {
+      await ensureSettled();
+
+      if (policy.changeModel === undefined) {
+        state.changeModel(selection.model);
+      } else {
+        policy.changeModel(state, selection.model);
+      }
+
+      await settle(false);
+    }
+
+    if (
+      providerMatches &&
+      !locks?.execution &&
+      selection.reasoningLevel !== undefined
+    ) {
+      await ensureSettled();
+      state.changeReasoning(selection.reasoningLevel);
+      await settle(false);
+    }
+
+    if (
+      !locks?.execution &&
+      selection.serviceTier !== undefined &&
+      state.supportsServiceTier
+    ) {
+      state.changeServiceTier(selection.serviceTier);
+      await settle(false);
+    }
+  }
+
+  if (!locks?.execution && selection.permissionMode !== undefined) {
+    state.changePermissionMode(selection.permissionMode);
+    await settle(false);
+  }
+
+  await settle(true);
+
+  return state;
 }
 
 export function readExecutionSelection(

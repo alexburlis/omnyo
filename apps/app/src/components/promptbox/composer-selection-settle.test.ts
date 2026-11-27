@@ -1,14 +1,65 @@
+// @vitest-environment jsdom
+import { renderHook } from "@testing-library/react";
+import type { ExperimentalComposerSelection } from "@omnyo/plugin-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createCommittedStateObserver,
   readExecutionSelection,
   readExecutionTuple,
+  useQueuedComposerSelection,
 } from "./composer-selection-settle";
 
 interface State {
   version: number;
   isSettled: boolean;
 }
+
+describe("useQueuedComposerSelection", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("retains the queue across a rerender and starts the next deadline after rejection", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1000);
+    let rejectFirst: (error: Error) => void = () => {};
+
+    const firstResult = new Promise<ExperimentalComposerSelection>(
+      (_, reject) => {
+        rejectFirst = reject;
+      },
+    );
+
+    type ApplySelection = Parameters<typeof useQueuedComposerSelection>[0];
+
+    const firstApply = vi.fn<ApplySelection>(() => firstResult);
+    const secondApply = vi.fn<ApplySelection>(async (selection) => selection);
+
+    const { result, rerender } = renderHook(
+      ({ apply }) => useQueuedComposerSelection(apply),
+      {
+        initialProps: { apply: firstApply },
+      },
+    );
+
+    const first = result.current({ model: "first" });
+    const rejection = expect(first).rejects.toThrow("selection refused");
+
+    await Promise.resolve();
+    expect(firstApply).toHaveBeenCalledWith({ model: "first" }, 16000);
+
+    vi.setSystemTime(2000);
+    rerender({ apply: secondApply });
+    const second = result.current({ model: "second" });
+
+    await Promise.resolve();
+    expect(secondApply).not.toHaveBeenCalled();
+
+    vi.setSystemTime(3000);
+    rejectFirst(new Error("selection refused"));
+    await rejection;
+    await expect(second).resolves.toEqual({ model: "second" });
+    expect(secondApply).toHaveBeenCalledWith({ model: "second" }, 18000);
+  });
+});
 
 describe("createCommittedStateObserver", () => {
   afterEach(() => {
