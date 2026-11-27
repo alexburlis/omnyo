@@ -227,121 +227,95 @@ const fixedPanelTabsStateSchema = z
   })
   .passthrough();
 
-interface ThreadInfoFixedPanelTab {
-  id: string;
-  kind: "thread-info";
-}
-
-interface GitDiffFixedPanelTab {
-  id: string;
-  kind: "git-diff";
-}
-
-export interface PluginPageFixedPanelTab {
-  fixedTabId: string;
-  id: string;
-  kind: "plugin-page-fixed";
-  pageId: string;
-  pluginId: string;
-}
-
-export type FixedPanelViewTab =
-  | ThreadInfoFixedPanelTab
-  | GitDiffFixedPanelTab
-  | PluginPageFixedPanelTab;
-
-export interface PluginPanelFixedPanelTab {
-  actionId: string;
-  fileOpenerOwner?: ThreadTabFileOpenerOwner;
-  id: string;
-  kind: "plugin-panel";
-  paramsJson: string | null;
-  pluginId: string;
-  title: string;
-}
-
-export interface WorkspaceFilePreviewFixedPanelTab {
-  environmentId: string | null;
-  id: string;
-  kind: "workspace-file-preview";
-  lineRange: FilePreviewLineRange | null;
-  path: string;
-  projectId: string | null;
-  source: EnvironmentFilePreviewSource;
-  statusLabel: WorkspaceFilePreviewStatusLabel | null;
-}
-
-export interface HostFilePreviewFixedPanelTab {
-  environmentId: string | null;
-  hostId: string | null;
-  id: string;
-  kind: "host-file-preview";
-  lineRange: FilePreviewLineRange | null;
-  path: string;
-  threadId: string | null;
-}
-
-export interface ThreadStorageFilePreviewFixedPanelTab {
-  environmentId: string | null;
-  id: string;
-  isPinned: boolean;
-  kind: "thread-storage-file-preview";
-  lineRange: FilePreviewLineRange | null;
-  path: string;
-  threadId: string | null;
-}
-
-export interface AttachmentFilePreviewFixedPanelTab {
-  id: string;
-  kind: "attachment-file-preview";
-  name: string;
-  path: string;
-  projectId: string;
-}
-
-export interface BrowserFixedPanelTab {
-  desktopTarget?: OmnyoDesktopBrowserTarget;
-  environmentId: string | null;
-  id: string;
-  kind: "browser";
-  title: string | null;
-  url: string;
-}
-
-export interface NewTabFixedPanelTab {
-  id: string;
-  kind: "new-tab";
-}
-
-export interface TerminalFixedPanelTab {
-  id: string;
-  kind: "terminal";
-  terminalId: string;
-  target?: TerminalCreateTarget;
-}
-
 export type SecondaryFixedPanelTab =
-  | ThreadInfoFixedPanelTab
-  | GitDiffFixedPanelTab
-  | PluginPageFixedPanelTab
-  | PluginPanelFixedPanelTab
-  | WorkspaceFilePreviewFixedPanelTab
-  | HostFilePreviewFixedPanelTab
-  | ThreadStorageFilePreviewFixedPanelTab
-  | AttachmentFilePreviewFixedPanelTab
+  | Exclude<
+      z.output<typeof secondaryFixedPanelTabSchema>,
+      { kind: "browser" | "plugin-panel" | "terminal" }
+    >
   | BrowserFixedPanelTab
-  | NewTabFixedPanelTab
+  | PluginPanelFixedPanelTab
   | TerminalFixedPanelTab;
 
-export type SecondaryFileFixedPanelTab =
-  | WorkspaceFilePreviewFixedPanelTab
-  | HostFilePreviewFixedPanelTab
-  | ThreadStorageFilePreviewFixedPanelTab
-  | AttachmentFilePreviewFixedPanelTab
-  | BrowserFixedPanelTab
-  | NewTabFixedPanelTab
-  | TerminalFixedPanelTab
-  | PluginPanelFixedPanelTab;
+type ThreadInfoFixedPanelTab = Extract<
+  SecondaryFixedPanelTab,
+  { kind: "thread-info" }
+>;
+
+type GitDiffFixedPanelTab = Extract<
+  SecondaryFixedPanelTab,
+  { kind: "git-diff" }
+>;
+
+export type PluginPageFixedPanelTab = Extract<
+  SecondaryFixedPanelTab,
+  { kind: "plugin-page-fixed" }
+>;
+
+export type FixedPanelViewTab = Extract<
+  SecondaryFixedPanelTab,
+  { kind: "thread-info" | "git-diff" | "plugin-page-fixed" }
+>;
+
+export type PluginPanelFixedPanelTab = Omit<
+  z.output<typeof pluginPanelFixedPanelTabSchema>,
+  "fileOpenerOwner"
+> & {
+  fileOpenerOwner?: ThreadTabFileOpenerOwner;
+};
+
+export type WorkspaceFilePreviewFixedPanelTab = Extract<
+  SecondaryFixedPanelTab,
+  { kind: "workspace-file-preview" }
+>;
+
+export type HostFilePreviewFixedPanelTab = Extract<
+  SecondaryFixedPanelTab,
+  { kind: "host-file-preview" }
+>;
+
+export type ThreadStorageFilePreviewFixedPanelTab = Extract<
+  SecondaryFixedPanelTab,
+  { kind: "thread-storage-file-preview" }
+>;
+
+export type AttachmentFilePreviewFixedPanelTab = Extract<
+  SecondaryFixedPanelTab,
+  { kind: "attachment-file-preview" }
+>;
+
+export type BrowserFixedPanelTab = Omit<
+  z.output<typeof browserFixedPanelTabSchema>,
+  "desktopTarget"
+> & {
+  desktopTarget?: OmnyoDesktopBrowserTarget;
+};
+
+export type NewTabFixedPanelTab = Extract<
+  SecondaryFixedPanelTab,
+  { kind: "new-tab" }
+>;
+
+export type TerminalFixedPanelTab = Omit<
+  z.output<typeof terminalFixedPanelTabSchema>,
+  "target"
+> & {
+  target?: TerminalCreateTarget;
+};
+
+export type SecondaryFileFixedPanelTab = Extract<
+  SecondaryFixedPanelTab,
+  {
+    kind:
+      | "workspace-file-preview"
+      | "host-file-preview"
+      | "thread-storage-file-preview"
+      | "attachment-file-preview"
+      | "browser"
+      | "new-tab"
+      | "terminal"
+      | "plugin-panel";
+  }
+>;
 
 export type FixedPanelTab = SecondaryFixedPanelTab;
 
