@@ -111,3 +111,6 @@ scripts/idle-update-last-run.json
 .worker-fixture-*/
 
 /apps/desktop/dist-public-beta/
+
+# Local runtime install receipts written by standalone plugin installers
+/standalone-plugins/*/docs/evidence/
