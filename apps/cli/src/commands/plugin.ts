@@ -156,11 +156,11 @@ async function searchCatalog(
     .results;
 }
 
-const pluginSettingDescriptorSchema = z.object({
+const pluginSettingDescriptorSchema = z.looseObject({
   type: z.enum(["string", "number", "boolean", "select", "project"]),
   label: z.string(),
   description: z.string().optional(),
-  experimental_section: z.object({ title: z.string() }).optional(),
+  experimental_section: z.looseObject({ title: z.string() }).optional(),
   secret: z.literal(true).optional(),
   default: z.union([z.string(), z.number().finite(), z.boolean()]).optional(),
   options: z.array(z.string()).optional(),

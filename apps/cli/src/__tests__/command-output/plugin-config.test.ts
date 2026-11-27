@@ -115,6 +115,41 @@ describe("omnyo plugin config", () => {
     );
   });
 
+  it("keeps descriptor metadata in --json output", async () => {
+    const schema = {
+      notes: {
+        type: "string",
+        label: "Notes",
+        experimental_multiline: true,
+        experimental_placeholder: "Write notes",
+        experimental_section: {
+          title: "General",
+          description: "Shared options",
+        },
+      },
+      mode: {
+        type: "select",
+        label: "Mode",
+        options: ["fast", "slow"],
+        experimental_optionLabels: { fast: "Fast", slow: "Slow" },
+      },
+    };
+
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ ok: true, schema, values: { mode: "fast" } }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const stdout = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await runCommand(["plugin", "config", "demo", "--json"], register);
+
+    expect(JSON.parse(String(stdout.mock.calls[0]?.[0])).schema).toEqual(
+      schema,
+    );
+  });
+
   it("rejects a non-finite number before sending an update", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(settingsResponse(3));
 
