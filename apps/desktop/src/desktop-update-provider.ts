@@ -49,7 +49,7 @@ function resolveBuiltDesktopReleaseChannel(
   }
 
   throw new Error(
-    `Built desktop release channel must be latest or nightly, got ${String(rawChannel)}.`,
+    `Built desktop release channel must be latest, nightly or public-beta, got ${String(rawChannel)}.`,
   );
 }
 
