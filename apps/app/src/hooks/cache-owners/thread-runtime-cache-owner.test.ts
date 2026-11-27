@@ -15,7 +15,10 @@ import {
   makeProjectWithThreadsResponse,
   makeSidebarBootstrapResponse,
 } from "@/test/fixtures/projects";
-import { makeThreadTimelineResponse as makeTimelineResponse } from "@/test/fixtures/thread-responses";
+import {
+  makeThreadResponse,
+  makeThreadTimelineResponse as makeTimelineResponse,
+} from "@/test/fixtures/thread-responses";
 import { conversationRow, turnRow } from "@/test/fixtures/thread-timeline-rows";
 import { displayedTimelineRows } from "@/test/displayed-timeline-rows";
 import { mergePendingComposerQueuedMessages } from "./pending-composer-cache-owner";
@@ -1101,6 +1104,57 @@ describe("thread runtime cache owner", () => {
       queryClient.getQueryData(threadQueuedMessagesQueryKey("thread-1")),
     ).toEqual([]);
   });
+
+  it.each([
+    { sendNow: false, kind: "queued-message" },
+    { sendNow: true, kind: "accepted-turn" },
+  ])(
+    "predicts the server pausing an owner send behind a held automatic retry (sendNow $sendNow)",
+    async ({ sendNow, kind }) => {
+      const queryClient = new QueryClient({
+        defaultOptions: { queries: { gcTime: Infinity, retry: false } },
+      });
+
+      queryClient.setQueryData(
+        threadQueryKey("thread-1"),
+        makeThreadResponse({ id: "thread-1", status: "error" }),
+      );
+      queryClient.setQueryData(threadQueuedMessagesQueryKey("thread-1"), [
+        makeQueuedMessage({
+          id: "qmsg-retry",
+          sendAt: Date.now() + 3_600_000,
+          waitingOn: { kind: "time" },
+          payload: {
+            kind: "retry",
+            retryOfTurnRequestId: "creq_failed",
+            attempt: 2,
+            reason: "Rate limited",
+          },
+        }),
+      ]);
+
+      const transaction = await beginSendThreadMessageTransaction({
+        queryClient,
+        request: {
+          id: "thread-1",
+          mode: "queue-if-active",
+          input: [{ type: "text", text: "Carry on", mentions: [] }],
+          ...(sendNow ? { sendNow: true } : {}),
+        },
+      });
+
+      expect(transaction.kind).toBe(kind);
+
+      if (kind === "queued-message")
+        expect(
+          queryClient
+            .getQueryData<ThreadQueuedMessage[]>(
+              threadQueuedMessagesQueryKey("thread-1"),
+            )
+            ?.at(-1),
+        ).toMatchObject({ waitingOn: { kind: "thread-busy" } });
+    },
+  );
 
   it("optimistically queues a scheduled send even when the cached thread is idle", async () => {
     const queryClient = new QueryClient({

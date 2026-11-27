@@ -937,6 +937,19 @@ function isMachineWaitingForExecution(host: Host): boolean {
   );
 }
 
+function hasCachedAutomaticRetry(
+  queryClient: QueryClient,
+  threadId: string,
+): boolean {
+  return (
+    queryClient
+      .getQueryData<ThreadQueuedMessageListResponse>(
+        threadQueuedMessagesQueryKey(threadId),
+      )
+      ?.some((message) => message.payload.kind === "retry") ?? false
+  );
+}
+
 function optimisticSendWait(
   queryClient: QueryClient,
   request: Pick<
@@ -967,6 +980,9 @@ function optimisticSendWait(
     return { kind: "time" };
 
   if (thread?.status === "stopping") return { kind: "stopping" };
+
+  if (!sendNow && resting && hasCachedAutomaticRetry(queryClient, request.id))
+    return { kind: "thread-busy" };
 
   const host = cachedThreadHost(queryClient, thread);
 
