@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   acpContentBlockSchema,
+  acpOptionalString,
   acpPermissionToolCallSchema,
   acpToolCallUpdateEventSchema,
 } from "@omnyo/provider-bridge-protocol/acp/tool-call-wire";
@@ -85,11 +86,6 @@ export const acpSessionNotificationParamsSchema = z
     update: acpSessionUpdateSchema,
   })
   .passthrough();
-
-const acpOptionalString = z
-  .union([z.string(), z.null()])
-  .transform((value) => value ?? undefined)
-  .optional();
 
 const acpConfigOptionSelectOptionSchema = z
   .object({

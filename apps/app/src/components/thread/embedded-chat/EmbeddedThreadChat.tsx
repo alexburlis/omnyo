@@ -313,6 +313,7 @@ function EmbeddedThreadChatWithComposer({
     modelLoadError,
     modelNotice,
     reasoningOptions,
+    isLoadingReasoning,
     permissionModeOptions,
     supportsPermissionModeSelection,
     supportsServiceTier,
@@ -1269,6 +1270,7 @@ function EmbeddedThreadChatWithComposer({
       reasoning: {
         value: reasoningLevel,
         options: reasoningOptions,
+        isLoading: isLoadingReasoning,
         onChange: setReasoningLevel,
       },
     }),
@@ -1290,6 +1292,7 @@ function EmbeddedThreadChatWithComposer({
       providerOptions,
       reasoningLevel,
       reasoningOptions,
+      isLoadingReasoning,
       selectedModel,
       selectedProviderId,
       serviceTier,

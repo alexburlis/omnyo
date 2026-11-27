@@ -4,6 +4,21 @@ import { cn } from "@omnyo/shared-ui/lib/utils";
 
 const PICKER_LOADING_ROW_WIDTHS = ["w-20", "w-28", "w-24", "w-32"] as const;
 
+export function ReasoningLoadingIndicator() {
+  return (
+    <span
+      role="status"
+      aria-label="Loading reasoning levels"
+      data-promptbox-hide-compact=""
+      className="inline-flex h-3 w-8 shrink-0"
+    >
+      <DelayedLoading>
+        <Skeleton className="size-full rounded-sm" />
+      </DelayedLoading>
+    </span>
+  );
+}
+
 interface PickerLoadingRowsProps {
   label: string;
   rowDataAttribute: `data-${string}`;

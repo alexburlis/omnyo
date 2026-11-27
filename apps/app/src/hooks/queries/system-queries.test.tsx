@@ -299,6 +299,55 @@ describe("useSystemProviders", () => {
 });
 
 describe("useSystemExecutionOptions", () => {
+  it("separates selected-model discovery from the base catalog and native profile queries", async () => {
+    vi.mocked(sdk.system.executionOptions).mockResolvedValue(
+      EXECUTION_OPTIONS_RESPONSE,
+    );
+    const { wrapper, queryClient } = createQueryClientTestHarness();
+    const profileId = "11111111-1111-4111-8111-111111111111";
+
+    const { result } = renderHook(
+      () =>
+        useSystemExecutionOptions({
+          hostId: "host-models",
+          providerId: "codex",
+          selectedModel: "acme/beta",
+        }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(sdk.system.executionOptions).toHaveBeenCalledWith(
+      expect.objectContaining({ selectedModel: "acme/beta" }),
+    );
+
+    const routing = {
+      environmentId: null,
+      hostId: "host-models",
+      providerId: "codex",
+    };
+
+    expect(
+      queryClient.getQueryData(systemExecutionOptionsQueryKey(routing)),
+    ).toBeUndefined();
+    expect(
+      queryClient.getQueryData(
+        systemExecutionOptionsQueryKey({
+          ...routing,
+          selectedModel: "acme/beta",
+        }),
+      ),
+    ).toEqual(EXECUTION_OPTIONS_RESPONSE);
+    expect(
+      systemExecutionOptionsQueryKey({
+        ...routing,
+        claudeProfileId: profileId,
+      }),
+    ).not.toEqual(
+      systemExecutionOptionsQueryKey({ ...routing, selectedModel: profileId }),
+    );
+  });
+
   it("keeps profile model requests separate from unprofiled cached models", async () => {
     const { queryClient, wrapper } = createQueryClientTestHarness();
     const provider = makeProviderInfo({ id: "claude-code" });

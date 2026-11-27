@@ -217,6 +217,7 @@ export type SystemProvidersQuery = z.infer<typeof systemProvidersQuerySchema>;
 
 export const systemExecutionOptionsQuerySchema = z
   .object({
+    selectedModel: z.string().min(1),
     ...systemProviderHostQueryFields,
     providerId: z.string().min(1),
     claudeProfileId: claudeProfileIdSchema,

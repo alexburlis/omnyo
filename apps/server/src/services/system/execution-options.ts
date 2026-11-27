@@ -64,7 +64,8 @@ interface ResolveSystemProviderModelsArgs {
 type ModelListResult = Pick<
   SystemExecutionOptionsResponse,
   "modelLoadError" | "models" | "selectedOnlyModels"
->;
+> &
+  Partial<Pick<SystemExecutionOptionsResponse, "modelNotice">>;
 
 function unavailableProviderModelResult(providerId: string): ModelListResult {
   return {
@@ -491,7 +492,10 @@ export function resolveSystemExecutionOptions(
   deps: LoggedWorkSessionDeps,
   query: SystemExecutionOptionsRequest,
 ): Promise<SystemExecutionOptionsResponse> {
-  return resolveExecutionOptions(deps, query, { kind: "picker" });
+  return resolveExecutionOptions(deps, query, {
+    kind: "picker",
+    selectedModel: query.selectedModel,
+  });
 }
 
 export function resolveSystemExecutionOptionsForValidation(
@@ -652,7 +656,7 @@ async function resolveExecutionOptions(
     models,
     selectedOnlyModels,
     modelLoadError: modelResult.modelLoadError,
-    modelNotice,
+    modelNotice: modelResult.modelNotice ?? modelNotice,
   };
 }
 
@@ -731,6 +735,16 @@ async function loadSystemProviderModels(
       models: result.models,
       selectedOnlyModels: result.selectedOnlyModels,
       modelLoadError: null,
+      ...(result.discoveryFailure === undefined
+        ? {}
+        : {
+            modelNotice: {
+              providerId: args.provider.id,
+              message: `Could not load reasoning options for ${result.discoveryFailure.model}`,
+              detail: result.discoveryFailure.detail,
+              until: null,
+            },
+          }),
     };
   }
 

@@ -209,6 +209,9 @@ export function createBridgeProtocolAdapter(
             method: BRIDGE_REQUEST_METHODS.modelList,
             params: {
               ...cwdAndStaticProviderOptions(command.cwd),
+              ...(command.selectedModel === undefined
+                ? {}
+                : { selectedModel: command.selectedModel }),
               ...(command.envVars !== undefined
                 ? { envVars: command.envVars }
                 : {}),

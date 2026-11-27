@@ -26,6 +26,19 @@ function launchSpecFor(spec: AcpLaunchSpec): AcpLaunchSpec {
 }
 
 describe("buildAcpModelListParams", () => {
+  it("preserves a selected model for native discovery without adding model sweep options", () => {
+    expect(
+      buildAcpModelListParams(null, {
+        parameterizedModelPicker: false,
+        selectedModel: "acme/beta",
+      }),
+    ).toEqual({
+      primaryModels: [],
+      parameterizedModelPicker: false,
+      selectedModel: "acme/beta",
+    });
+  });
+
   it("keeps a custom CLI catalog when model-picker options are absent", () => {
     const params = buildAcpModelListParams(
       launchSpecFor({
@@ -42,7 +55,6 @@ describe("buildAcpModelListParams", () => {
       }),
       {
         parameterizedModelPicker: false,
-        reasoningProbePriorityModelIds: [],
       },
     );
 
@@ -60,7 +72,6 @@ describe("buildAcpModelListParams", () => {
         envVars: { CUSTOM_AGENT_TOKEN: "token" },
       },
       primaryModels: ["model-a"],
-      reasoningProbePriorityModelIds: [],
       parameterizedModelPicker: false,
     });
   });
@@ -84,14 +95,12 @@ describe("buildAcpModelListParams", () => {
         }),
         {
           parameterizedModelPicker: false,
-          reasoningProbePriorityModelIds: [],
         },
       ),
     ).toEqual({
       agent: { command: "custom-agent", args: ["serve"] },
       optionsAgent: { command: "custom-agent", args: ["serve"] },
       primaryModels: [],
-      reasoningProbePriorityModelIds: [],
       parameterizedModelPicker: false,
       reasoningCli,
     });
@@ -116,7 +125,6 @@ describe("buildAcpModelListParams", () => {
         }),
         {
           parameterizedModelPicker: false,
-          reasoningProbePriorityModelIds: [],
         },
       );
 
@@ -124,7 +132,6 @@ describe("buildAcpModelListParams", () => {
         agent: { command: "custom-agent", args: ["serve"] },
         optionsAgent: { command: "custom-agent", args: ["serve"] },
         primaryModels: [],
-        reasoningProbePriorityModelIds: [],
         parameterizedModelPicker: false,
       });
       expect(params).not.toHaveProperty("listCommand");
@@ -142,7 +149,6 @@ describe("buildAcpModelListParams", () => {
         {
           parameterizedModelPicker: true,
           primaryModels: ["default", "composer-2.5", "grok-4.6"],
-          reasoningProbePriorityModelIds: ["grok-4.6", "grok-4.5"],
         },
       ),
     ).toEqual({
@@ -150,7 +156,6 @@ describe("buildAcpModelListParams", () => {
       optionsAgent: { command: "cursor-agent", args: ["acp"] },
       parameterizedModelPicker: true,
       primaryModels: ["default", "composer-2.5", "grok-4.6"],
-      reasoningProbePriorityModelIds: ["grok-4.6", "grok-4.5"],
     });
   });
 });

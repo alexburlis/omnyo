@@ -377,19 +377,22 @@ describe("acp configOptions model catalog", () => {
     const reasoningByModel = new Map([
       [
         "opencode/deepseek-v4-flash-free",
-        buildAcpNativeReasoningSupport({
-          id: "effort",
-          category: "thought_level",
-          type: "select",
-          currentValue: "high",
-          options: [
-            { value: "none" },
-            { value: "low" },
-            { value: "medium" },
-            { value: "high" },
-            { value: "xhigh" },
-          ],
-        }),
+        {
+          ...buildAcpNativeReasoningSupport({
+            id: "effort",
+            category: "thought_level",
+            type: "select",
+            currentValue: "high",
+            options: [
+              { value: "none" },
+              { value: "low" },
+              { value: "medium" },
+              { value: "high" },
+              { value: "xhigh" },
+            ],
+          }),
+          supportedServiceTiers: [],
+        },
       ],
     ]);
 
@@ -472,6 +475,7 @@ describe("acp configOptions model catalog", () => {
         options: [],
       }),
     ).toEqual({
+      reasoningDiscovery: "known",
       supportedReasoningEfforts: [],
       defaultReasoningEffort: "medium",
     });
@@ -492,6 +496,7 @@ describe("acp configOptions model catalog", () => {
     };
 
     expect(buildAcpNativeReasoningSupport(thoughtLevel)).toEqual({
+      reasoningDiscovery: "known",
       supportedReasoningEfforts: [
         {
           reasoningEffort: "fast",

@@ -53,7 +53,7 @@ export type AdapterCommand =
     }
   | ({ type: "model/list" } & Pick<
       z.infer<typeof modelListParamsSchema>,
-      "cwd" | "envVars"
+      "cwd" | "envVars" | "selectedModel"
     >)
   | { type: "provider/health"; cwd?: string }
   | { type: "provider/usage"; cwd?: string; envVars?: Record<string, string> }

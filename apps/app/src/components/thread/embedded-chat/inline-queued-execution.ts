@@ -118,6 +118,9 @@ export function inlineQueuedExecutionControls({
       },
       reasoning: {
         ...execution.reasoning,
+        isLoading:
+          execution.reasoning.isLoading &&
+          edit.model === execution.model.selected,
         options: modelOption?.reasoningOptions ?? execution.reasoning.options,
         value: edit.reasoningLevel,
         onChange: (reasoningLevel) => patch({ reasoningLevel }),

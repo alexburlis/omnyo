@@ -704,6 +704,7 @@ type SystemExecutionOptionsQueryKey = readonly [
   string | null,
   string | null,
   string | null,
+  (string | undefined)?,
   string?,
 ];
 
@@ -1433,6 +1434,7 @@ export function systemProviderStatesQueryKey(
 }
 
 interface SystemExecutionOptionsQueryKeyArgs {
+  selectedModel?: string;
   claudeProfileId?: string;
   environmentId: string | null;
   hostId: string | null;
@@ -1440,6 +1442,7 @@ interface SystemExecutionOptionsQueryKeyArgs {
 }
 
 export function systemExecutionOptionsQueryKey({
+  selectedModel,
   claudeProfileId,
   environmentId,
   hostId,
@@ -1452,7 +1455,11 @@ export function systemExecutionOptionsQueryKey({
     providerId,
   ] as const;
 
-  return claudeProfileId === undefined ? key : [...key, claudeProfileId];
+  return selectedModel === undefined
+    ? claudeProfileId === undefined
+      ? key
+      : [...key, claudeProfileId]
+    : [...key, claudeProfileId, selectedModel];
 }
 
 export function allSystemExecutionOptionsQueryKeyPrefix(): AllSystemExecutionOptionsQueryKeyPrefix {

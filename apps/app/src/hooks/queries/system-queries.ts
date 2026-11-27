@@ -63,6 +63,7 @@ import {
 } from "./query-policies";
 
 interface UseSystemExecutionOptionsArgs {
+  selectedModel?: string;
   claudeProfileId?: string;
   enabled?: boolean;
   environmentId?: string;
@@ -71,6 +72,7 @@ interface UseSystemExecutionOptionsArgs {
 }
 
 interface SystemExecutionOptionsQueryArgs {
+  selectedModel?: string;
   claudeProfileId?: string;
   environmentId: string | null;
   hostId: string | null;
@@ -353,6 +355,7 @@ export function useSystemProviderInfo({
 }
 
 async function requestOfferedProviderExecutionOptions({
+  selectedModel,
   claudeProfileId,
   environmentId,
   hostId,
@@ -369,6 +372,9 @@ async function requestOfferedProviderExecutionOptions({
       environmentId: environmentId ?? undefined,
       hostId: hostId ?? undefined,
       providerId: requestedProviderId ?? undefined,
+      ...(requestedProviderId === providerId && selectedModel !== undefined
+        ? { selectedModel }
+        : {}),
       ...(claudeProfileId === undefined ? {} : { claudeProfileId }),
       signal,
     });
@@ -392,6 +398,7 @@ async function requestOfferedProviderExecutionOptions({
 }
 
 export function systemExecutionOptionsQueryOptions({
+  selectedModel,
   claudeProfileId,
   environmentId,
   hostId,
@@ -400,6 +407,7 @@ export function systemExecutionOptionsQueryOptions({
 }: SystemExecutionOptionsQueryArgs) {
   return queryOptions<SystemExecutionOptionsResponse>({
     queryKey: systemExecutionOptionsQueryKey({
+      selectedModel,
       claudeProfileId,
       environmentId,
       hostId,
@@ -408,6 +416,7 @@ export function systemExecutionOptionsQueryOptions({
     queryFn: async ({ signal }) => {
       const { response, loadedProviderId } =
         await requestOfferedProviderExecutionOptions({
+          selectedModel,
           claudeProfileId,
           environmentId,
           hostId,
@@ -522,6 +531,7 @@ export function useSystemExecutionOptions(
 
   return useQuery({
     ...systemExecutionOptionsQueryOptions({
+      selectedModel: args.selectedModel,
       claudeProfileId,
       environmentId,
       hostId,

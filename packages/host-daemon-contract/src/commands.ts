@@ -1059,6 +1059,7 @@ const hostListBranchOptionsCommandSchema = z
   .strict();
 
 const providerListModelsCommandSchema = z.object({
+  selectedModel: z.string().min(1).optional(),
   type: z.literal("provider.list_models"),
   claudeProfileBinding: z
     .object({ profileId: claudeProfileIdSchema })

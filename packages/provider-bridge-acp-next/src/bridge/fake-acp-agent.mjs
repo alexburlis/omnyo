@@ -2,7 +2,12 @@
 
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import { appendFileSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 
 const failLoad = process.env.FAKE_ACP_FAIL_LOAD === "1";
 
@@ -45,6 +50,8 @@ const setConfigModelErrorValue =
   process.env.FAKE_ACP_SET_CONFIG_MODEL_ERROR_VALUE;
 
 const setConfigFastError = process.env.FAKE_ACP_SET_CONFIG_FAST_ERROR === "1";
+
+const modelConfigReply = process.env.FAKE_ACP_MODEL_CONFIG_REPLY;
 
 const emptyModelResult = process.env.FAKE_ACP_EMPTY_MODEL_RESULT === "1";
 
@@ -108,11 +115,24 @@ let stuckAfterCancel = false;
 
 let nextAgentRequestId = 1000;
 
-let selectedModel = "fake/default";
+let selectedModel = process.env.FAKE_ACP_INITIAL_MODEL ?? "fake/default";
 
-let selectedEffort = "none";
+let selectedEffort = process.env.FAKE_ACP_INITIAL_EFFORT ?? "none";
 
 let selectedFast = process.env.FAKE_ACP_INITIAL_FAST ?? "false";
+const settingsFile = process.env.FAKE_ACP_SETTINGS_FILE;
+if (settingsFile && existsSync(settingsFile)) {
+  ({ selectedModel, selectedEffort, selectedFast } = JSON.parse(
+    readFileSync(settingsFile, "utf8"),
+  ));
+}
+function saveSettings() {
+  if (settingsFile)
+    writeFileSync(
+      settingsFile,
+      JSON.stringify({ selectedModel, selectedEffort, selectedFast }),
+    );
+}
 
 let clientSupportsParameterizedModels = false;
 
@@ -165,6 +185,16 @@ if (process.env.FAKE_ACP_READY_FILE) {
 
 if (process.env.FAKE_ACP_LAUNCH_LOG) {
   appendFileSync(process.env.FAKE_ACP_LAUNCH_LOG, `launch ${process.pid}\n`);
+}
+
+let lostSessionError = null;
+if (
+  process.env.FAKE_ACP_LOST_SESSION_ERROR &&
+  process.env.FAKE_ACP_LOST_SESSION_FILE &&
+  !existsSync(process.env.FAKE_ACP_LOST_SESSION_FILE)
+) {
+  writeFileSync(process.env.FAKE_ACP_LOST_SESSION_FILE, "");
+  lostSessionError = JSON.parse(process.env.FAKE_ACP_LOST_SESSION_ERROR);
 }
 
 function send(message) {
@@ -341,7 +371,9 @@ function configOptions() {
       name: "Model",
       category: "model",
       type: "select",
-      currentValue: selectedModel,
+      ...(process.env.FAKE_ACP_MISSING_CURRENT_MODEL === "1"
+        ? {}
+        : { currentValue: selectedModel }),
       options: fakeModels,
     },
     effortOptionForModel(selectedModel),
@@ -494,6 +526,12 @@ async function handlePrompt(message) {
       },
     });
 
+    return;
+  }
+
+  if (lostSessionError !== null) {
+    activePromptId = null;
+    send({ jsonrpc: "2.0", id: message.id, error: lostSessionError });
     return;
   }
 
@@ -818,9 +856,11 @@ async function handleMessage(message) {
         clientSupportsParameterizedModels =
           message.params?.clientCapabilities?._meta
             ?.parameterizedModelPicker === true;
-        selectedModel = clientSupportsParameterizedModels
-          ? "default"
-          : "default[]";
+        if (!process.env.FAKE_ACP_INITIAL_MODEL && !settingsFile) {
+          selectedModel = clientSupportsParameterizedModels
+            ? "default"
+            : "default[]";
+        }
       }
 
       send({
@@ -1058,6 +1098,13 @@ async function handleMessage(message) {
     case "session/set_config_option": {
       const configId = message.params?.configId;
       const value = message.params?.value;
+      if (
+        lostSessionError !== null &&
+        process.env.FAKE_ACP_LOST_SESSION_ON_CONFIG === "1"
+      ) {
+        send({ jsonrpc: "2.0", id: message.id, error: lostSessionError });
+        return;
+      }
 
       if (configId === "model") {
         if (setConfigModelError || value === setConfigModelErrorValue) {
@@ -1088,17 +1135,74 @@ async function handleMessage(message) {
           return;
         }
 
-        selectedModel = value;
+        await new Promise((resolveDelay) =>
+          setTimeout(
+            resolveDelay,
+            Number(process.env.FAKE_ACP_MODEL_DELAY_MS ?? "0"),
+          ),
+        );
+        const previousConfig = configState();
+        const previousModel = selectedModel;
+        if (value !== "fake/strong" || modelConfigReply !== "stale") {
+          selectedModel = value;
+        }
+        if (process.env.FAKE_ACP_RESET_CONFIG_ON_MODEL === "1") {
+          selectedEffort = "low";
+          selectedFast = "false";
+        }
+        const result = emptyModelResult ? {} : configState();
+        saveSettings();
+        if (
+          value === "fake/gen-2" &&
+          modelConfigReply === "error-after-switch"
+        ) {
+          send({
+            jsonrpc: "2.0",
+            id: message.id,
+            error: {
+              code: -32603,
+              message: "model config probe failed after applying selection",
+            },
+          });
+          return;
+        }
+        if (value === "fake/strong") {
+          if (
+            modelConfigReply === "stale" ||
+            (modelConfigReply === "stale-once" && previousModel !== value)
+          ) {
+            send({ jsonrpc: "2.0", id: message.id, result: previousConfig });
+            return;
+          }
+          if (modelConfigReply === "missing-model") {
+            result.configOptions = result.configOptions?.filter(
+              (option) => option.category !== "model",
+            );
+          }
+          if (modelConfigReply === "missing-value") {
+            const modelOption = result.configOptions?.find(
+              (option) => option.category === "model",
+            );
+            if (modelOption) delete modelOption.currentValue;
+          }
+        }
         send({
           jsonrpc: "2.0",
           id: message.id,
-          result: emptyModelResult ? {} : configState(),
+          result,
         });
-
         return;
       }
 
       if (configId === "effort") {
+        if (process.env.FAKE_ACP_RESTORE_EFFORT_ERROR === "1") {
+          send({
+            jsonrpc: "2.0",
+            id: message.id,
+            error: { code: -32603, message: "effort restore failed" },
+          });
+          return;
+        }
         const efforts = cursorParameterizedModels
           ? ["low", "medium", "high", "xhigh"]
           : effortsByModel.get(selectedModel);
@@ -1118,6 +1222,7 @@ async function handleMessage(message) {
         }
 
         selectedEffort = value;
+        saveSettings();
         send({ jsonrpc: "2.0", id: message.id, result: configState() });
 
         return;
@@ -1145,6 +1250,7 @@ async function handleMessage(message) {
         }
 
         selectedFast = value;
+        saveSettings();
         send({ jsonrpc: "2.0", id: message.id, result: configState() });
 
         return;

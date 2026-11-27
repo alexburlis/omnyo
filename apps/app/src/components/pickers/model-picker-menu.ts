@@ -192,6 +192,7 @@ export function stepRowReasoningLevel(
 }
 
 export interface ModelPickerMatrixRow {
+  reasoningPending?: boolean;
   key: string;
   providerId: string;
   option: ModelPickerOption;

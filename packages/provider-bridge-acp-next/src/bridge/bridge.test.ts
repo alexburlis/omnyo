@@ -206,7 +206,7 @@ interface AgentLaunchArgs {
   modelListArgs?: string[];
   selectFlag?: string;
   primaryModels?: string[];
-  reasoningProbePriorityModelIds?: string[];
+  cwd?: string;
   modelPickerPrimaryModels?: string[];
   reasoningCli?: {
     flag: string;
@@ -238,6 +238,7 @@ function acpLaunchSpec(args: AgentLaunchArgs): Record<string, unknown> {
     displayName: "Fake ACP",
     command: agent.command,
     args: agent.args,
+    ...(args.cwd === undefined ? {} : { cwd: args.cwd }),
     env: args.envVars ?? {},
     ...(args.modelListArgs
       ? {
@@ -259,9 +260,6 @@ function launchProviderOptions(args: AgentLaunchArgs): Record<string, unknown> {
     ...(args.dialectId ? { acpDialect: args.dialectId } : {}),
     ...(args.parameterizedModelPicker === true
       ? { parameterizedModelPicker: true }
-      : {}),
-    ...(args.reasoningProbePriorityModelIds
-      ? { reasoningProbePriorityModelIds: args.reasoningProbePriorityModelIds }
       : {}),
     ...(args.modelPickerPrimaryModels
       ? { primaryModels: args.modelPickerPrimaryModels }
@@ -419,21 +417,16 @@ function contextWindowDeltasFor(
 }
 
 function sendModelList(
-  args: AgentLaunchArgs & { modelLines?: string } = {},
+  args: AgentLaunchArgs & { modelLines?: string; selectedModel?: string } = {},
 ): number {
-  const { modelLines, ...launch } = args;
+  const { modelLines, selectedModel, ...launch } = args;
 
   return sendRequest("model/list", {
+    ...(selectedModel === undefined ? {} : { selectedModel }),
     providerOptions: {
       ...(launch.dialectId ? { acpDialect: launch.dialectId } : {}),
       ...(launch.parameterizedModelPicker === true
         ? { parameterizedModelPicker: true }
-        : {}),
-      ...(launch.reasoningProbePriorityModelIds
-        ? {
-            reasoningProbePriorityModelIds:
-              launch.reasoningProbePriorityModelIds,
-          }
         : {}),
       ...(launch.modelPickerPrimaryModels
         ? { primaryModels: launch.modelPickerPrimaryModels }
@@ -787,79 +780,271 @@ describe("acp bridge", () => {
     ).toEqual(["low", "medium", "high"]);
   });
 
-  it("discovers ACP-native models and per-model reasoning from session configOptions", async () => {
-    const modelListId = sendModelList({
-      envVars: {
-        FAKE_ACP_MODEL_CONFIG: "1",
-        FAKE_ACP_THOUGHT_LEVEL_CONFIG: "1",
-      },
-    });
+  it("lists ACP-native models without switching through the model list", async () => {
+    const requestLog = join(workspaceDir, "list-only-requests.jsonl");
 
-    expect((await waitForResponse(modelListId)).result).toMatchObject({
+    const result = (
+      await waitForResponse(
+        sendModelList({
+          envVars: {
+            FAKE_ACP_MODEL_CONFIG: "1",
+            FAKE_ACP_THOUGHT_LEVEL_CONFIG: "1",
+            FAKE_ACP_REQUEST_LOG: requestLog,
+          },
+        }),
+      )
+    ).result;
+
+    expect(result).toMatchObject({
       models: [
         {
           id: "fake/default",
-          model: "fake/default",
-          displayName: "Fake Default",
-          isDefault: true,
-          defaultReasoningEffort: "medium",
-          supportedReasoningEfforts: [{ reasoningEffort: "medium" }],
+          reasoningDiscovery: "known",
+          supportedReasoningEfforts: [],
         },
         {
           id: "fake/strong",
-          model: "fake/strong",
-          displayName: "Fake Strong",
-          isDefault: false,
-          defaultReasoningEffort: "none",
-          supportedReasoningEfforts: [
-            { reasoningEffort: "none" },
-            { reasoningEffort: "low" },
-            { reasoningEffort: "medium" },
-            { reasoningEffort: "high" },
-            { reasoningEffort: "xhigh" },
-          ],
+          reasoningDiscovery: "unknown",
+          supportedReasoningEfforts: [],
         },
       ],
-      selectedOnlyModels: [],
+    });
+    expect(
+      loggedAcpRequests(requestLog).filter(
+        (request) => request.method === "session/set_config_option",
+      ),
+    ).toEqual([]);
+  });
+
+  it.each(["stale-once", "stale", "missing-model", "missing-value"])(
+    "confirms selected model identity and restores discovery settings: %s",
+    async (reply) => {
+      const requestLog = join(workspaceDir, "selected-requests.jsonl");
+
+      const result = (
+        await waitForResponse(
+          sendModelList({
+            selectedModel: "fake/strong",
+            envVars: {
+              FAKE_ACP_MODEL_CONFIG: "1",
+              FAKE_ACP_THOUGHT_LEVEL_CONFIG: "1",
+              FAKE_ACP_MODEL_CONFIG_REPLY: reply,
+              FAKE_ACP_REQUEST_LOG: requestLog,
+            },
+          }),
+        )
+      ).result;
+
+      const confirmed = reply === "stale-once";
+      expect(result).toMatchObject({
+        models: [
+          {
+            id: "fake/default",
+            reasoningDiscovery: "known",
+            supportedReasoningEfforts: [],
+          },
+          {
+            id: "fake/strong",
+            reasoningDiscovery: confirmed ? "known" : "unknown",
+            supportedReasoningEfforts: confirmed
+              ? [
+                  { reasoningEffort: "none" },
+                  { reasoningEffort: "low" },
+                  { reasoningEffort: "medium" },
+                  { reasoningEffort: "high" },
+                  { reasoningEffort: "xhigh" },
+                ]
+              : [],
+          },
+        ],
+      });
+      expect(
+        loggedAcpRequests(requestLog)
+          .filter((request) => request.method === "session/set_config_option")
+          .map((request) => request.params?.["value"]),
+      ).toEqual(["fake/strong", "fake/strong", "fake/default"]);
+    },
+  );
+
+  it.each(["success", "error-after-switch"])(
+    "restores the starting model and reasoning after a selected probe: %s",
+    async (reply) => {
+      const requestLog = join(workspaceDir, "restore-settings.jsonl");
+      const settingsFile = join(workspaceDir, "agent-settings.json");
+
+      const response = await waitForResponse(
+        sendModelList({
+          selectedModel: "fake/gen-2",
+          envVars: {
+            FAKE_ACP_MODEL_CONFIG: "1",
+            FAKE_ACP_THOUGHT_LEVEL_CONFIG: "1",
+            FAKE_ACP_MODEL_COUNT: "3",
+            FAKE_ACP_INITIAL_MODEL: "fake/strong",
+            FAKE_ACP_INITIAL_EFFORT: "xhigh",
+            FAKE_ACP_MODEL_CONFIG_REPLY: reply,
+            FAKE_ACP_REQUEST_LOG: requestLog,
+            FAKE_ACP_SETTINGS_FILE: settingsFile,
+          },
+        }),
+      );
+
+      expect(response.error).toBeUndefined();
+      expect(response.result).toMatchObject({
+        models: [
+          { id: "fake/default", reasoningDiscovery: "unknown" },
+          {
+            id: "fake/strong",
+            reasoningDiscovery: "known",
+            defaultReasoningEffort: "xhigh",
+          },
+          {
+            id: "fake/gen-2",
+            reasoningDiscovery: reply === "success" ? "known" : "unknown",
+          },
+        ],
+      });
+      expect(JSON.parse(readFileSync(settingsFile, "utf8"))).toMatchObject({
+        selectedModel: "fake/strong",
+        selectedEffort: "xhigh",
+      });
+      expect(
+        loggedAcpRequests(requestLog)
+          .filter((request) => request.method === "session/set_config_option")
+          .map((request) => request.params?.["value"]),
+      ).toEqual(["fake/gen-2", "fake/strong", "xhigh"]);
+    },
+  );
+
+  it("does not change settings when the starting model cannot be identified", async () => {
+    const requestLog = join(workspaceDir, "missing-start-model.jsonl");
+
+    const response = await waitForResponse(
+      sendModelList({
+        selectedModel: "fake/strong",
+        envVars: {
+          FAKE_ACP_MODEL_CONFIG: "1",
+          FAKE_ACP_MISSING_CURRENT_MODEL: "1",
+          FAKE_ACP_REQUEST_LOG: requestLog,
+        },
+      }),
+    );
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toMatchObject({
+      models: [
+        { id: "fake/default", reasoningDiscovery: "unknown" },
+        { id: "fake/strong", reasoningDiscovery: "unknown" },
+      ],
+    });
+    expect(
+      loggedAcpRequests(requestLog).filter(
+        (request) => request.method === "session/set_config_option",
+      ),
+    ).toEqual([]);
+  });
+
+  it.each(["rejected", "stale", "missing-model", "missing-value"])(
+    "reports a failed model restore: %s",
+    async (reply) => {
+      const response = await waitForResponse(
+        sendModelList({
+          selectedModel: "fake/gen-2",
+          envVars: {
+            FAKE_ACP_MODEL_CONFIG: "1",
+            FAKE_ACP_THOUGHT_LEVEL_CONFIG: "1",
+            FAKE_ACP_MODEL_COUNT: "3",
+            FAKE_ACP_INITIAL_MODEL: "fake/strong",
+            ...(reply === "rejected"
+              ? { FAKE_ACP_SET_CONFIG_MODEL_ERROR_VALUE: "fake/strong" }
+              : { FAKE_ACP_MODEL_CONFIG_REPLY: reply }),
+          },
+        }),
+      );
+
+      expect(response.result).toBeUndefined();
+      expect(response.error?.message).toMatch(
+        reply === "rejected"
+          ? /model config probe failed/
+          : /did not confirm restoring its model/,
+      );
+    },
+  );
+
+  it("attempts the remaining settings when one restored option is rejected", async () => {
+    const requestLog = join(workspaceDir, "partial-restore.jsonl");
+    const settingsFile = join(workspaceDir, "partial-restored-settings.json");
+
+    const response = await waitForResponse(
+      sendModelList({
+        selectedModel: "grok-4.5",
+        dialectId: "cursor",
+        parameterizedModelPicker: true,
+        envVars: {
+          FAKE_ACP_CURSOR_PARAMETERIZED_MODELS: "1",
+          FAKE_ACP_INITIAL_MODEL: "grok-4.6",
+          FAKE_ACP_INITIAL_EFFORT: "xhigh",
+          FAKE_ACP_INITIAL_FAST: "true",
+          FAKE_ACP_RESET_CONFIG_ON_MODEL: "1",
+          FAKE_ACP_RESTORE_EFFORT_ERROR: "1",
+          FAKE_ACP_REQUEST_LOG: requestLog,
+          FAKE_ACP_SETTINGS_FILE: settingsFile,
+        },
+      }),
+    );
+
+    expect(response.result).toBeUndefined();
+    expect(response.error?.message).toMatch(/could not restore its settings/);
+    expect(
+      loggedAcpRequests(requestLog)
+        .filter((request) => request.method === "session/set_config_option")
+        .map((request) => request.params?.["value"]),
+    ).toEqual(["grok-4.5", "grok-4.6", "xhigh", "true"]);
+    expect(JSON.parse(readFileSync(settingsFile, "utf8"))).toMatchObject({
+      selectedModel: "grok-4.6",
+      selectedFast: "true",
     });
   });
 
-  it("keeps probing reasoning for later models after one model's probe fails", async () => {
-    const modelListId = sendModelList({
-      envVars: {
-        FAKE_ACP_MODEL_CONFIG: "1",
-        FAKE_ACP_THOUGHT_LEVEL_CONFIG: "1",
-        FAKE_ACP_MODEL_COUNT: "3",
-        FAKE_ACP_SET_CONFIG_MODEL_ERROR_VALUE: "fake/strong",
-      },
+  it("serializes overlapping discovery sessions and restores their shared defaults", async () => {
+    const requestLog = join(workspaceDir, "serial-discovery.jsonl");
+    const settingsFile = join(workspaceDir, "shared-settings.json");
+
+    const envVars = {
+      FAKE_ACP_MODEL_CONFIG: "1",
+      FAKE_ACP_THOUGHT_LEVEL_CONFIG: "1",
+      FAKE_ACP_MODEL_COUNT: "4",
+      FAKE_ACP_INITIAL_MODEL: "fake/strong",
+      FAKE_ACP_INITIAL_EFFORT: "xhigh",
+      FAKE_ACP_REQUEST_LOG: requestLog,
+      FAKE_ACP_SETTINGS_FILE: settingsFile,
+      FAKE_ACP_MODEL_DELAY_MS: "50",
+    };
+
+    const first = sendModelList({ selectedModel: "fake/gen-2", envVars });
+
+    const second = sendModelList({
+      selectedModel: "fake/gen-3",
+      envVars,
+      cwd: dirname(workspaceDir),
     });
 
-    expect((await waitForResponse(modelListId)).result).toMatchObject({
-      models: [
-        {
-          id: "fake/default",
-          supportedReasoningEfforts: [{ reasoningEffort: "medium" }],
-        },
-        {
-          id: "fake/strong",
-          supportedReasoningEfforts: [
-            {
-              reasoningEffort: "medium",
-              description:
-                "Reasoning effort is managed by the connected ACP agent.",
-            },
-          ],
-        },
-        {
-          id: "fake/gen-2",
-          defaultReasoningEffort: "low",
-          supportedReasoningEfforts: [
-            { reasoningEffort: "low" },
-            { reasoningEffort: "medium" },
-            { reasoningEffort: "high" },
-          ],
-        },
-      ],
+    expect((await waitForResponse(first)).error).toBeUndefined();
+    expect((await waitForResponse(second)).error).toBeUndefined();
+    expect(
+      loggedAcpRequests(requestLog)
+        .filter((request) => request.method === "session/set_config_option")
+        .map((request) => request.params?.["value"]),
+    ).toEqual([
+      "fake/gen-2",
+      "fake/strong",
+      "xhigh",
+      "fake/gen-3",
+      "fake/strong",
+      "xhigh",
+    ]);
+    expect(JSON.parse(readFileSync(settingsFile, "utf8"))).toMatchObject({
+      selectedModel: "fake/strong",
+      selectedEffort: "xhigh",
     });
   });
 
@@ -869,7 +1054,7 @@ describe("acp bridge", () => {
     const modelListId = sendModelList({
       dialectId: "cursor",
       parameterizedModelPicker: true,
-      reasoningProbePriorityModelIds: ["grok-4.6", "grok-4.5"],
+      selectedModel: "grok-4.6",
       modelPickerPrimaryModels: ["default", "composer-2.5", "grok-4.6"],
       envVars: {
         FAKE_ACP_CURSOR_PARAMETERIZED_MODELS: "1",
@@ -905,7 +1090,7 @@ describe("acp bridge", () => {
         .filter((request) => request.method === "session/set_config_option")
         .map((request) => request.params?.["value"])
         .slice(0, 2),
-    ).toEqual(["grok-4.6", "grok-4.5"]);
+    ).toEqual(["grok-4.6", "default"]);
     expect(result.models.map((model) => model.id)).toEqual([
       "default",
       "composer-2.5",
@@ -1086,7 +1271,8 @@ describe("acp bridge", () => {
           displayName: "Fake Default",
           isDefault: true,
           defaultReasoningEffort: "medium",
-          supportedReasoningEfforts: [{ reasoningEffort: "medium" }],
+          reasoningDiscovery: "unknown",
+          supportedReasoningEfforts: [],
         },
         {
           id: "fake/strong",
@@ -1094,7 +1280,8 @@ describe("acp bridge", () => {
           displayName: "Fake Strong",
           isDefault: false,
           defaultReasoningEffort: "medium",
-          supportedReasoningEfforts: [{ reasoningEffort: "medium" }],
+          reasoningDiscovery: "unknown",
+          supportedReasoningEfforts: [],
         },
       ],
       selectedOnlyModels: [],
@@ -1161,8 +1348,9 @@ describe("acp bridge", () => {
     });
   });
 
-  it("probes per-model reasoning across large catalogs instead of falling back", async () => {
+  it("discovers only the requested reasoning across large catalogs", async () => {
     const modelListId = sendModelList({
+      selectedModel: "fake/gen-59",
       envVars: {
         FAKE_ACP_MODEL_CONFIG: "1",
         FAKE_ACP_THOUGHT_LEVEL_CONFIG: "1",
@@ -1988,7 +2176,7 @@ describe("acp bridge", () => {
     expect(agentMessageTexts()).toContain("selected-effort:max");
   });
 
-  it("keeps ACP-native models without thought_level at the single managed level", async () => {
+  it("keeps ACP-native models without thought_level free of reasoning choices", async () => {
     const modelListId = sendModelList({
       envVars: { FAKE_ACP_MODEL_CONFIG: "1" },
     });
@@ -2007,11 +2195,12 @@ describe("acp bridge", () => {
     expect(
       models.find((model) => model.id === "fake/strong")
         ?.supportedReasoningEfforts,
-    ).toEqual([{ reasoningEffort: "medium", description: expect.any(String) }]);
+    ).toEqual([]);
   });
 
   it("lists an ACP-native model's own thought levels when none of them are standard levels", async () => {
     const modelListId = sendModelList({
+      selectedModel: "fake/strong",
       envVars: {
         FAKE_ACP_MODEL_CONFIG: "1",
         FAKE_ACP_UNMAPPED_REASONING_CONFIG: "1",
@@ -3485,6 +3674,257 @@ describe("acp bridge", () => {
     expect(threadEventsOfType("turn/started")).toHaveLength(1);
     expect(threadEventsOfType("turn/completed")).toHaveLength(1);
     expect(notifications("session/replaced")).toHaveLength(0);
+  });
+
+  it.each([
+    { code: -32002, message: "Resource not found" },
+    { code: -32602, message: "Invalid params: session not found: abc" },
+    { code: -32602, message: "Session abc not found" },
+    {
+      code: -32603,
+      message: "Internal error",
+      data: { details: "Session abc not found" },
+    },
+    {
+      code: -32603,
+      message: "Internal error",
+      data: { details: "session lock unavailable for abc" },
+    },
+  ])("rebuilds a lost session on the next turn: $message", async (error) => {
+    const requestLog = join(workspaceDir, "lost-session-requests.jsonl");
+    const launchLog = join(workspaceDir, "lost-session-launches.txt");
+
+    const { providerThreadId } = await startThread({
+      envVars: {
+        FAKE_ACP_LOAD_SESSION: "1",
+        FAKE_ACP_REQUEST_LOG: requestLog,
+        FAKE_ACP_LAUNCH_LOG: launchLog,
+        FAKE_ACP_LOST_SESSION_ERROR: JSON.stringify(error),
+        FAKE_ACP_LOST_SESSION_FILE: join(workspaceDir, "lost-session-once"),
+      },
+    });
+
+    await waitForResponse(
+      sendTurnRequest("turn/start", providerThreadId, {
+        input: [{ type: "text", text: "first", mentions: [] }],
+      }),
+    );
+    expect(await waitForTurnCompleted()).toMatchObject({ status: "failed" });
+    expect(notifications("session/replaced")).toHaveLength(0);
+    await completeTurnWith(providerThreadId, "follow-up", executionOptions({}));
+    expect(threadEventsOfType("turn/completed")[1]).toMatchObject({
+      status: "completed",
+    });
+    expect(agentMessageTexts()).toContain("echo:follow-up");
+    expect(notifications("session/replaced")).toHaveLength(1);
+    expect(notifications("session/replaced")[0]?.params).toMatchObject({
+      contextLost: false,
+      reason:
+        "The ACP agent lost its session; the session was rebuilt before continuing.",
+    });
+    expect(readFileSync(launchLog, "utf8").trim().split("\n")).toHaveLength(2);
+    expect(
+      loggedAcpRequests(requestLog).filter(
+        (request) => request.method === "session/load",
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        params: expect.objectContaining({ sessionId: providerThreadId }),
+      }),
+    ]);
+    expect(
+      loggedAcpRequests(requestLog).filter(
+        (request) => request.method === "session/prompt",
+      ),
+    ).toHaveLength(2);
+  });
+
+  it.each([
+    { code: -32602, message: "Invalid params: model not found" },
+    {
+      code: -32603,
+      message: "Internal error",
+      data: { details: "credit balance exhausted" },
+    },
+    { code: -32000, message: "session quota exceeded" },
+  ])(
+    "does not rebuild an ACP session for unrelated errors: $message",
+    async (error) => {
+      const launchLog = join(workspaceDir, "unrelated-error-launches.txt");
+
+      const { providerThreadId } = await startThread({
+        envVars: {
+          FAKE_ACP_LOST_SESSION_ERROR: JSON.stringify(error),
+          FAKE_ACP_LOST_SESSION_FILE: join(
+            workspaceDir,
+            "unrelated-error-once",
+          ),
+          FAKE_ACP_LAUNCH_LOG: launchLog,
+        },
+      });
+
+      await completeTurnWith(providerThreadId, "first", executionOptions({}));
+      await completeTurnWith(providerThreadId, "second", executionOptions({}));
+      expect(
+        threadEventsOfType("turn/completed").map((event) => event.status),
+      ).toEqual(["failed", "failed"]);
+      expect(notifications("session/replaced")).toHaveLength(0);
+      expect(readFileSync(launchLog, "utf8").trim().split("\n")).toHaveLength(
+        1,
+      );
+    },
+  );
+
+  it.each(["resume", "fresh", "failed-load"])(
+    "recovers a lost session through %s",
+    async (restore) => {
+      const requestLog = join(workspaceDir, "recovery-route.jsonl");
+
+      const { providerThreadId } = await startThread({
+        envVars: {
+          FAKE_ACP_LOST_SESSION_ERROR: JSON.stringify({
+            code: -32602,
+            message: "Session not found: abc",
+          }),
+          FAKE_ACP_LOST_SESSION_FILE: join(workspaceDir, "route-lost-once"),
+          FAKE_ACP_REQUEST_LOG: requestLog,
+          ...(restore === "resume" ? { FAKE_ACP_RESUME_SESSION: "1" } : {}),
+          ...(restore === "failed-load" ? { FAKE_ACP_FAIL_LOAD: "1" } : {}),
+        },
+      });
+
+      await completeTurnWith(providerThreadId, "first", executionOptions({}));
+      await completeTurnWith(
+        providerThreadId,
+        "follow-up",
+        executionOptions({}),
+      );
+      expect(threadEventsOfType("turn/completed")[1]).toMatchObject({
+        status: "completed",
+      });
+      expect(agentMessageTexts()).toContain("echo:follow-up");
+      expect(notifications("session/replaced")[0]?.params).toMatchObject({
+        contextLost: restore !== "resume",
+      });
+
+      if (restore === "resume")
+        expect(
+          loggedAcpRequests(requestLog).filter(
+            (request) => request.method === "session/resume",
+          ),
+        ).toHaveLength(1);
+      else expect(threadEventsOfType("provider/warning")).not.toHaveLength(0);
+    },
+  );
+
+  it("rebuilds after a compaction request loses the session", async () => {
+    const { providerThreadId } = await startThread({
+      envVars: {
+        FAKE_ACP_LOAD_SESSION: "1",
+        FAKE_ACP_LOST_SESSION_ERROR: JSON.stringify({
+          code: -32002,
+          message: "Resource not found",
+        }),
+        FAKE_ACP_LOST_SESSION_FILE: join(workspaceDir, "compact-lost-once"),
+      },
+    });
+
+    await waitForResponse(
+      sendTurnRequest("turn/start", providerThreadId, {
+        input: createStandaloneBuiltinCompactCommandInput(),
+      }),
+    );
+    expect(await waitForTurnCompleted()).toMatchObject({ status: "failed" });
+    await completeTurnWith(providerThreadId, "follow-up", executionOptions({}));
+    expect(threadEventsOfType("turn/completed")[1]).toMatchObject({
+      status: "completed",
+    });
+    expect(notifications("session/replaced")).toHaveLength(1);
+  });
+
+  it("rebuilds when a native model change loses the session before prompting", async () => {
+    const requestLog = join(workspaceDir, "native-model-lost.jsonl");
+
+    const launch: AgentLaunchArgs = {
+      envVars: {
+        FAKE_ACP_LOAD_SESSION: "1",
+        FAKE_ACP_MODEL_CONFIG: "1",
+        FAKE_ACP_LOST_SESSION_ON_CONFIG: "1",
+        FAKE_ACP_LOST_SESSION_ERROR: JSON.stringify({
+          code: -32002,
+          message: "Resource not found",
+        }),
+        FAKE_ACP_LOST_SESSION_FILE: join(
+          workspaceDir,
+          "native-model-lost-once",
+        ),
+        FAKE_ACP_REQUEST_LOG: requestLog,
+      },
+    };
+
+    const { providerThreadId } = await startThread(launch);
+
+    const options = executionOptions({
+      model: "fake/strong",
+      providerOptions: launchProviderOptions(launch),
+    });
+
+    const response = await waitForResponse(
+      sendTurnRequest("turn/start", providerThreadId, {
+        input: [{ type: "text", text: "first", mentions: [] }],
+        options,
+      }),
+    );
+
+    expect(response.error?.message).toMatch(/Resource not found/);
+    expect(
+      loggedAcpRequests(requestLog).filter(
+        (request) => request.method === "session/prompt",
+      ),
+    ).toHaveLength(0);
+    await completeTurnWith(providerThreadId, "echo-selected-model", options);
+    expect(agentMessageTexts()).toContain("selected-model:fake/strong");
+    expect(notifications("session/replaced")).toHaveLength(1);
+  });
+
+  it("rebuilds when a session option request loses the session before prompting", async () => {
+    const requestLog = join(workspaceDir, "config-lost.jsonl");
+
+    const { providerThreadId } = await startThread({
+      envVars: {
+        FAKE_ACP_LOAD_SESSION: "1",
+        FAKE_ACP_SESSION_OPTIONS: "1",
+        FAKE_ACP_LOST_SESSION_ON_CONFIG: "1",
+        FAKE_ACP_LOST_SESSION_ERROR: JSON.stringify({
+          code: -32002,
+          message: "Resource not found",
+        }),
+        FAKE_ACP_LOST_SESSION_FILE: join(workspaceDir, "config-lost-once"),
+        FAKE_ACP_REQUEST_LOG: requestLog,
+      },
+    });
+
+    const response = await waitForResponse(
+      sendTurnRequest("turn/start", providerThreadId, {
+        input: [{ type: "text", text: "first", mentions: [] }],
+        options: {
+          ...executionOptions({}),
+          sessionOptions: { approach: "plan" },
+        },
+      }),
+    );
+
+    expect(response.error?.message).toMatch(/Resource not found/);
+    expect(
+      loggedAcpRequests(requestLog).filter(
+        (request) => request.method === "session/prompt",
+      ),
+    ).toHaveLength(0);
+    await completeTurnWith(providerThreadId, "follow-up", executionOptions({}));
+    expect(threadEventsOfType("turn/completed")[0]).toMatchObject({
+      status: "completed",
+    });
+    expect(notifications("session/replaced")).toHaveLength(1);
   });
 
   it.each(["0", "1"])(
