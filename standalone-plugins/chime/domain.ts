@@ -1,0 +1,332 @@
+export const EVENT_KINDS = [
+  "started",
+  "completed",
+  "question",
+  "approval",
+  "failed",
+  "cancelled",
+] as const;
+
+export type EventKind = (typeof EVENT_KINDS)[number];
+
+export const THEME_IDS = ["calm", "glass", "wood", "minimal", "velvet", "omnyo"] as const;
+
+export type ThemeId = (typeof THEME_IDS)[number];
+
+export const SOUND_IDS = [
+  "soft-rise",
+  "warm-resolve",
+  "clear-question",
+  "gentle-knock",
+  "low-warning",
+  "soft-stop",
+  "glass-rise",
+  "glass-resolve",
+  "glass-question",
+  "glass-knock",
+  "glass-warning",
+  "glass-stop",
+  "wood-rise",
+  "wood-resolve",
+  "wood-question",
+  "wood-knock",
+  "wood-warning",
+  "wood-stop",
+  "minimal-rise",
+  "minimal-resolve",
+  "minimal-question",
+  "minimal-knock",
+  "minimal-warning",
+  "minimal-stop",
+  "velvet-resolve",
+  "velvet-attention",
+  "velvet-warning",
+  "omnyo-resolve",
+  "omnyo-question",
+  "omnyo-approval",
+  "omnyo-warning",
+  "omnyo-stop",
+  "omnyo-resolve-b",
+  "omnyo-resolve-c",
+  "omnyo-resolve-d",
+  "omnyo-resolve-e",
+  "omnyo-approval-b",
+  "omnyo-warning-b",
+] as const;
+
+export type SoundId = (typeof SOUND_IDS)[number];
+export type DeliveryMode = "client" | "server";
+
+export interface ChimeConfig {
+  enabled: boolean;
+  volume: number;
+  deliveryMode: DeliveryMode;
+  muteVisibleThread: boolean;
+  mutedProjectIds: string[];
+  eventEnabled: Record<EventKind, boolean>;
+  eventSounds: Record<EventKind, SoundId>;
+}
+
+export interface ChimeNotification {
+  kind: EventKind;
+  threadId: string;
+  projectId: string;
+  interactionId?: string;
+  turnSeq?: number;
+  timestamp: number;
+}
+
+export interface QueuedChimeNotification {
+  seq: number;
+  notification: ChimeNotification;
+}
+
+export const DEFAULT_CONFIG: ChimeConfig = {
+  enabled: true,
+  volume: 0.5,
+  deliveryMode: "client",
+  muteVisibleThread: false,
+  mutedProjectIds: [],
+  eventEnabled: {
+    started: false,
+    completed: true,
+    question: true,
+    approval: true,
+    failed: true,
+    cancelled: false,
+  },
+  eventSounds: {
+    started: "soft-rise",
+    completed: "omnyo-resolve",
+    question: "omnyo-question",
+    approval: "omnyo-approval",
+    failed: "omnyo-warning",
+    cancelled: "omnyo-stop",
+  },
+};
+
+export const THEME_LABELS: Record<ThemeId, string> = {
+  calm: "Calm",
+  glass: "Glass",
+  wood: "Wood",
+  minimal: "Minimal",
+  velvet: "Velvet",
+  omnyo: "Omnyo",
+};
+
+export const THEME_DESCRIPTIONS: Record<ThemeId, string> = {
+  calm: "Soft, rounded chimes",
+  glass: "Bright, airy tones",
+  wood: "Muted, percussive knocks",
+  minimal: "Brief, unobtrusive cues",
+  velvet: "Smooth, velvety cues",
+  omnyo: "Omnyo's own cues, with alternatives",
+};
+
+export const THEME_SOUNDS: Record<ThemeId, Record<EventKind, SoundId>> = {
+  calm: {
+    started: "soft-rise",
+    completed: "warm-resolve",
+    question: "clear-question",
+    approval: "gentle-knock",
+    failed: "low-warning",
+    cancelled: "soft-stop",
+  },
+  glass: {
+    started: "glass-rise",
+    completed: "glass-resolve",
+    question: "glass-question",
+    approval: "glass-knock",
+    failed: "glass-warning",
+    cancelled: "glass-stop",
+  },
+  wood: {
+    started: "wood-rise",
+    completed: "wood-resolve",
+    question: "wood-question",
+    approval: "wood-knock",
+    failed: "wood-warning",
+    cancelled: "wood-stop",
+  },
+  minimal: {
+    started: "minimal-rise",
+    completed: "minimal-resolve",
+    question: "minimal-question",
+    approval: "minimal-knock",
+    failed: "minimal-warning",
+    cancelled: "minimal-stop",
+  },
+  velvet: {
+    started: "soft-rise",
+    completed: "velvet-resolve",
+    question: "velvet-attention",
+    approval: "velvet-attention",
+    failed: "velvet-warning",
+    cancelled: "soft-stop",
+  },
+  omnyo: DEFAULT_CONFIG.eventSounds,
+};
+
+const THEME_ALTERNATIVE_SOUNDS: Partial<Record<ThemeId, readonly SoundId[]>> = {
+  omnyo: [
+    "omnyo-resolve-b",
+    "omnyo-resolve-c",
+    "omnyo-resolve-d",
+    "omnyo-resolve-e",
+    "omnyo-approval-b",
+    "omnyo-warning-b",
+  ],
+};
+
+const EVENT_PRIORITY: Record<EventKind, number> = {
+  started: 0,
+  completed: 1,
+  cancelled: 2,
+  question: 3,
+  approval: 4,
+  failed: 5,
+};
+
+export const EVENT_LABELS: Record<EventKind, string> = {
+  started: "Turn started",
+  completed: "Turn completed",
+  question: "Waiting for an answer",
+  approval: "Approval required",
+  failed: "Turn failed",
+  cancelled: "Turn cancelled",
+};
+
+export const SOUND_LABELS: Record<SoundId, string> = {
+  "soft-rise": "Soft rise",
+  "warm-resolve": "Warm resolve",
+  "clear-question": "Clear question",
+  "gentle-knock": "Gentle knock",
+  "low-warning": "Low warning",
+  "soft-stop": "Soft stop",
+  "glass-rise": "Airy rise",
+  "glass-resolve": "Glass resolve",
+  "glass-question": "Bright question",
+  "glass-knock": "Crystal tap",
+  "glass-warning": "Glass warning",
+  "glass-stop": "Falling glass",
+  "wood-rise": "Wood rise",
+  "wood-resolve": "Wood resolve",
+  "wood-question": "Hollow question",
+  "wood-knock": "Gentle wood knock",
+  "wood-warning": "Low wood warning",
+  "wood-stop": "Wood stop",
+  "minimal-rise": "Single rise",
+  "minimal-resolve": "Double resolve",
+  "minimal-question": "Question pair",
+  "minimal-knock": "Approval tick",
+  "minimal-warning": "Warning pulse",
+  "minimal-stop": "Stop tick",
+  "velvet-resolve": "Velvet message",
+  "velvet-attention": "Velvet needs-you",
+  "velvet-warning": "Velvet error",
+  "omnyo-resolve": "Omnyo completed",
+  "omnyo-question": "Omnyo waiting for answer",
+  "omnyo-approval": "Omnyo approval",
+  "omnyo-warning": "Omnyo failed",
+  "omnyo-stop": "Omnyo cancelled",
+  "omnyo-resolve-b": "Omnyo completed B",
+  "omnyo-resolve-c": "Omnyo completed C",
+  "omnyo-resolve-d": "Omnyo completed D",
+  "omnyo-resolve-e": "Omnyo completed E",
+  "omnyo-approval-b": "Omnyo approval B",
+  "omnyo-warning-b": "Omnyo failed B",
+};
+
+export function themeSoundOptions(themeId: ThemeId): SoundId[] {
+  return SOUND_IDS.filter(
+    (soundId) =>
+      THEME_IDS.find(
+        (candidate) =>
+          Object.values(THEME_SOUNDS[candidate]).includes(soundId) ||
+          THEME_ALTERNATIVE_SOUNDS[candidate]?.includes(soundId),
+      ) === themeId,
+  );
+}
+
+export function matchingTheme(eventSounds: Record<EventKind, SoundId>): ThemeId | "custom" {
+  return (
+    THEME_IDS.find((themeId) =>
+      EVENT_KINDS.every((kind) => eventSounds[kind] === THEME_SOUNDS[themeId][kind]),
+    ) ?? "custom"
+  );
+}
+
+export function normalizeConfig(value: Partial<ChimeConfig> | null | undefined): ChimeConfig {
+  const volume =
+    typeof value?.volume === "number" && Number.isFinite(value.volume)
+      ? Math.min(1, Math.max(0, value.volume))
+      : DEFAULT_CONFIG.volume;
+  const deliveryMode = value?.deliveryMode === "server" ? "server" : "client";
+  const mutedProjectIds = Array.isArray(value?.mutedProjectIds)
+    ? [...new Set(value.mutedProjectIds.filter((id): id is string => typeof id === "string"))]
+    : [];
+
+  return {
+    enabled: value?.enabled ?? DEFAULT_CONFIG.enabled,
+    volume,
+    deliveryMode,
+    muteVisibleThread: value?.muteVisibleThread ?? DEFAULT_CONFIG.muteVisibleThread,
+    mutedProjectIds,
+    eventEnabled: Object.fromEntries(
+      EVENT_KINDS.map((kind) => [kind, value?.eventEnabled?.[kind] ?? DEFAULT_CONFIG.eventEnabled[kind]]),
+    ) as Record<EventKind, boolean>,
+    eventSounds: Object.fromEntries(
+      EVENT_KINDS.map((kind) => {
+        const candidate = value?.eventSounds?.[kind];
+        return [
+          kind,
+          SOUND_IDS.includes(candidate as SoundId) ? candidate : DEFAULT_CONFIG.eventSounds[kind],
+        ];
+      }),
+    ) as Record<EventKind, SoundId>,
+  };
+}
+
+function decodedPathSegments(pathname: string): string[] {
+  return pathname.split("/").map((segment) => {
+    try {
+      return decodeURIComponent(segment);
+    } catch {
+      return segment;
+    }
+  });
+}
+
+export function isVisibleThread(threadId: string, pathname: string): boolean {
+  return decodedPathSegments(pathname).includes(threadId);
+}
+
+export function visibleThreadId(pathname: string): string | null {
+  return decodedPathSegments(pathname).find((segment) => segment.startsWith("thr_")) ?? null;
+}
+
+export function chooseStormNotification(
+  notifications: ChimeNotification[],
+): ChimeNotification | null {
+  return notifications.reduce<ChimeNotification | null>((chosen, notification) => {
+    if (!chosen) return notification;
+    const priorityDelta = EVENT_PRIORITY[notification.kind] - EVENT_PRIORITY[chosen.kind];
+    return priorityDelta > 0 || (priorityDelta === 0 && notification.timestamp > chosen.timestamp)
+      ? notification
+      : chosen;
+  }, null);
+}
+
+export function shouldPlayNotification(
+  notification: ChimeNotification,
+  config: ChimeConfig,
+  now: number,
+  pathname: string,
+): boolean {
+  if (!config.enabled || config.deliveryMode !== "client") return false;
+  if (!config.eventEnabled[notification.kind]) return false;
+  if (now - notification.timestamp > 5_000) return false;
+  if (config.mutedProjectIds.includes(notification.projectId)) return false;
+  if (config.muteVisibleThread && isVisibleThread(notification.threadId, pathname)) return false;
+  return true;
+}

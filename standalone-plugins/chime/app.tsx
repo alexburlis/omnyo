@@ -1,0 +1,320 @@
+import { useEffect, useState, type ReactNode } from "react";
+import { definePluginApp, experimental_usePluginId, useRpc } from "@omnyo/plugin-sdk/app";
+import type { rpcContract } from "./server";
+import {
+  DEFAULT_CONFIG,
+  EVENT_KINDS,
+  EVENT_LABELS,
+  SOUND_LABELS,
+  THEME_DESCRIPTIONS,
+  THEME_IDS,
+  THEME_LABELS,
+  THEME_SOUNDS,
+  matchingTheme,
+  themeSoundOptions,
+  type ChimeConfig,
+  type EventKind,
+  type SoundId,
+} from "./domain";
+import { audioActivationStatus, playClientSound, startAudioClient } from "./client-audio";
+import { Button } from "./components/ui/button";
+import "./app.css";
+
+interface ProjectOption {
+  id: string;
+  name: string;
+}
+
+function SelectChevron() {
+  return (
+    <svg className="chime-select-chevron" aria-hidden="true" viewBox="0 0 16 16">
+      <path d="m4 6 4 4 4-4" />
+    </svg>
+  );
+}
+
+function SelectShell({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <span className={`chime-select${className ? ` ${className}` : ""}`}>
+      {children}
+      <SelectChevron />
+    </span>
+  );
+}
+
+function Settings() {
+  const pluginId = experimental_usePluginId();
+  const rpc = useRpc<typeof rpcContract>();
+  const [config, setConfig] = useState<ChimeConfig | null>(null);
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const [serverAvailable, setServerAvailable] = useState(false);
+  const [status, setStatus] = useState("Loading settings…");
+  const [audioStatus, setAudioStatus] = useState(audioActivationStatus());
+
+  useEffect(() => {
+    let live = true;
+    void rpc
+      .call("getConfig")
+      .then((result) => {
+        if (!live) return;
+        setConfig(result.config);
+        setProjects(result.projects);
+        setServerAvailable(result.serverPlaybackAvailable);
+        setStatus("");
+      })
+      .catch((error: unknown) => {
+        if (live) setStatus(error instanceof Error ? error.message : String(error));
+      });
+    return () => {
+      live = false;
+    };
+  }, [rpc]);
+
+  if (!config) return <p className="chime-muted">{status}</p>;
+
+  const patchEvent = (kind: EventKind, patch: { enabled?: boolean; sound?: SoundId }) => {
+    setConfig(
+      (current) =>
+        current && {
+          ...current,
+          eventEnabled: {
+            ...current.eventEnabled,
+            ...(patch.enabled === undefined ? {} : { [kind]: patch.enabled }),
+          },
+          eventSounds: {
+            ...current.eventSounds,
+            ...(patch.sound === undefined ? {} : { [kind]: patch.sound }),
+          },
+        },
+    );
+  };
+
+  const save = async () => {
+    setStatus("Saving…");
+    try {
+      const result = await rpc.call("updateConfig", config);
+      setConfig(result.config);
+      setStatus("Saved");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const preview = async (soundId: SoundId) => {
+    if (config.deliveryMode === "server") {
+      const result = await rpc.call("previewServer", { soundId });
+      setStatus(result.ok ? "Played on the server" : (result.error ?? "Playback failed"));
+      return;
+    }
+    try {
+      await playClientSound(pluginId, soundId, config.volume);
+      setAudioStatus("active");
+      setStatus("Client audio enabled");
+    } catch {
+      setAudioStatus("blocked");
+      setStatus(
+        "The browser blocked audio. Click this button again after interacting with the page.",
+      );
+    }
+  };
+
+  return (
+    <div className="chime-settings">
+      <section className="chime-card">
+        <div>
+          <h3>Playback</h3>
+          <p>Short, local sounds for AI turn and attention events.</p>
+        </div>
+        <label className="chime-row">
+          <span>Enable Chime</span>
+          <input
+            type="checkbox"
+            checked={config.enabled}
+            onChange={(event) => setConfig({ ...config, enabled: event.target.checked })}
+          />
+        </label>
+        <label className="chime-stack">
+          <span>Delivery</span>
+          <SelectShell>
+            <select
+              value={config.deliveryMode}
+              onChange={(event) =>
+                setConfig({
+                  ...config,
+                  deliveryMode: event.target.value as ChimeConfig["deliveryMode"],
+                })
+              }
+            >
+              <option value="client">This browser or Omnyo window</option>
+              <option value="server" disabled={!serverAvailable}>
+                Server audio {serverAvailable ? "(macOS)" : "(unavailable)"}
+              </option>
+            </select>
+          </SelectShell>
+        </label>
+        <label className="chime-stack">
+          <span>Master volume · {Math.round(config.volume * 100)}%</span>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.05"
+            value={config.volume}
+            onChange={(event) => setConfig({ ...config, volume: Number(event.target.value) })}
+          />
+        </label>
+        <label className="chime-row">
+          <span>Mute the visible thread</span>
+          <input
+            type="checkbox"
+            checked={config.muteVisibleThread}
+            onChange={(event) => setConfig({ ...config, muteVisibleThread: event.target.checked })}
+          />
+        </label>
+        <div className="chime-actions">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void preview(config.eventSounds.completed)}
+          >
+            Enable and test sounds
+          </Button>
+          <span className="chime-muted">Client audio: {audioStatus}</span>
+        </div>
+      </section>
+
+      <section className="chime-card">
+        <div>
+          <h3>Events</h3>
+          <p>Choose a coordinated theme, then fine-tune any event.</p>
+        </div>
+        <div className="chime-theme-row">
+          <label className="chime-stack">
+            <span>Sound theme</span>
+            <SelectShell>
+              <select
+                aria-label="Sound theme"
+                value={matchingTheme(config.eventSounds)}
+                onChange={(event) => {
+                  const themeId = event.target.value;
+                  if (themeId === "custom") return;
+                  setConfig({
+                    ...config,
+                    eventSounds: { ...THEME_SOUNDS[themeId as keyof typeof THEME_SOUNDS] },
+                  });
+                }}
+              >
+                {matchingTheme(config.eventSounds) === "custom" && (
+                  <option value="custom">Custom</option>
+                )}
+                {THEME_IDS.map((themeId) => (
+                  <option key={themeId} value={themeId}>
+                    {THEME_LABELS[themeId]} · {THEME_DESCRIPTIONS[themeId]}
+                  </option>
+                ))}
+              </select>
+            </SelectShell>
+          </label>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void preview(config.eventSounds.completed)}
+          >
+            Preview completion
+          </Button>
+        </div>
+        <div className="chime-events">
+          {EVENT_KINDS.map((kind) => (
+            <div className="chime-event" key={kind}>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={config.eventEnabled[kind]}
+                  onChange={(event) => patchEvent(kind, { enabled: event.target.checked })}
+                />
+                <span>{EVENT_LABELS[kind]}</span>
+              </label>
+              <SelectShell className="chime-event-select">
+                <select
+                  aria-label={`${EVENT_LABELS[kind]} sound`}
+                  value={config.eventSounds[kind]}
+                  onChange={(event) => patchEvent(kind, { sound: event.target.value as SoundId })}
+                >
+                  {THEME_IDS.map((themeId) => (
+                    <optgroup key={themeId} label={THEME_LABELS[themeId]}>
+                      {themeSoundOptions(themeId).map((soundId) => (
+                        <option key={soundId} value={soundId}>
+                          {SOUND_LABELS[soundId]}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </SelectShell>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => void preview(config.eventSounds[kind])}
+              >
+                Preview
+              </Button>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="chime-card">
+        <div>
+          <h3>Muted projects</h3>
+          <p>New projects remain audible until muted here.</p>
+        </div>
+        {projects.length === 0 ? (
+          <p className="chime-muted">No projects found.</p>
+        ) : (
+          projects.map((project) => (
+            <label className="chime-row" key={project.id}>
+              <span>{project.name}</span>
+              <input
+                type="checkbox"
+                checked={config.mutedProjectIds.includes(project.id)}
+                onChange={(event) =>
+                  setConfig({
+                    ...config,
+                    mutedProjectIds: event.target.checked
+                      ? [...config.mutedProjectIds, project.id]
+                      : config.mutedProjectIds.filter((id) => id !== project.id),
+                  })
+                }
+              />
+            </label>
+          ))
+        )}
+      </section>
+
+      <div className="chime-savebar">
+        <span className="chime-muted" role="status">
+          {status}
+        </span>
+        <Button type="button" onClick={() => void save()}>
+          Save settings
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+export default definePluginApp((app) => {
+  app.contentScripts.register({
+    id: "audio-client",
+    mount({ pluginId, signal }) {
+      return startAudioClient(pluginId, signal);
+    },
+  });
+  app.slots.settingsSection({
+    id: "chime-settings",
+    title: "Chime settings",
+    description: "Control notification sounds without sending message content or analytics.",
+    component: Settings,
+  });
+});
