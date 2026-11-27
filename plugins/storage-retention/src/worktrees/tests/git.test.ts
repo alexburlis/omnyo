@@ -3,6 +3,7 @@ import {
   access,
   mkdir,
   mkdtemp,
+  readFile,
   realpath,
   rm,
   writeFile,
@@ -320,3 +321,65 @@ it("rechecks ignored work and protected paths while preserving branch history", 
     await expect(access(root)).rejects.toThrow();
   }
 });
+
+it("blocks purge only while Git status hides changed work", async () => {
+  const root = await realpath(
+    await mkdtemp(join(tmpdir(), "worktrees-hidden-proof-")),
+  );
+
+  const repo = join(root, "repo");
+  const library = join(root, "library");
+  const lane = join(root, "lane");
+
+  const git = (cwd: string, ...args: string[]) =>
+    execFileSync("git", ["-C", cwd, ...args], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+
+  const laneReasons = async () =>
+    (await inspectRepo(repo, [])).worktrees.find((entry) => entry.path === lane)
+      ?.reasons;
+
+  try {
+    for (const path of [repo, library]) {
+      await mkdir(path);
+      git(path, "init", "-b", "main");
+      git(path, "config", "user.name", "Fixture");
+      git(path, "config", "user.email", "fixture@example.invalid");
+      git(path, "config", "commit.gpgsign", "false");
+      await writeFile(join(path, "tracked"), "retained source\n");
+      git(path, "add", ".");
+      git(path, "commit", "-m", "base");
+    }
+
+    git(
+      repo,
+      "-c",
+      "protocol.file.allow=always",
+      "submodule",
+      "add",
+      library,
+      "lib",
+    );
+    git(repo, "commit", "-m", "add submodule");
+    git(repo, "worktree", "add", "-b", "lane", lane);
+    git(lane, "update-index", "--assume-unchanged", "tracked");
+    expect(await laneReasons()).toEqual([]);
+
+    await writeFile(join(lane, "tracked"), "hidden edit\n");
+    await writeFile(join(lane, "lib", "notes"), "submodule folder work\n");
+    expect(await laneReasons()).toEqual(
+      expect.arrayContaining([
+        "Index hides working files",
+        "Uninitialized submodule holds files",
+      ]),
+    );
+    await expect(
+      purgeWorktree(repo, lane, git(lane, "rev-parse", "HEAD"), [], "main"),
+    ).rejects.toThrow("Worktree changed or is protected");
+    expect(await readFile(join(lane, "tracked"), "utf8")).toBe("hidden edit\n");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}, 15_000);

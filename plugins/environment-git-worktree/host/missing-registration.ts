@@ -5,6 +5,7 @@ import path from "node:path";
 import { experimental_inspectDirectoryProcesses } from "@omnyo/plugin-sdk/host";
 import { getGitCommonDir, runGit } from "omnyo-environment-provider-host/git";
 import { withWorktreeMetadataLock } from "omnyo-environment-provider-host/locks";
+import { verifyInParallel } from "omnyo-environment-provider-host/worktree-local-state";
 import {
   findWorktreeEntry,
   parseWorktreeListPorcelain,
@@ -117,30 +118,6 @@ async function readRegularFile(
   } finally {
     await handle.close();
   }
-}
-
-export async function verifyInParallel<T>(
-  entries: readonly T[],
-  verify: (entry: T) => Promise<void>,
-) {
-  let next = 0;
-  let failure: { error: unknown } | undefined;
-
-  async function worker() {
-    while (!failure && next < entries.length) {
-      try {
-        await verify(entries[next++]);
-      } catch (error) {
-        failure ??= { error };
-      }
-    }
-  }
-
-  await Promise.all(
-    Array.from({ length: Math.min(8, entries.length) }, worker),
-  );
-
-  if (failure) throw failure.error;
 }
 
 async function verifyMissingRegistration(

@@ -477,6 +477,7 @@ describe("worktree host entry", () => {
     "refs/bisect/saved",
     "refs/rewritten/saved",
     "MERGE_HEAD",
+    "MERGE_AUTOSTASH",
   ])("keeps clean worktrees with local Git state: %s", async (state) => {
     const { sourcePath, dataDir } = await createSourceRepository();
     const harness = createHarness(dataDir);

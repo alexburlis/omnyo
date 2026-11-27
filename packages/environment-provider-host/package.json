@@ -38,6 +38,11 @@
       "source": "./src/transcript.ts",
       "types": "./src/transcript.ts",
       "default": "./src/transcript.ts"
+    },
+    "./worktree-local-state": {
+      "source": "./src/worktree-local-state.ts",
+      "types": "./src/worktree-local-state.ts",
+      "default": "./src/worktree-local-state.ts"
     }
   },
   "scripts": {

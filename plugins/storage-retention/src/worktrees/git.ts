@@ -8,6 +8,12 @@ import {
   invalidateWorktreeStorage,
   type WorktreeStorage,
 } from "./storage.js";
+import {
+  findUnreportedChanges,
+  WORKTREE_INDEX_LISTING_MAX_BYTES,
+  WORKTREE_OPERATION_MARKERS,
+  WORKTREE_PRIVATE_REF_NAMESPACES,
+} from "omnyo-environment-provider-host/worktree-local-state";
 
 export function isPathWithin(parent: string, target: string) {
   const difference = relative(parent, target);
@@ -945,7 +951,7 @@ function gitCommonDirectory(repo: string) {
   ]).then((output) => output.trim());
 }
 
-function requireGitOutput(result: PromiseSettledResult<string>) {
+function requireGitOutput<T>(result: PromiseSettledResult<T>) {
   if (result.status === "rejected") throw result.reason;
 
   return result.value;
@@ -1313,6 +1319,7 @@ async function inspectTargets(
       let unsavedCommitCount: number | null = w.branch === null ? null : 0;
 
       let hiddenIndex = false;
+      let submoduleFiles = false;
       let operation = false;
       let privateReferences = false;
       let gitDirectory: string | undefined;
@@ -1366,7 +1373,7 @@ async function inspectTargets(
               w.bare ? "Bare repository" : "Worktree directory is missing",
             );
 
-          const [status, ignoredFiles, indexFiles, privateRefs, directory] =
+          const [status, ignoredFiles, unreported, privateRefs, directory] =
             await Promise.allSettled([
               git(w.path, [
                 "status",
@@ -1383,13 +1390,15 @@ async function inspectTargets(
                 "--no-empty-directory",
                 "-z",
               ]),
-              git(w.path, ["ls-files", "-v", "-z"]),
+              findUnreportedChanges(
+                w.path,
+                (args) => git(w.path, args, WORKTREE_INDEX_LISTING_MAX_BYTES),
+                () => hostSignal.getStore()?.throwIfAborted(),
+              ),
               git(w.path, [
                 "for-each-ref",
                 "--format=%(refname)",
-                "refs/worktree/",
-                "refs/bisect/",
-                "refs/rewritten/",
+                ...WORKTREE_PRIVATE_REF_NAMESPACES,
               ]),
               git(w.path, ["rev-parse", "--absolute-git-dir"]),
             ]);
@@ -1397,9 +1406,9 @@ async function inspectTargets(
           dirtyFiles = statusFiles(requireGitOutput(status));
           dirty = dirtyFiles.length > 0;
           ignored = requireGitOutput(ignoredFiles).length > 0;
-          hiddenIndex = requireGitOutput(indexFiles)
-            .split("\0")
-            .some((entry) => /^[a-zS] /.test(entry));
+          const unreportedChanges = requireGitOutput(unreported);
+          hiddenIndex = unreportedChanges.hidden.length > 0;
+          submoduleFiles = unreportedChanges.submodules.length > 0;
           privateReferences = requireGitOutput(privateRefs).trim().length > 0;
 
           const metadataDirectory = requireGitOutput(directory).trim();
@@ -1408,23 +1417,8 @@ async function inspectTargets(
           if (!isAbsolute(metadataDirectory))
             throw new Error("Cannot resolve worktree Git metadata");
 
-          const markers = [
-            "MERGE_HEAD",
-            "MERGE_AUTOSTASH",
-            "CHERRY_PICK_HEAD",
-            "REVERT_HEAD",
-            "REBASE_HEAD",
-            "BISECT_HEAD",
-            "BISECT_EXPECTED_REV",
-            "AUTO_MERGE",
-            "BISECT_LOG",
-            "rebase-merge",
-            "rebase-apply",
-            "sequencer",
-          ];
-
           const present = await Promise.all(
-            markers.map((marker) =>
+            WORKTREE_OPERATION_MARKERS.map((marker) =>
               access(join(metadataDirectory, marker)).then(
                 () => true,
                 (cause) => {
@@ -1481,6 +1475,7 @@ async function inspectTargets(
         ignored ? "Ignored files present" : "",
         w.locked ? "Locked" : "",
         hiddenIndex ? "Index hides working files" : "",
+        submoduleFiles ? "Uninitialized submodule holds files" : "",
         operation ? "Git operation in progress" : "",
         privateReferences ? "Worktree-private references present" : "",
         inUse ? "Used by Omnyo environment or project source" : "",
