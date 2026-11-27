@@ -12,18 +12,28 @@ import {
 } from "./test/runtime-test-harness.js";
 import type { AgentRuntime } from "./types.js";
 
-const acpBridgeModulePath = fileURLToPath(
-  new URL("../../provider-bridge-acp/src/bridge/bridge.ts", import.meta.url),
-);
+function acpBridge(packageName: string, pluginId: string) {
+  return {
+    modulePath: fileURLToPath(
+      new URL(`../../${packageName}/src/bridge/bridge.ts`, import.meta.url),
+    ),
+    fakeAgentPath: fileURLToPath(
+      new URL(
+        `../../${packageName}/src/bridge/fake-acp-agent.mjs`,
+        import.meta.url,
+      ),
+    ),
+    pluginId,
+  };
+}
 
-const fakeAgentPath = fileURLToPath(
-  new URL(
-    "../../provider-bridge-acp/src/bridge/fake-acp-agent.mjs",
-    import.meta.url,
-  ),
-);
-
-describe("acp process topology", () => {
+describe.each([
+  { engine: "classic", ...acpBridge("provider-bridge-acp", "provider-acp") },
+  {
+    engine: "next",
+    ...acpBridge("provider-bridge-acp-next", "provider-acp-next"),
+  },
+])("acp process topology ($engine bridge)", (bridge) => {
   let workspaceDir: string;
   const runtimes: AgentRuntime[] = [];
 
@@ -50,15 +60,15 @@ describe("acp process topology", () => {
         threadCreation: { requestTimeoutMs: 300 },
       }),
       createScriptedEchoLaunch({
-        pluginId: "provider-acp",
+        pluginId: bridge.pluginId,
         digest: "acp-v1",
-        modulePath: acpBridgeModulePath,
+        modulePath: bridge.modulePath,
         capabilities: { fork: "tip" },
         providerOptions: {
           acpLaunchSpec: {
             displayName: "Fake ACP",
             command: process.execPath,
-            args: [fakeAgentPath],
+            args: [bridge.fakeAgentPath],
             env: {
               FAKE_ACP_SESSION_NEW_DELAY_MS: "60000",
               FAKE_ACP_READY_FILE: readyFile,
