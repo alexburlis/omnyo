@@ -2730,31 +2730,24 @@ export function providerWithoutBridgeMessage(providerId: string): string {
 }
 
 /**
- * Files a hook handler under its key in a per-hook record.
- *
- * The record is a mapped type over the hook-name union, so writing to it
- * through a generic key is not expressible soundly in TypeScript: this call
- * site knows `handler` matches `hook`, but the checker only knows both range
- * over the union and so demands their intersection. The erasure is confined to
- * this one function; every READ is sound, because a slot is typed for its own
- * hook and the runner builds the context for the hook it read the handler from.
- *
- * Shared by the real host (`plugin-api.ts`) and the fake one so both register
- * hooks by the same rule, which is the point of every other helper here.
+ * Checks the host lifecycle before registering one handler per hook.
  */
-export function storePluginHook<K extends PluginHookName>(
+export function registerPluginHook<K extends PluginHookName>(
   records: { [N in PluginHookName]: PluginHookHandler<N> | null },
+  assertLive: () => void,
   hook: K,
   handler: PluginHookHandler<K>,
 ): void {
-  (records as Record<PluginHookName, unknown>)[hook] = handler;
-}
+  assertLive();
 
-/** The refusal a second handler for one hook from one plugin gets. */
-export function pluginHookAlreadyRegisteredMessage(
-  hook: PluginHookName,
-): string {
-  return `a "${hook}" hook handler is already registered by this plugin`;
+  if (records[hook] !== null) {
+    throw new Error(
+      `a "${hook}" hook handler is already registered by this plugin`,
+    );
+  }
+
+  // The generic key and handler share K, but TypeScript requires the intersection of all slots for a mapped write.
+  (records as Record<PluginHookName, unknown>)[hook] = handler;
 }
 
 export const ENVIRONMENT_PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9-]{1,63}$/;

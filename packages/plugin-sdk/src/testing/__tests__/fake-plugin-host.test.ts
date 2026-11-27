@@ -1834,6 +1834,34 @@ describe("agent tools", () => {
 });
 
 describe("dispose", () => {
+  it("rejects new hook registrations on a disposed handle", async () => {
+    const { api, harness } = createFakePluginHost();
+
+    await harness.dispose();
+
+    expect(() =>
+      api.experimental_hooks.on("message.dispatch", () => ({
+        action: "proceed",
+      })),
+    ).toThrow("used a stale API handle");
+  });
+
+  it("keeps the registered hook and rejects duplicate live registrations", async () => {
+    const { api, harness } = createFakePluginHost();
+    const hook = () => ({ action: "proceed" }) as const;
+    api.experimental_hooks.on("message.dispatch", hook);
+
+    expect(() => api.experimental_hooks.on("message.dispatch", hook)).toThrow(
+      'a "message.dispatch" hook handler is already registered by this plugin',
+    );
+    expect(harness.registrations.hooks["message.dispatch"]).toBe(hook);
+
+    await harness.dispose();
+    expect(() => api.experimental_hooks.on("message.dispatch", hook)).toThrow(
+      "used a stale API handle",
+    );
+  });
+
   it("reloads atomically while preserving storage and the direct harness API", async () => {
     const host = createFakePluginHost({ pluginId: "reloadable" });
 

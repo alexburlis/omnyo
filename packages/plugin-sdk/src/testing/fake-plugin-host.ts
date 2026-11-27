@@ -22,11 +22,10 @@ import {
 import {
   adoptHttpRouteResponse,
   aiServiceAlreadyRegisteredMessage,
-  pluginHookAlreadyRegisteredMessage,
   coerceStoredPluginSettingValue,
   enforcePluginCliOutputLimit,
   isStandardSchema,
-  storePluginHook,
+  registerPluginHook,
   validatePluginEnvironmentProviderDeclaration,
   validatePluginMachineProviderDeclaration,
   type NormalizedPluginEnvironmentProvider,
@@ -1705,11 +1704,7 @@ function createFakePluginHostInternal(
 
   const experimental_hooks: PluginHooks = {
     on(hook, handler) {
-      if (hooks[hook] !== null) {
-        throw new Error(pluginHookAlreadyRegisteredMessage(hook));
-      }
-
-      storePluginHook(hooks, hook, handler);
+      registerPluginHook(hooks, assertLive, hook, handler);
     },
     async recheck(_hook) {
       assertLive();

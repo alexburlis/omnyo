@@ -107,8 +107,7 @@ import {
   runPluginStorageMigrations,
   isStandardSchema,
   aiServiceAlreadyRegisteredMessage,
-  pluginHookAlreadyRegisteredMessage,
-  storePluginHook,
+  registerPluginHook,
   validateBackgroundServiceRegistration,
   validatePluginEnvironmentProviderDeclaration,
   validatePluginMachineProviderDeclaration,
@@ -1420,13 +1419,7 @@ export function createPluginApi(options: {
 
   const experimental_hooks: PluginHooks = {
     on(hook, handler) {
-      assertLive();
-
-      if (hooks[hook] !== null) {
-        throw new Error(pluginHookAlreadyRegisteredMessage(hook));
-      }
-
-      storePluginHook(hooks, hook, handler);
+      registerPluginHook(hooks, assertLive, hook, handler);
     },
     async recheck(hook) {
       assertLive();
