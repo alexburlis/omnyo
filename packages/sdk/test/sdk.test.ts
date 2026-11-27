@@ -1133,6 +1133,7 @@ describe("@omnyo/sdk", () => {
       sdk.providers.models({
         environmentId: "env_remote",
         providerId: "acp-remote",
+        selectedModel: "acme/beta",
       }),
     ).resolves.toMatchObject({ models: [], providers: [] });
 
@@ -1145,7 +1146,7 @@ describe("@omnyo/sdk", () => {
       {
         bodyText: undefined,
         method: "GET",
-        url: "http://omnyo.test/api/v1/system/execution-options?environmentId=env_remote&providerId=acp-remote",
+        url: "http://omnyo.test/api/v1/system/execution-options?environmentId=env_remote&providerId=acp-remote&selectedModel=acme%2Fbeta",
       },
     ]);
   });

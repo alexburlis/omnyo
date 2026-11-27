@@ -38,6 +38,7 @@ import {
   PopoverTrigger,
 } from "@omnyo/shared-ui/popover";
 import { Skeleton } from "@omnyo/shared-ui/skeleton";
+import { ReasoningLoadingIndicator } from "./PickerLoadingRows";
 import {
   CONTROL_PRESS_FEEDBACK,
   CONTROL_PRESS_TRANSITION,
@@ -310,6 +311,7 @@ interface ModelReasoningPickerProps {
   onModelChange: (value: string) => void;
   reasoningValue: ReasoningLevel;
   reasoningOptions: readonly PickerOption<ReasoningLevel>[];
+  reasoningIsLoading?: boolean;
   onReasoningChange: (value: ReasoningLevel) => void;
   onSelectionChange: (selection: ModelPickerSelection) => boolean;
   serviceTierValue: ServiceTier | undefined;
@@ -352,6 +354,7 @@ export function ModelReasoningPicker({
   onModelChange,
   reasoningValue,
   reasoningOptions,
+  reasoningIsLoading = false,
   onReasoningChange,
   onSelectionChange,
   serviceTierValue,
@@ -469,6 +472,12 @@ export function ModelReasoningPicker({
 
   const selectedModelLoadFailed =
     modelLoadFailed || selectedModelLoadErrorMatches;
+
+  const loadingSelectedReasoning =
+    reasoningIsLoading &&
+    hasSelectedModel &&
+    !modelIsLoading &&
+    !selectedModelLoadFailed;
 
   const handoffSourceProviderId = handoff?.sourceProviderId;
   const handoffActive = handoff?.active === true;
@@ -756,6 +765,11 @@ export function ModelReasoningPicker({
         label: stripModelBrandPrefix(option.label, source.brandPrefix),
         hidden: source.hidden.has(option.value),
         selected: source.selected && option.value === modelValue,
+        reasoningPending:
+          loadingSelectedReasoning &&
+          pickerMode !== "model" &&
+          source.selected &&
+          option.value === modelValue,
         selectable: source.committable && option.disabled !== true,
         landingLevel,
       };
@@ -843,6 +857,7 @@ export function ModelReasoningPicker({
     handoffSourceProviderId,
     isSearching,
     landingOverride,
+    loadingSelectedReasoning,
     modelValue,
     noticesByProvider,
     pickerMode,
@@ -1609,7 +1624,9 @@ export function ModelReasoningPicker({
                 {triggerModelTag}
               </span>
             ) : null}
-            {triggerReasoningLabel ? (
+            {loadingSelectedReasoning && showsEffort ? (
+              <ReasoningLoadingIndicator />
+            ) : triggerReasoningLabel ? (
               <span
                 className="shrink-0 text-subtle-foreground"
                 data-promptbox-hide-compact=""

@@ -29,7 +29,10 @@ import {
 import { useIsCompactViewport } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import { usePointerCoarse } from "@omnyo/shared-ui/hooks/use-pointer-coarse";
 import { cn } from "@omnyo/shared-ui/lib/utils";
-import { PickerLoadingRows } from "./PickerLoadingRows";
+import {
+  PickerLoadingRows,
+  ReasoningLoadingIndicator,
+} from "./PickerLoadingRows";
 import {
   FavoriteLevelToggle,
   MODEL_PICKER_CHIP_CLASS_NAME as CHIP_CLASS_NAME,
@@ -1056,6 +1059,7 @@ function MatrixRow({
             {nameContent}
           </button>
         )}
+        {row.reasoningPending ? <ReasoningLoadingIndicator /> : null}
       </div>
       <MatrixCells layout={layout} mode={mode} highlighted={highlighted}>
         {cells}

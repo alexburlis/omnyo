@@ -72,13 +72,6 @@ export function acpProviderDeclaration(
       ...(agent.primaryModels === undefined
         ? {}
         : { primaryModels: [...agent.primaryModels] }),
-      ...(agent.reasoningProbePriorityModelIds === undefined
-        ? {}
-        : {
-            reasoningProbePriorityModelIds: [
-              ...agent.reasoningProbePriorityModelIds,
-            ],
-          }),
       acpLaunchSpec: { ...agent.launch },
     },
     models: { scope: "host" },

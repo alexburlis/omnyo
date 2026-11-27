@@ -1,5 +1,9 @@
 import { compareReasoningLevels } from "@omnyo/domain";
-import type { AvailableModel, ReasoningLevel, ServiceTier } from "@omnyo/domain";
+import type {
+  AvailableModel,
+  ReasoningLevel,
+  ServiceTier,
+} from "@omnyo/domain";
 import type { AcpConfigOption, AcpSessionModels } from "../wire.js";
 
 interface RawAgentModel {
@@ -7,17 +11,22 @@ interface RawAgentModel {
   displayName: string;
 }
 
-export const ACP_NATIVE_REASONING_EFFORTS: AvailableModel["supportedReasoningEfforts"] =
-  [
-    {
-      reasoningEffort: "medium",
-      description: "Reasoning effort is managed by the connected ACP agent.",
-    },
-  ];
-
 export interface AcpNativeReasoningSupport {
+  reasoningDiscovery: AvailableModel["reasoningDiscovery"];
   supportedReasoningEfforts: AvailableModel["supportedReasoningEfforts"];
   defaultReasoningEffort: ReasoningLevel;
+}
+
+export interface AcpNativeModelSupport extends AcpNativeReasoningSupport {
+  supportedServiceTiers: NonNullable<AvailableModel["supportedServiceTiers"]>;
+}
+
+export function findAcpFastConfigOption(
+  configOptions: readonly AcpConfigOption[] | undefined,
+): AcpConfigOption | undefined {
+  return (configOptions ?? []).find(
+    (option) => option.id === "fast" && option.type === "select",
+  );
 }
 
 interface AgentModelVariant extends RawAgentModel {
@@ -170,8 +179,8 @@ export function buildAcpNativeReasoningSupport(
 
   if (supportedReasoningEfforts.length === 0) {
     return {
-      supportedReasoningEfforts:
-        thoughtLevelOption === undefined ? ACP_NATIVE_REASONING_EFFORTS : [],
+      reasoningDiscovery: "known",
+      supportedReasoningEfforts: [],
       defaultReasoningEffort: "medium",
     };
   }
@@ -179,6 +188,7 @@ export function buildAcpNativeReasoningSupport(
   const currentValue = thoughtLevelOption?.currentValue;
 
   return {
+    reasoningDiscovery: "known",
     supportedReasoningEfforts,
     defaultReasoningEffort:
       currentValue !== undefined && seen.has(currentValue)
@@ -189,7 +199,7 @@ export function buildAcpNativeReasoningSupport(
 
 export function buildModelCatalogFromConfigOptions(
   modelOption: AcpConfigOption | undefined,
-  reasoningByModel?: ReadonlyMap<string, AcpNativeReasoningSupport>,
+  supportByModel?: ReadonlyMap<string, AcpNativeModelSupport>,
 ): AvailableModel[] {
   const options = modelOption?.options ?? [];
 
@@ -203,8 +213,9 @@ export function buildModelCatalogFromConfigOptions(
     const isDefault =
       currentValue !== undefined ? option.value === currentValue : index === 0;
 
-    const reasoning = reasoningByModel?.get(option.value) ?? {
-      supportedReasoningEfforts: ACP_NATIVE_REASONING_EFFORTS,
+    const reasoning = supportByModel?.get(option.value) ?? {
+      reasoningDiscovery: "unknown" as const,
+      supportedReasoningEfforts: [],
       defaultReasoningEffort: "medium" as ReasoningLevel,
     };
 
@@ -213,8 +224,11 @@ export function buildModelCatalogFromConfigOptions(
       model: option.value,
       displayName: option.name ?? option.value,
       description: readOptionDescription(option) ?? "",
+      reasoningDiscovery: reasoning.reasoningDiscovery,
       supportedReasoningEfforts: reasoning.supportedReasoningEfforts,
       defaultReasoningEffort: reasoning.defaultReasoningEffort,
+      supportedServiceTiers:
+        supportByModel?.get(option.value)?.supportedServiceTiers ?? [],
       isDefault,
     };
   });
@@ -248,8 +262,10 @@ export function buildModelCatalogFromSessionModels(
       model: model.modelId,
       displayName: model.name ?? model.modelId,
       description: model.description ?? "",
-      supportedReasoningEfforts: ACP_NATIVE_REASONING_EFFORTS,
+      reasoningDiscovery: "unknown",
+      supportedReasoningEfforts: [],
       defaultReasoningEffort: "medium",
+      supportedServiceTiers: [],
       isDefault,
     };
   });

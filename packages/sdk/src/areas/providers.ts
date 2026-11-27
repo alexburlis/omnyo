@@ -23,6 +23,7 @@ export type ProviderListArgs = ProviderHostRoutingArgs & {
 };
 
 export type ProviderModelsArgs = ProviderHostRoutingArgs & {
+  selectedModel?: string;
   providerId?: string;
   claudeProfileId?: string;
   signal?: AbortSignal;

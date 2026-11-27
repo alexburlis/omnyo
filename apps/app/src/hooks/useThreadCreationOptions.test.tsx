@@ -349,6 +349,130 @@ afterEach(() => {
 });
 
 describe("useThreadCreationOptions", () => {
+  it.each([
+    { hasLevels: true, scope: "new-thread" as const },
+    { hasLevels: false, scope: "new-thread" as const },
+    { hasLevels: true, scope: "component-local" as const },
+    { hasLevels: false, scope: "component-local" as const },
+  ])(
+    "keeps the selected model and preferred reasoning while discovery settles ($scope, levels: $hasLevels)",
+    async ({ hasLevels, scope }) => {
+      window.localStorage.setItem(
+        "omnyo.promptbox.provider",
+        GLOBAL_PROVIDER_ID,
+      );
+      window.localStorage.setItem(
+        `omnyo.promptbox.model-${GLOBAL_PROVIDER_ID}-1`,
+        "global-model",
+      );
+      const preferenceKey = `omnyo.promptbox.reasoning-${GLOBAL_PROVIDER_ID}-1`;
+      window.localStorage.setItem(preferenceKey, "high");
+      const discovery = createDeferredPromise<SystemExecutionOptionsResponse>();
+      const catalog = executionOptionsResponse();
+
+      const unknown = {
+        ...catalog,
+        models: catalog.models.map((model) => ({
+          ...model,
+          reasoningDiscovery: "unknown" as const,
+          supportedReasoningEfforts: [],
+        })),
+      };
+
+      vi.mocked(sdk.system.executionOptions).mockImplementation((args) =>
+        args?.selectedModel === "global-model"
+          ? discovery.promise
+          : Promise.resolve(unknown),
+      );
+      const { wrapper } = createQueryClientTestHarness();
+
+      const { result } = renderHook(
+        () =>
+          useThreadCreationOptions({
+            scope,
+            initialProviderId: GLOBAL_PROVIDER_ID,
+            initialModel: "global-model",
+            initialReasoningLevel: "high",
+          }),
+        { wrapper },
+      );
+
+      await waitFor(() =>
+        expect(sdk.system.executionOptions).toHaveBeenCalledWith(
+          expect.objectContaining({ selectedModel: "global-model" }),
+        ),
+      );
+      expect(result.current.selectedModel).toBe("global-model");
+      expect(result.current.reasoningOptions).toEqual([]);
+      expect(result.current.isLoadingReasoning).toBe(true);
+      expect(result.current.reasoningLevel).toBe("high");
+      act(() => result.current.setSelectedModel("global-model"));
+      expect(window.localStorage.getItem(preferenceKey)).toBe("high");
+      await act(async () =>
+        discovery.resolve({
+          ...catalog,
+          models: catalog.models.map((model) => ({
+            ...model,
+            reasoningDiscovery: "known",
+            supportedReasoningEfforts: hasLevels
+              ? model.supportedReasoningEfforts
+              : [],
+          })),
+        }),
+      );
+      await waitFor(() =>
+        expect(result.current.isLoadingReasoning).toBe(false),
+      );
+      expect(result.current.selectedModel).toBe("global-model");
+      expect(result.current.reasoningOptions.length > 0).toBe(hasLevels);
+      expect(window.localStorage.getItem(preferenceKey)).toBe("high");
+    },
+  );
+
+  it("shows a selected discovery failure notice while preserving the selected model and reasoning preference", async () => {
+    const catalog = executionOptionsResponse();
+
+    const unknown = {
+      ...catalog,
+      models: catalog.models.map((model) => ({
+        ...model,
+        reasoningDiscovery: "unknown" as const,
+        supportedReasoningEfforts: [],
+      })),
+    };
+
+    const notice = {
+      providerId: GLOBAL_PROVIDER_ID,
+      message: "Could not load reasoning options for global-model",
+      detail: "The discovery session could not restore its settings",
+      until: null,
+    };
+
+    vi.mocked(sdk.system.executionOptions).mockImplementation((args) =>
+      Promise.resolve(
+        args?.selectedModel ? { ...unknown, modelNotice: notice } : unknown,
+      ),
+    );
+    const { wrapper } = createQueryClientTestHarness();
+
+    const { result } = renderHook(
+      () =>
+        useThreadCreationOptions({
+          scope: "component-local",
+          initialProviderId: GLOBAL_PROVIDER_ID,
+          initialModel: "global-model",
+          initialReasoningLevel: "high",
+        }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.modelNotice).toEqual(notice));
+    expect(result.current.selectedModel).toBe("global-model");
+    expect(result.current.reasoningLevel).toBe("high");
+    expect(result.current.isLoadingReasoning).toBe(false);
+    expect(result.current.modelLoadFailed).toBe(false);
+  });
+
   it("waits for native account resolution before loading Claude models", async () => {
     const pending =
       createDeferredPromise<

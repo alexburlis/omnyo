@@ -1289,6 +1289,9 @@ const onlineRpcHandlers: OnlineRpcHandlerMap = {
     withResolvedBridgeLaunch(command, options, async (args) =>
       options.listModels({
         ...args,
+        ...(command.selectedModel === undefined
+          ? {}
+          : { selectedModel: command.selectedModel }),
         contributedEnv: await withClaudeProfileEnvironment({
           options,
           context: {

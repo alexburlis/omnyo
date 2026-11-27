@@ -160,6 +160,7 @@ interface UseThreadCreationOptionsResult<TExecutionInputSources> {
   moreModelOptions: ModelPickerOption[];
   catalogModelOptions: ModelPickerOption[];
   isLoadingModels: boolean;
+  isLoadingReasoning: boolean;
   modelLoadFailed: boolean;
   modelLoadError: SystemExecutionOptionsModelLoadError | null;
   modelNotice: SystemExecutionOptionsModelNotice | null;
@@ -565,8 +566,6 @@ export function useThreadCreationOptions(
   const modelLoadError =
     executionOptionsQuery.data?.modelLoadError ?? NO_MODEL_LOAD_ERROR;
 
-  const modelNotice = executionOptionsQuery.data?.modelNotice ?? null;
-
   const modelLoadFailed =
     executionOptionsQuery.isError || modelLoadError !== null;
 
@@ -817,19 +816,7 @@ export function useThreadCreationOptions(
     return supportByProvider;
   }, [serviceTierSettings, providers]);
 
-  const {
-    selectedModel,
-    activeModel,
-    modelOptions,
-    moreModelOptions,
-    catalogModelOptions,
-    reasoningLevel,
-    reasoningOptions,
-    declaredSessionOptions,
-    sessionOptionSelections,
-    requiresExplicitModel,
-    isSessionOptionModelSwitch,
-  } = useMemo(
+  const baseCatalogSelection = useMemo(
     () =>
       resolveModelCatalogSelection({
         models: executionOptionsQuery.data?.models ?? [],
@@ -846,6 +833,79 @@ export function useThreadCreationOptions(
     [
       executionOptionsQuery.data?.models,
       executionOptionsQuery.data?.selectedOnlyModels,
+      hiddenModels,
+      modelCatalogIsVerified,
+      preferredReasoningLevel,
+      rawSelectedModel,
+      requestedSessionOptionSelections,
+      selectedProviderInfo,
+    ],
+  );
+
+  const needsSelectedModelDiscovery =
+    modelCatalogIsVerified &&
+    baseCatalogSelection.activeModel?.reasoningDiscovery === "unknown";
+
+  const selectedModelQuery = useSystemExecutionOptions({
+    enabled:
+      executionOptionsQueryEnabled &&
+      profileModelsReady &&
+      needsSelectedModelDiscovery,
+    ...executionOptionsRouting,
+    providerId: effectiveProviderId,
+    claudeProfileId,
+    selectedModel: baseCatalogSelection.selectedModel || undefined,
+  });
+
+  const isLoadingReasoning =
+    executionOptionsQueryEnabled &&
+    needsSelectedModelDiscovery &&
+    !selectedModelQuery.isError &&
+    (selectedModelQuery.isPending || selectedModelQuery.isPlaceholderData);
+
+  const selectedCatalog =
+    needsSelectedModelDiscovery &&
+    !selectedModelQuery.isPlaceholderData &&
+    selectedModelQuery.data?.modelLoadError === null
+      ? selectedModelQuery.data
+      : executionOptionsQuery.data;
+
+  const modelNotice =
+    selectedCatalog?.modelNotice ??
+    executionOptionsQuery.data?.modelNotice ??
+    null;
+
+  const {
+    selectedModel,
+    activeModel,
+    modelOptions,
+    moreModelOptions,
+    catalogModelOptions,
+    reasoningLevel,
+    reasoningOptions,
+    declaredSessionOptions,
+    sessionOptionSelections,
+    requiresExplicitModel,
+    isSessionOptionModelSwitch,
+  } = useMemo(
+    () =>
+      selectedCatalog === executionOptionsQuery.data
+        ? baseCatalogSelection
+        : resolveModelCatalogSelection({
+            models: selectedCatalog?.models ?? [],
+            selectedOnlyModels: selectedCatalog?.selectedOnlyModels ?? [],
+            selectedModel: rawSelectedModel,
+            preferredReasoningLevel,
+            sessionOptionSelections: requestedSessionOptionSelections,
+            hiddenModels,
+            provider: selectedProviderInfo,
+            catalogIsVerified: modelCatalogIsVerified,
+            formatModelLabel,
+          }),
+    [
+      baseCatalogSelection,
+      executionOptionsQuery.data,
+      selectedCatalog,
       hiddenModels,
       modelCatalogIsVerified,
       preferredReasoningLevel,
@@ -1363,6 +1423,7 @@ export function useThreadCreationOptions(
     moreModelOptions,
     catalogModelOptions,
     isLoadingModels,
+    isLoadingReasoning,
     modelLoadFailed,
     modelLoadError,
     modelNotice,

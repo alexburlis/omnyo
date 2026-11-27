@@ -83,6 +83,7 @@ export interface CommandDispatchOptions {
   workspaceReads: WorkspaceReadCoalescer;
   eventSink: Pick<EventSink, "emit" | "flush">;
   listModels: (args: {
+    selectedModel?: string;
     providerId: string;
     bridgeLaunch: AgentRuntimeBridgeLaunch;
     cwd?: string;

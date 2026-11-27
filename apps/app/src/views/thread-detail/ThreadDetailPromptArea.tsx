@@ -809,6 +809,7 @@ export function ThreadDetailPromptArea({
     modelLoadError,
     modelNotice,
     reasoningOptions,
+    isLoadingReasoning,
     permissionModeOptions,
     supportsPermissionModeSelection,
     supportsServiceTier,
@@ -2115,6 +2116,7 @@ export function ThreadDetailPromptArea({
       reasoning: {
         value: reasoningLevel,
         options: reasoningOptions,
+        isLoading: isLoadingReasoning,
         onChange: setReasoningLevel,
       },
       handoff: {
@@ -2156,6 +2158,7 @@ export function ThreadDetailPromptArea({
       providers,
       reasoningLevel,
       reasoningOptions,
+      isLoadingReasoning,
       selectedModel,
       selectedProviderId,
       serviceTier,

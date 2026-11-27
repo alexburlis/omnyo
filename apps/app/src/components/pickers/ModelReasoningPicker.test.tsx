@@ -282,6 +282,7 @@ function renderPicker({
   providerRouting,
   selectedProviderId = "codex",
   modelIsLoading = false,
+  reasoningIsLoading = false,
   modelLoadError = null,
   modelNotice = null,
   alternateModelNotice = null,
@@ -323,6 +324,7 @@ function renderPicker({
   providerRouting?: SystemProvidersQuery;
   selectedProviderId?: string;
   modelIsLoading?: boolean;
+  reasoningIsLoading?: boolean;
   modelLoadError?: SystemExecutionOptionsModelLoadError | null;
   modelNotice?: SystemExecutionOptionsModelNotice | null;
   alternateModelNotice?: SystemExecutionOptionsModelNotice | null;
@@ -414,6 +416,7 @@ function renderPicker({
         onModelChange={onModelChange}
         reasoningValue={reasoningValue}
         reasoningOptions={pickerReasoningOptions}
+        reasoningIsLoading={reasoningIsLoading}
         onReasoningChange={onReasoningChange}
         onSelectionChange={onSelectionChange}
         serviceTierValue={serviceTierValue}
@@ -770,6 +773,34 @@ describe("ModelReasoningPicker", () => {
       loadingStatus.querySelectorAll("[data-model-loading-row]"),
     ).toHaveLength(4);
     expect(screen.queryByText("Loading models…")).toBeNull();
+  });
+
+  it("keeps the selected model visible while its reasoning levels load", () => {
+    renderPicker({
+      modelOptions: [
+        modelRow("selected", "Selected agent model"),
+        modelRow("other", "Other agent model"),
+      ],
+      pickerReasoningOptions: [],
+      reasoningIsLoading: true,
+    });
+
+    expect(
+      within(getTrigger()).getByRole("status", {
+        name: "Loading reasoning levels",
+      }),
+    ).toBeTruthy();
+    expect(getTrigger().textContent).toContain("Selected agent model");
+    openPicker();
+    const grid = screen.getByRole("grid", { name: "Models" });
+
+    const pending = within(grid).getByRole("status", {
+      name: "Loading reasoning levels",
+    });
+
+    expect(pending.closest("[role=row]")?.textContent).toContain(
+      "Selected agent model",
+    );
   });
 
   it("cycles models backward from a Tab-focused composer control", () => {

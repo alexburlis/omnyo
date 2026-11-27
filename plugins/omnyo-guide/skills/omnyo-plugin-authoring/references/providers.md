@@ -299,16 +299,15 @@ For an ACP agent, use `@omnyo/plugin-sdk/provider-bridge/acp`. Re-export
 `experimental_acpProviderBridge` as `experimental_providerBridge`. Supply a
 validated `acpLaunchSpec` and an ACP dialect in the static bridge options. The
 public ACP entrypoint includes the bridge, launch schema, agent probe, model
-catalog, tool, and dialect contracts. It supports the `generic`, `cursor`, and
-`grok` dialects. Read `provider-bridge-api-index.md` for the complete export
-list.
+catalog, tool, and dialect contracts. The built-in dialects are `acp`
+(generic), `cursor`, `grok`, `omp`, and `opencode`. See
+`provider-bridge-api-index.md` for the complete export list.
 
-`@omnyo/plugin-sdk/provider-bridge/acp-next` is a preview of the rebuilt ACP
-bridge with the same exports plus `experimental_registerAcpDialect({ id,
-...hooks })`. Call it at module load in the host artifact and name that id as
-`acpDialect` to read an agent's own side channels; a built-in id (`acp`,
-`cursor`, `grok`, `omp`, `opencode`) cannot be replaced. The subpath will be
-folded into `provider-bridge/acp` when the rebuilt bridge becomes the default.
+To register a custom dialect, import `experimental_registerAcpDialect` from
+`@omnyo/plugin-sdk/provider-bridge/acp-next`. Both SDK paths use the same
+bridge. Call `experimental_registerAcpDialect({ id, ...hooks })` at module
+load in the host artifact, using a unique dialect ID. Set `acpDialect` to
+that ID in the provider registration.
 
 **Conformance.** Ship a test that drives the published kit,
 `@omnyo/plugin-sdk/provider-bridge/testing`, against your bridge

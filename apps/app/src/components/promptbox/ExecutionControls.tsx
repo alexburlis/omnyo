@@ -61,6 +61,7 @@ interface ExecutionServiceTierConfig {
 }
 
 interface ExecutionReasoningConfig {
+  isLoading?: boolean;
   value: ReasoningLevel;
   options: readonly PickerOption<ReasoningLevel>[];
   onChange: (value: ReasoningLevel) => void;
@@ -167,6 +168,7 @@ export const ExecutionControls = memo(function ExecutionControls({
       onModelChange={model.onChange}
       reasoningValue={reasoning.value}
       reasoningOptions={reasoning.options}
+      reasoningIsLoading={reasoning.isLoading}
       onReasoningChange={reasoning.onChange}
       onSelectionChange={handleSelectionChange}
       serviceTierValue={serviceTier?.value}

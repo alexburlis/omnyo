@@ -39,11 +39,11 @@ export interface AcpAgentCommandParam {
 }
 
 export interface AcpModelListParams {
+  selectedModel?: string;
   listCommand?: AcpAgentCommandParam;
   agent?: AcpAgentCommandParam;
   optionsAgent?: AcpAgentCommandParam;
   primaryModels: string[];
-  reasoningProbePriorityModelIds: string[];
   parameterizedModelPicker: boolean;
   reasoningCli?: AcpBridgeReasoningCli;
   nativeReasoning?: AcpBridgeNativeReasoning;
@@ -176,9 +176,9 @@ function buildAcpModelDiscoveryAgentCommand(
 }
 
 interface AcpModelListOptions {
+  selectedModel?: string;
   parameterizedModelPicker: boolean;
   primaryModels?: readonly string[];
-  reasoningProbePriorityModelIds: readonly string[];
 }
 
 export function buildAcpModelListParams(
@@ -189,14 +189,12 @@ export function buildAcpModelListParams(
     ...(options.primaryModels ?? launchSpec?.modelCli?.primaryModels ?? []),
   ];
 
-  const reasoningProbePriorityModelIds = [
-    ...options.reasoningProbePriorityModelIds,
-  ];
-
   if (launchSpec === null) {
     return {
       primaryModels,
-      reasoningProbePriorityModelIds,
+      ...(options.selectedModel === undefined
+        ? {}
+        : { selectedModel: options.selectedModel }),
       parameterizedModelPicker: options.parameterizedModelPicker,
     };
   }
@@ -209,7 +207,9 @@ export function buildAcpModelListParams(
     ...(agent !== undefined ? { agent } : {}),
     optionsAgent: buildAcpAgentCommand(launchSpec),
     primaryModels,
-    reasoningProbePriorityModelIds,
+    ...(options.selectedModel === undefined
+      ? {}
+      : { selectedModel: options.selectedModel }),
     parameterizedModelPicker: options.parameterizedModelPicker,
     ...(launchSpec.reasoningCli !== undefined
       ? { reasoningCli: launchSpec.reasoningCli }

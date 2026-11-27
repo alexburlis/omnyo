@@ -297,6 +297,7 @@ interface UnarchiveThreadArgs {
 }
 
 export interface ListModelsArgs {
+  selectedModel?: string;
   providerId: string;
   bridgeLaunch: AgentRuntimeBridgeLaunch;
   cwd?: string;

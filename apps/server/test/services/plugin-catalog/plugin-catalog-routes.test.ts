@@ -116,6 +116,44 @@ describe("plugin catalog routes", () => {
     expect(versionOverride.status).toBe(422);
   });
 
+  it("finds the bundled ACP provider by agent name before installation", async () => {
+    const { app } = catalogApp();
+
+    const providers = await app.request(
+      "/plugin-catalog/search?q=ACP%20Providers",
+    );
+
+    await expect(providers.json()).resolves.toMatchObject({
+      results: [{ entryId: "provider-acp-next", displayName: "ACP Providers" }],
+    });
+
+    for (const query of [
+      "Antigravity CLI",
+      "agy",
+      "Gemini",
+      "gemni",
+      "GitHub Copilot CLI",
+      "mistral-vibe",
+      "oh-my-pi",
+      "acp-omp",
+      "Hermes Agent",
+      "Kiro CLI",
+    ]) {
+      const search = await app.request(
+        `/plugin-catalog/search?${new URLSearchParams({ q: query })}`,
+      );
+
+      expect(await search.json(), query).toMatchObject({
+        results: expect.arrayContaining([
+          expect.objectContaining({
+            entryId: "provider-acp-next",
+            installed: false,
+          }),
+        ]),
+      });
+    }
+  });
+
   it("identifies background installs with the same entry ID as catalog search", async () => {
     const { app } = catalogApp();
     const search = await app.request("/plugin-catalog/search?q=docs");

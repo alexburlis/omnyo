@@ -107,20 +107,24 @@ const acpToolCallLocationSchema = z
   })
   .passthrough();
 
-const acpToolCallNameSchema = z
-  .union([z.string(), z.null()])
-  .transform((value) => value ?? undefined)
-  .optional();
+function nullAsAbsent<Schema extends z.ZodType>(schema: Schema) {
+  return schema
+    .nullable()
+    .transform((value) => value ?? undefined)
+    .optional();
+}
+
+export const acpOptionalString = nullAsAbsent(z.string());
 
 const acpToolCallFieldsSchema = z.object({
   toolCallId: z.string(),
-  title: z.string().optional(),
-  name: acpToolCallNameSchema,
+  title: acpOptionalString,
+  name: acpOptionalString,
   kind: acpToolKindSchema.optional(),
   rawKind: z.string().optional(),
   status: acpToolCallStatusSchema.optional(),
-  content: acpToolCallContentListSchema.optional(),
-  locations: z.array(acpToolCallLocationSchema).optional(),
+  content: nullAsAbsent(acpToolCallContentListSchema),
+  locations: nullAsAbsent(z.array(acpToolCallLocationSchema)),
   rawInput: z.unknown().optional(),
   rawOutput: z.unknown().optional(),
 });

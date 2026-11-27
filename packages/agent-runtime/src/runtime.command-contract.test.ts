@@ -147,6 +147,7 @@ describe("createAgentRuntime command contracts", () => {
     try {
       await runtime.listModels({
         providerId: "fake",
+        selectedModel: "acme/beta",
         contributedEnv: [
           {
             name: "CODEX_OPENAI_BASE_URL",
@@ -164,6 +165,7 @@ describe("createAgentRuntime command contracts", () => {
       });
 
       expect(record.last("model/list")?.params).toEqual({
+        selectedModel: "acme/beta",
         envVars: {
           CODEX_OPENAI_BASE_URL:
             "http://127.0.0.1:38886/api/v1/plugins/account-pool/http/v1",

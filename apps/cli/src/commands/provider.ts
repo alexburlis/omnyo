@@ -285,6 +285,9 @@ export function registerProviderCommands(
           const sdk = createCliOmnyoSdk(serverUrl);
 
           const executionOptions = await sdk.providers.models({
+            ...(opts.selectedModel === undefined
+              ? {}
+              : { selectedModel: opts.selectedModel }),
             ...(await resolveMachineEnvironmentRouting(opts, serverUrl)),
             ...(providerId ? { providerId } : {}),
           });

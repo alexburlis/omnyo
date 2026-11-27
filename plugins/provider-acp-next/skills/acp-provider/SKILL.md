@@ -11,6 +11,10 @@ host: `opencode`, `omp`, `grok`, and `hermes` appear as `acp-opencode`, `acp-omp
 `omnyo provider list` and `omnyo provider models <provider-id>` using its environment
 or machine selector.
 
+Listing models reads the agent's current configuration. When you select a
+model whose reasoning levels are unknown, Omnyo queries that model and then
+restores the agent's starting model and settings.
+
 Agents in the official ACP registry can be added without writing JSON.
 `omnyo acp registry [--refresh] [--json]` lists them with a status: `available`,
 `added`, `update available`, `built in` (Omnyo already ships it), or

@@ -38,6 +38,24 @@ const fullModeOptions: ProviderExecutionContext = {
   providerOptions: {},
 };
 
+it("preserves the selected-model request through the bridge adapter", () => {
+  const adapter = makeAdapter({ parameterizedModelPicker: true });
+  expect(
+    adapter.buildCommandPlan({
+      type: "model/list",
+      cwd: "/workspace",
+      selectedModel: "acme/beta",
+    }),
+  ).toMatchObject({
+    method: "model/list",
+    params: {
+      cwd: "/workspace",
+      selectedModel: "acme/beta",
+      providerOptions: { parameterizedModelPicker: true },
+    },
+  });
+});
+
 describe("handshake version gate", () => {
   it("rejects a bridge on another protocol version with a legible error", () => {
     const adapter = makeAdapter();
