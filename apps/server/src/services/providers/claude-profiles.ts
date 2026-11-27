@@ -97,7 +97,7 @@ async function manageHost(
 ): Promise<ClaudeProfileManagementResult> {
   return callHostOnlineRpc(deps, {
     hostId,
-    timeoutMs: 10_000,
+    timeoutMs: 30_000,
     command: { type: "claude-profile/manage", request },
   });
 }
@@ -128,6 +128,13 @@ function requireReadyProfile(status: ClaudeProfile["status"]): void {
       409,
       "claude_profile_removed",
       "This Claude account was removed.",
+    );
+
+  if (status === "check-timed-out")
+    throw new ApiError(
+      503,
+      "claude_profile_check_timed_out",
+      "Claude took too long to check this account. Try again.",
     );
 
   if (status !== "ready")

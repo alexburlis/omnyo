@@ -16,7 +16,11 @@ type ClaudeProfiles = PluginApi["sdk"]["providers"]["claudeProfiles"] & {
 
 type Profile = Awaited<ReturnType<ClaudeProfiles["list"]>>["profiles"][number];
 
-type NativeReading = { accounts: AccountSummary[]; error?: string };
+type NativeReading = {
+  accounts: AccountSummary[];
+  error?: string;
+  checkTimedOut?: true;
+};
 
 const profileUsageResult = z.object({
   action: z.literal("usage"),
@@ -81,10 +85,12 @@ async function readProfile(
 ): Promise<AccountSummary> {
   if (profile.status !== "ready") {
     const message =
-      profile.status === "sign-in-required" ||
-      profile.status === "wrong-account"
-        ? "Sign in to this Claude account in Account Pooler."
-        : "This Claude profile is unavailable.";
+      profile.status === "check-timed-out"
+        ? "Claude took too long to check this account. Refresh to try again."
+        : profile.status === "sign-in-required" ||
+            profile.status === "wrong-account"
+          ? "Sign in to this Claude account in Account Pooler."
+          : "This Claude profile is unavailable.";
 
     return profileAccount(profile, null, message);
   }
@@ -158,7 +164,9 @@ export function createNativeClaudeUsageReader(api: PluginApi) {
         );
       }
 
-      return { accounts };
+      return active.some(({ status }) => status === "check-timed-out")
+        ? { accounts, checkTimedOut: true }
+        : { accounts };
     } catch {
       return { accounts: [], error: "Claude accounts could not be loaded." };
     }
@@ -173,7 +181,7 @@ export function createNativeClaudeUsageReader(api: PluginApi) {
     pending = fetchReading()
       .then((result) => {
         reading =
-          result.error === undefined
+          result.error === undefined && result.checkTimedOut === undefined
             ? { result, expiresAt: Date.now() + PROFILE_USAGE_MAX_AGE_MS }
             : undefined;
 

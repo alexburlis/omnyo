@@ -13,6 +13,7 @@ export const claudeProfileSchema = z
       "removed",
       "wrong-account",
       "unavailable",
+      "check-timed-out",
     ]),
     loginExpiresAt: z.iso.datetime().nullable(),
   })

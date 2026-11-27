@@ -8,6 +8,7 @@ import {
 } from "../test/command/dispatch-helpers.js";
 import {
   manageClaudeProfiles,
+  setClaudeCheckTimeoutForTests,
   withClaudeProfileEnvironment,
 } from "./claude-profiles.js";
 import { RuntimeManager } from "./runtime-manager.js";
@@ -20,7 +21,13 @@ async function fixture() {
   await fs.writeFile(
     executable,
     `#!${process.execPath}
-if (process.argv[2] === "--version") {
+const slowMarker = require("node:path").join(
+  require("node:path").dirname(process.argv[1]),
+  process.argv[2] === "--version" ? "slow-version" : "slow-auth",
+);
+if (require("node:fs").existsSync(slowMarker)) {
+  setTimeout(() => {}, 10_000);
+} else if (process.argv[2] === "--version") {
   console.log("2.1.331 (Claude Code)");
 } else {
   const fs = require("node:fs");
@@ -75,9 +82,15 @@ if (process.argv[2] === "--version") {
     );
   };
 
+  const slow = (check: "version" | "auth", enabled: boolean) =>
+    enabled
+      ? fs.writeFile(path.join(dataDir, `slow-${check}`), "")
+      : fs.rm(path.join(dataDir, `slow-${check}`));
+
   return {
     add,
     options,
+    slow,
     profileConfig: (profileId: string) =>
       path.join(dataDir, "native-claude-profiles", profileId, "claude"),
     existingConfig: path.join(dataDir, ".claude"),
@@ -183,6 +196,61 @@ describe.skipIf(process.platform !== "darwin")(
         ]),
       );
       expect(await add("Add again", true)).toMatchObject({ status: "ready" });
+    });
+
+    it("reports a slow sign-in check as timed out, not unavailable, and checks again", async () => {
+      const { add, options, profileConfig, signIn, slow } = await fixture();
+      const original = await add("Original");
+      await signIn(profileConfig(original.id), "person@example.com", "org");
+      const restore = setClaudeCheckTimeoutForTests(500);
+
+      try {
+        await slow("auth", true);
+        await expect(
+          manageClaudeProfiles({ action: "list" }, options),
+        ).resolves.toMatchObject({
+          supported: true,
+          profiles: [{ id: original.id, status: "check-timed-out" }],
+        });
+        await expect(
+          withClaudeProfileEnvironment({
+            options,
+            context: {
+              providerId: "claude-code",
+              claudeProfileBinding: { profileId: original.id },
+              contributedEnv: [],
+            },
+          }),
+        ).rejects.toThrow("took too long");
+
+        await slow("auth", false);
+        await expect(
+          manageClaudeProfiles({ action: "list" }, options),
+        ).resolves.toMatchObject({
+          profiles: [{ id: original.id, status: "ready" }],
+        });
+      } finally {
+        restore();
+      }
+    });
+
+    it("does not keep native accounts switched off after a slow version check", async () => {
+      const { options, slow } = await fixture();
+      const restore = setClaudeCheckTimeoutForTests(500);
+
+      try {
+        await slow("version", true);
+        await expect(
+          manageClaudeProfiles({ action: "list" }, options),
+        ).rejects.toThrow("took too long");
+
+        await slow("version", false);
+        await expect(
+          manageClaudeProfiles({ action: "list" }, options),
+        ).resolves.toMatchObject({ supported: true });
+      } finally {
+        restore();
+      }
     });
   },
 );

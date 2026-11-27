@@ -48,6 +48,7 @@ const STATUS_LABELS: Record<Profile["status"], { label: string; dot: string }> =
       dot: "bg-destructive",
     },
     unavailable: { label: "Unavailable", dot: "bg-muted-foreground" },
+    "check-timed-out": { label: "Check timed out", dot: "bg-warning" },
   };
 
 function NativeClaudeAccountRow({

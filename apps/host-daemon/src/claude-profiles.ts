@@ -139,18 +139,45 @@ async function privateDirectory(dir: string, create = false): Promise<void> {
     unavailable("Claude account storage is unavailable on this device.");
 }
 
+let checkTimeoutMs = 20_000;
+
+export function setClaudeCheckTimeoutForTests(ms: number): () => void {
+  const previous = checkTimeoutMs;
+  checkTimeoutMs = ms;
+
+  return () => {
+    checkTimeoutMs = previous;
+  };
+}
+
+class ClaudeCheckTimeout extends ExpectedCommandDispatchError {
+  constructor() {
+    super(
+      "command_failed",
+      "Claude took too long to respond on this device. Try again.",
+    );
+  }
+}
+
 function execute(
   executable: string,
   args: string[],
   env: NodeJS.ProcessEnv,
   cwd?: string,
 ): Promise<string> {
-  return new Promise((done) => {
+  return new Promise((done, fail) => {
     execFile(
       executable,
       args,
-      { env, cwd, timeout: 6_000, maxBuffer: 32_768 },
-      (_error, stdout) => done(stdout),
+      { env, cwd, timeout: checkTimeoutMs, maxBuffer: 32_768 },
+      (error, stdout) => {
+        if (
+          error?.killed === true &&
+          error.code !== "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"
+        )
+          fail(new ClaudeCheckTimeout());
+        else done(stdout);
+      },
     );
   });
 }
@@ -182,11 +209,18 @@ async function nativeExecutable(
   let test = supportedExecutables.get(key);
 
   if (test === undefined) {
-    test = execute(real, ["--version"], env).then((output) =>
+    const check = execute(real, ["--version"], env).then((output) =>
       verifiedVersion.test(output),
     );
+
+    test = check;
+
     supportedExecutables.clear();
-    supportedExecutables.set(key, test);
+    supportedExecutables.set(key, check);
+    check.catch(() => {
+      if (supportedExecutables.get(key) === check)
+        supportedExecutables.delete(key);
+    });
   }
 
   return (await test) ? real : null;
@@ -425,7 +459,15 @@ async function inspectProfile(
   config: LaunchConfig,
   cwd?: string,
 ): Promise<ClaudeProfile> {
-  const native = await readNativeStatus(config, cwd);
+  let native: NativeStatus | null;
+
+  try {
+    native = await readNativeStatus(config, cwd);
+  } catch (error) {
+    if (error instanceof ClaudeCheckTimeout)
+      return profileInfo(profile, "check-timed-out");
+    throw error;
+  }
 
   if (native === null) return profileInfo(profile, "unavailable");
 
@@ -881,6 +923,11 @@ export async function withClaudeProfileEnvironment(args: {
 
   if (status.status === "duplicate-account")
     unavailable(duplicateAccountMessage);
+
+  if (status.status === "check-timed-out")
+    unavailable(
+      "Claude took too long to check the account this chat uses. Try again.",
+    );
 
   if (status.status !== "ready")
     unavailable("Sign in again to the Claude account this chat uses.");
