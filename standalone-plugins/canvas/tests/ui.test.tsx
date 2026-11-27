@@ -5,7 +5,12 @@ import {
   renderSlot,
   type PluginRpcTestHandlers,
 } from "@omnyo/plugin-sdk/testing/app";
-import { useComposer, type ComposerMention } from "@omnyo/plugin-sdk/app";
+import {
+  experimental_useAppNavigate,
+  useComposer,
+  useSdk,
+  type ComposerMention,
+} from "@omnyo/plugin-sdk/app";
 import {
   realtimeChannel,
   type Board,
@@ -658,6 +663,80 @@ describe("side panel", () => {
 
     expect(await screen.findByText("Thread list under 1 s")).toBeTruthy();
   });
+});
+
+describe("compact Canvas action", () => {
+  it.each([
+    { compact: true, enabled: true, sameChat: true, visible: true },
+    { compact: false, enabled: true, sameChat: true, visible: false },
+    { compact: true, enabled: false, sameChat: true, visible: false },
+    { compact: true, enabled: true, sameChat: false, visible: false },
+  ])(
+    "shows Open Canvas only for the active compact chat with a board ($compact, $enabled, $sameChat)",
+    async (test) => {
+      compact = test.compact;
+      const threadId = `thr_canvas_action_${test.compact}_${test.enabled}_${test.sameChat}`;
+      const app = await loadPluginApp(() => import("../app"));
+      const action = app.threadActions.find((entry) => entry.id === "open-chat-canvas");
+
+      expect(action?.useData).toBeDefined();
+
+      if (!action?.useData) throw new Error("Missing Canvas thread action");
+      const useData = action.useData;
+
+      function Menu() {
+        const data = useData({ threadIds: [threadId] });
+        const sdk = useSdk();
+        const navigate = experimental_useAppNavigate();
+
+        const item = action?.item({
+          data,
+          sdk,
+          navigate,
+          thread: {
+            id: test.sameChat ? threadId : "thr_other",
+            projectId: "proj_1",
+            parentThreadId: null,
+            archivedAt: null,
+            pinnedAt: null,
+            shelvedAt: null,
+            sectionId: null,
+            isUnread: false,
+            status: "idle",
+            environment: null,
+          },
+        });
+
+        return item ? (
+          <button type="button" onClick={() => void item.run({ requestRename() {} })}>
+            {item.label}
+          </button>
+        ) : null;
+      }
+
+      const view = renderSlot(
+        { component: Menu },
+        {},
+        {
+          pluginId: "canvas",
+          context: { projectId: "proj_1", threadId },
+          composer: threadComposer(threadId),
+          rpc: rpc(() => (test.enabled ? on : off)),
+          openThreadPanel: () => true,
+        },
+      );
+
+      await act(async () => {});
+      expect(view.navigateCalls).toEqual([]);
+
+      if (test.visible) {
+        fireEvent.click(await screen.findByRole("button", { name: "Open Canvas" }));
+        expect(view.navigateCalls).toEqual([openCanvas]);
+      } else {
+        expect(screen.queryByRole("button", { name: "Open Canvas" })).toBeNull();
+      }
+    },
+  );
 });
 
 describe("header button", () => {

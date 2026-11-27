@@ -63,7 +63,34 @@ function restoreNotificationLocks() {
   else Object.defineProperty(navigator, "locks", originalNotificationLocks);
 }
 
+const continuationDefaults = {
+  retryAt: null,
+  retryAttempt: null,
+  model: null,
+  canRetryNow: false,
+  cause: null,
+  failureLabel: null,
+  permissionMode: null,
+};
+
 const app = await loadPluginApp(() => import("./app.js"));
+
+it.each(["push-notifications/ringing", "push-notifications/off"])(
+  "renders %s inline with the menu color",
+  (name) => {
+    const Icon = app.icons.find((entry) => entry.name === name)?.component;
+
+    expect(Icon).toBeDefined();
+
+    if (Icon === undefined) throw new Error(`Missing registered icon ${name}`);
+    const { container } = render(<Icon className="size-full" />);
+    const svg = container.querySelector("svg");
+
+    expect(svg?.getAttribute("stroke")).toBe("currentColor");
+    expect(svg?.getAttribute("class")).toBe("size-full");
+    expect(svg?.querySelector("path")).not.toBeNull();
+  },
+);
 
 beforeEach(() => {
   Object.defineProperty(navigator, "locks", {
@@ -1549,6 +1576,7 @@ describe("chat notice cards", () => {
           sdk: {
             threads: {
               experimental_continuationState: async ({ threadId }) => ({
+                ...continuationDefaults,
                 threadId,
                 ...state,
               }),
@@ -1763,6 +1791,7 @@ describe("chat notice cards", () => {
         },
         threads: {
           experimental_continuationState: async ({ threadId }) => ({
+            ...continuationDefaults,
             threadId,
             available: false,
             pending: false,

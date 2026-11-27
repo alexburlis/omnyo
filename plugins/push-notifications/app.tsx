@@ -18,6 +18,7 @@ import {
   NotificationStateMigrationErrorV1,
   notificationPermission,
 } from "./client.js";
+import { NotificationIcon } from "./notification-icons.js";
 import { notificationsThreadAction } from "./notificationsAction.js";
 import {
   chatNoticeReducer,
@@ -295,6 +296,16 @@ function NotificationSettings() {
 }
 
 export default definePluginApp((app) => {
+  app.experimental_icons.register({
+    name: "push-notifications/ringing",
+    component: NotificationIcon,
+  });
+  app.experimental_icons.register({
+    name: "push-notifications/off",
+    component: ({ className }) => (
+      <NotificationIcon className={className} muted />
+    ),
+  });
   app.slots.experimental_appOverlay({
     id: "delivery",
     component: NotificationDelivery,

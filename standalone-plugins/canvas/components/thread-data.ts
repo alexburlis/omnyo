@@ -19,6 +19,8 @@ import { hasModeMention } from "./mode-mention";
 
 const modes = new ModelCache<CanvasMode>("Canvas could not load.");
 
+const emptyMode = { value: null, error: null };
+
 const boards = new ModelCache<Board>("The board could not refresh. Try again.");
 
 function useReconnect(refresh: () => void) {
@@ -31,7 +33,7 @@ function useReconnect(refresh: () => void) {
   }, [connection, refresh]);
 }
 
-function useThreadSignal(threadId: string, refresh: () => void) {
+function useThreadSignal(threadId: string | null, refresh: () => void) {
   useRealtime(realtimeChannel, (payload) => {
     const event = realtimePayloadSchema.safeParse(payload);
 
@@ -40,15 +42,20 @@ function useThreadSignal(threadId: string, refresh: () => void) {
   useReconnect(refresh);
 }
 
-export function useCanvasMode(threadId: string) {
+export function useCanvasMode(threadId: string | null) {
   const rpc = useRpc<CanvasRpcContract>();
 
   const entry = useSyncExternalStore(
-    useCallback((listener: () => void) => modes.subscribe(threadId, listener), [threadId]),
-    () => modes.read(threadId),
+    useCallback(
+      (listener: () => void) =>
+        threadId === null ? () => {} : modes.subscribe(threadId, listener),
+      [threadId],
+    ),
+    () => (threadId === null ? emptyMode : modes.read(threadId)),
   );
 
   const read = useCallback(async () => {
+    if (threadId === null) return null;
     const value = await rpc.call("mode.get", { threadId });
     const previous = modes.read(threadId).value;
 
@@ -61,10 +68,13 @@ export function useCanvasMode(threadId: string) {
       : value;
   }, [rpc, threadId]);
 
-  const refresh = useCallback(() => modes.load(threadId, read, true), [read, threadId]);
+  const refresh = useCallback(() => {
+    if (threadId !== null) modes.load(threadId, read, true);
+  }, [read, threadId]);
 
   const accept = useCallback(
     (mode: CanvasMode) => {
+      if (threadId === null) return;
       modes.accept(threadId, mode);
 
       if (!mode.canvas) boards.accept(threadId, null);
@@ -72,9 +82,11 @@ export function useCanvasMode(threadId: string) {
     [threadId],
   );
 
-  useEffect(() => modes.load(threadId, read), [read, threadId]);
   useEffect(() => {
-    if (entry.value?.canvas === false) boards.accept(threadId, null);
+    if (threadId !== null) modes.load(threadId, read);
+  }, [read, threadId]);
+  useEffect(() => {
+    if (threadId !== null && entry.value?.canvas === false) boards.accept(threadId, null);
   }, [entry.value, threadId]);
   useThreadSignal(threadId, refresh);
 
@@ -93,7 +105,7 @@ function stateOf(mode: CanvasMode | null, failed: boolean, pending: boolean): Ca
   return failed ? "failed" : "loading";
 }
 
-export function useCanvasState(threadId: string, composer: PluginComposerApi | null) {
+export function useCanvasState(threadId: string | null, composer: PluginComposerApi | null) {
   const pluginId = experimental_usePluginId();
   const { mode, failed, refresh, accept } = useCanvasMode(threadId);
 

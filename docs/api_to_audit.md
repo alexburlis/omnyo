@@ -4238,7 +4238,7 @@ and its unarchived, visible descendants
 `threadNotifications` realtime channel, and does the same for a thread on
 `thread.unarchived`; clients apply the rows they hold without a request. `item` resolves the level
 with the plugin's shared resolver, shows it as `detail` with a per-level icon
-(declared `push-notifications/ringing` and `push-notifications/off`, built-in
+(inline `push-notifications/ringing` and `push-notifications/off`, built-in
 `BellDot`), and `choices` sets it. The
 header menu, mobile recents, and both sidebar row menus render the host
 components; the row's hover quick actions read `experimental_useThreadActions`
