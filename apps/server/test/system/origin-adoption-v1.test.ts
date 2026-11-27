@@ -58,7 +58,7 @@ async function fixture() {
     selectedIds: ["a".repeat(64)],
     nonce: "b".repeat(64),
     fromOrigin: "https://bb.alexburlis.com",
-    toOrigin: "https://app.example.invalid",
+    toOrigin: "https://app.omnyohq.com",
   };
 
   const preparation = {
@@ -282,7 +282,7 @@ test("opens only finite bootstrap assets and same-origin control while the exact
     ).toBe(false);
     expect(
       await f.owner.permitsRequest(
-        `https://app.example.invalid.evil.example/assets/app.js`,
+        `https://app.omnyohq.com.evil.example/assets/app.js`,
         "GET",
         undefined,
       ),

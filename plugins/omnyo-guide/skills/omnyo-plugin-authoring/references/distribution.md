@@ -64,7 +64,7 @@ root:
 
 ```json
 {
-  "$schema": "https://app.example.invalid/schemas/plugins.schema.json",
+  "$schema": "https://app.omnyo.link/schemas/plugins.schema.json",
   "schemaVersion": 1,
   "name": "acme-plugins",
   "plugins": [

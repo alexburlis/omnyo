@@ -27,7 +27,7 @@ describe("supported relay", () => {
 });
 
 it.each([
-  "https://app.example.invalid",
+  "https://app.omnyo.link",
   "https://alice.slashnew.com",
   "https://alice.stg.slashnew.com",
   "https://user@alice.omnyo.link",

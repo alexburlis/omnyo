@@ -17,7 +17,7 @@ import type { RelayRebindInput } from "./relay-rebind.js";
 
 const checkpoint: RelayRebindInput = {
   fromBaseUrl: "https://slashnew.com",
-  fromServerUrl: "https://owner-relay.example.invalid",
+  fromServerUrl: "https://alexb.slashnew.com",
   userId: "usr_preserved",
   serverId: "srv_preserved",
   serverLabel: "alexb",
@@ -182,7 +182,7 @@ describe("same-identity relay rebind", () => {
   it.each([
     { fromBaseUrl: "https://slashnew.com.evil.test" },
     { fromServerUrl: "https://other.slashnew.com" },
-    { fromServerUrl: "https://owner-relay.example.invalid/path" },
+    { fromServerUrl: "https://alexb.slashnew.com/path" },
     { fromBaseUrl: "https://slashnew.com/" },
     { serverId: "srv_other" },
   ])(

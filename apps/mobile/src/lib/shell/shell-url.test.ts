@@ -152,8 +152,8 @@ describe("isRelaySignInRedirect", () => {
   it("does not treat a direct server's own pages as a relay sign-in", () => {
     expect(
       isRelaySignInRedirect(
-        "https://app.example.invalid/relay/authorize?host=app.example.invalid",
-        "https://app.example.invalid",
+        "https://app.omnyohq.com/relay/authorize?host=app.omnyohq.com",
+        "https://app.omnyohq.com",
       ),
     ).toBe(false);
     expect(isRelaySignInRedirect("not a url", RELAY)).toBe(false);
@@ -206,7 +206,7 @@ describe("decideShellNavigation", () => {
     expect(
       decideShellNavigation(
         { url: authorize, isTopFrame: true },
-        { mode: "direct", serverUrl: "https://app.example.invalid" },
+        { mode: "direct", serverUrl: "https://app.omnyohq.com" },
       ),
     ).toBe("open-external");
   });
@@ -225,12 +225,12 @@ function passesWebViewWhitelist(url: string, whitelist: readonly string[]) {
 describe("inline frames in the shell", () => {
   const direct = {
     mode: "direct" as const,
-    serverUrl: "https://app.example.invalid",
+    serverUrl: "https://app.omnyohq.com",
   };
 
   const frames = [
     "about:srcdoc",
-    "blob:https://app.example.invalid/1",
+    "blob:https://app.omnyohq.com/1",
     "data:text/html,<p>x</p>",
   ];
 
@@ -260,7 +260,7 @@ describe("inline frames in the shell", () => {
   });
 
   it("lets every inline frame reach the shell's navigation handler", () => {
-    for (const url of [...frames, "https://app.example.invalid/api/v1/x"]) {
+    for (const url of [...frames, "https://app.omnyohq.com/api/v1/x"]) {
       expect(passesWebViewWhitelist(url, SHELL_ORIGIN_WHITELIST)).toBe(true);
     }
   });

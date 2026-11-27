@@ -8,7 +8,7 @@ import { createTestAppHarness } from "../helpers/test-app.js";
 
 async function fixture(errors: Array<{ name: string; message: string }>) {
   const source = "https://bb.alexburlis.com";
-  const destination = "https://app.example.invalid";
+  const destination = "https://app.omnyohq.com";
 
   const dataDir = await realpath(
     await mkdtemp(join(tmpdir(), "omnyo-origin-route-")),

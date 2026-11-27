@@ -11,7 +11,7 @@ import { readPluginManifest } from "./manifest.js";
 const COLLECTION_MANIFEST_PATH = ".omnyo/plugins.json";
 
 export const COLLECTION_SCHEMA_URL =
-  "https://app.example.invalid/schemas/plugins.schema.json";
+  "https://app.omnyo.link/schemas/plugins.schema.json";
 
 const COLLECTION_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 
@@ -46,7 +46,7 @@ const pluginCollectionManifestSchema = z
     $schema: z
       .enum([
         COLLECTION_SCHEMA_URL,
-        "https://app.example.invalid/schemas/plugins.schema.json",
+        "https://app.omnyohq.com/schemas/plugins.schema.json",
       ])
       .optional(),
     schemaVersion: z.literal(1),

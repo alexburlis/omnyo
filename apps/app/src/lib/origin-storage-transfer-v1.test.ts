@@ -48,7 +48,7 @@ const ticket: OriginStorageTicketV1 = {
   selectedIds: ["a".repeat(64)],
   nonce: "b".repeat(64),
   fromOrigin: "https://bb.alexburlis.com",
-  toOrigin: "https://app.example.invalid",
+  toOrigin: "https://app.omnyohq.com",
 };
 
 function fixture() {

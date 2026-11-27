@@ -40,7 +40,7 @@ const connectServer = {
 
 it("uses the private remote target only for a new client and preserves saved target choices", async () => {
   const storagePath = await createStoragePath();
-  const defaultCustomServerUrl = "https://app.example.invalid";
+  const defaultCustomServerUrl = "https://app.omnyo.link";
 
   const fresh = createServerTargetStore({
     storagePath,
@@ -99,17 +99,17 @@ it("moves saved private direct URLs without selecting a different mode or changi
   const storagePath = await createStoragePath();
 
   const historical = {
-    toOrigin: "https://app.example.invalid",
+    toOrigin: "https://app.omnyohq.com",
     mappingSha256: "a".repeat(64),
   };
 
   const document = {
     target: "builtin",
-    customServerUrl: "https://app.example.invalid",
+    customServerUrl: "https://app.omnyohq.com",
     customServerUrls: [
-      "https://app.example.invalid",
-      "https://app.example.invalid/projects/example?view=chat",
-      "https://app.example.invalid.example",
+      "https://app.omnyohq.com",
+      "https://app.omnyohq.com/projects/example?view=chat",
+      "https://app.omnyohq.com.example",
       firstUrl,
     ],
     connectServer,
@@ -121,11 +121,11 @@ it("moves saved private direct URLs without selecting a different mode or changi
   await store.load();
   expect(store.getTarget()).toEqual({ kind: "builtin" });
   expect(store.getConnectServer()).toEqual(connectServer);
-  expect(store.getCustomServerUrl()).toBe("https://app.example.invalid");
+  expect(store.getCustomServerUrl()).toBe("https://app.omnyo.link");
   expect(store.getCustomServerUrls()).toEqual([
-    "https://app.example.invalid",
-    "https://app.example.invalid/projects/example?view=chat",
-    "https://app.example.invalid.example",
+    "https://app.omnyo.link",
+    "https://app.omnyo.link/projects/example?view=chat",
+    "https://app.omnyohq.com.example",
     firstUrl,
   ]);
   const migrated = await readFile(storagePath, "utf8");
@@ -136,7 +136,7 @@ it("moves saved private direct URLs without selecting a different mode or changi
   expect(await reloaded.setTarget("custom")).toBe(true);
   expect(reloaded.getTarget()).toEqual({
     kind: "custom",
-    url: "https://app.example.invalid",
+    url: "https://app.omnyo.link",
   });
 });
 
@@ -304,7 +304,7 @@ const admittedOrigin = {
   version: 1,
   adoptionId: "selected-origin-owner",
   fromOrigin: "https://bb.alexburlis.com",
-  toOrigin: "https://app.example.invalid",
+  toOrigin: "https://app.omnyohq.com",
   serverHostId: "host-synthetic",
   runtimeId: "runtime-synthetic",
   selectedIds: ["a".repeat(64)],

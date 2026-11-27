@@ -10,7 +10,7 @@ vi.mock("expo-constants", () => ({
     expoConfig: {
       extra: {
         omnyoMobileVariant: "private",
-        defaultServerUrl: "https://app.example.invalid",
+        defaultServerUrl: "https://app.omnyohq.com",
       },
     },
   },

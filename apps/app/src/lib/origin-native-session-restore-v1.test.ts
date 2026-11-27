@@ -31,7 +31,7 @@ function fixture() {
     version: 1,
     adoptionId: "selected-adoption",
     fromOrigin: "https://bb.alexburlis.com",
-    toOrigin: "https://app.example.invalid",
+    toOrigin: "https://app.omnyohq.com",
     serverHostId: "original-host",
     runtimeId: "original-control",
     selectedIds: [id, "b".repeat(64)],

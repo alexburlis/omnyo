@@ -7,23 +7,23 @@ import {
 
 describe("private coordinator address migration", () => {
   it("preserves the request path and query on the same private gateway", () => {
-    expect(migrateLegacyPrivateServerUrl("https://app.example.invalid")).toBe(
-      "https://app.example.invalid",
+    expect(migrateLegacyPrivateServerUrl("https://app.omnyohq.com")).toBe(
+      "https://app.omnyo.link",
     );
     expect(
       migrateLegacyPrivateServerUrl(
-        "https://app.example.invalid/private-updates/latest/macos/?v=1#release",
+        "https://app.omnyohq.com/private-updates/latest/macos/?v=1#release",
       ),
-    ).toBe("https://app.example.invalid/private-updates/latest/macos/?v=1#release");
+    ).toBe("https://app.omnyo.link/private-updates/latest/macos/?v=1#release");
   });
 
   it.each([
-    "https://app.example.invalid",
+    "https://app.omnyo.link",
     "https://alexb.omnyo.link",
-    "https://app.example.invalid.example",
-    "https://app.example.invalid:9443",
-    "https://user@app.example.invalid",
-    "http://app.example.invalid",
+    "https://app.omnyohq.com.example",
+    "https://app.omnyohq.com:9443",
+    "https://user@app.omnyohq.com",
+    "http://app.omnyohq.com",
   ])("leaves other addresses alone (%s)", (value) => {
     expect(migrateLegacyPrivateServerUrl(value)).toBeNull();
   });
@@ -31,7 +31,7 @@ describe("private coordinator address migration", () => {
 
 describe("retired relay address migration", () => {
   it("maps only production and staging tenant addresses and preserves their routes", () => {
-    expect(migrateLegacyRelayServerUrl("https://owner-relay.example.invalid")).toBe(
+    expect(migrateLegacyRelayServerUrl("https://alexb.slashnew.com")).toBe(
       "https://alexb.omnyo.link",
     );
     expect(
@@ -51,11 +51,11 @@ describe("retired relay address migration", () => {
     "https://slashnew.com",
     "https://stg.slashnew.com",
     "https://a.b.slashnew.com",
-    "https://owner-relay.example.invalid.attacker.test",
-    "https://owner-relay.example.invalid@attacker.test",
-    "https://user@owner-relay.example.invalid",
-    "https://owner-relay.example.invalid:8443",
-    "http://owner-relay.example.invalid",
+    "https://alexb.slashnew.com.attacker.test",
+    "https://alexb.slashnew.com@attacker.test",
+    "https://user@alexb.slashnew.com",
+    "https://alexb.slashnew.com:8443",
+    "http://alexb.slashnew.com",
     "https://alexb.omnyo.link",
     "http://localhost:1234",
     "https://-invalid.slashnew.com",

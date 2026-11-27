@@ -102,7 +102,7 @@ const originMappingSchema = z
     version: z.literal(1),
     adoptionId: z.string().min(1).max(200),
     fromOrigin: z.literal("https://bb.alexburlis.com"),
-    toOrigin: z.literal("https://app.example.invalid"),
+    toOrigin: z.literal("https://app.omnyohq.com"),
     serverHostId: z.string().min(1).max(200),
     runtimeId: z.string().min(1).max(200),
     selectedIds: z.array(digest).min(1).max(32),
@@ -122,7 +122,7 @@ const originWindowSchema = z
         selectedIds: z.array(digest).min(1).max(32),
         nonce: digest,
         fromOrigin: z.literal("https://bb.alexburlis.com"),
-        toOrigin: z.literal("https://app.example.invalid"),
+        toOrigin: z.literal("https://app.omnyohq.com"),
       })
       .strict(),
     returnPath: z

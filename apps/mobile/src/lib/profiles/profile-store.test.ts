@@ -250,7 +250,7 @@ it("migrates active and inactive relay profiles in place and retries a partial w
       ...direct,
       id: "private-direct",
       createdAt: 5,
-      serverUrl: "https://app.example.invalid",
+      serverUrl: "https://app.omnyohq.com",
     },
     {
       ...direct,
@@ -288,7 +288,7 @@ it("migrates active and inactive relay profiles in place and retries a partial w
     { ...profiles[0], serverUrl: "https://bee.omnyo.link" },
     { ...profiles[1], serverUrl: "https://bee.stg.omnyo.link" },
     profiles[2],
-    { ...profiles[3], serverUrl: "https://app.example.invalid" },
+    { ...profiles[3], serverUrl: "https://app.omnyo.link" },
     profiles[4],
   ]);
   const bytes = new Map(storage.entries);

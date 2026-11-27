@@ -17,7 +17,7 @@ const ticketSchema = z
     selectedIds: z.array(digest).min(1).max(32),
     nonce: digest,
     fromOrigin: z.literal("https://bb.alexburlis.com"),
-    toOrigin: z.literal("https://app.example.invalid"),
+    toOrigin: z.literal("https://app.omnyohq.com"),
   })
   .strict()
   .refine(
@@ -336,7 +336,7 @@ export function createOriginAdoptionV1(args: {
 
       if (
         target.origin !== "https://bb.alexburlis.com" &&
-        target.origin !== "https://app.example.invalid"
+        target.origin !== "https://app.omnyohq.com"
       )
         return false;
 

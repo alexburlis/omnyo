@@ -470,7 +470,7 @@ ordinary plugin package with its own package.json and Omnyo manifest. An optiona
 collection manifest at .omnyo/plugins.json indexes them:
 
 {
-"$schema": "https://app.example.invalid/schemas/plugins.schema.json",
+"$schema": "https://app.omnyo.link/schemas/plugins.schema.json",
 "schemaVersion": 1,
 "name": "acme-plugins",
 "plugins": [

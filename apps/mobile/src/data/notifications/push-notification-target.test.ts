@@ -21,7 +21,7 @@ const lan: PushTargetProfile = {
 const tailnet: PushTargetProfile = {
   id: "p4",
   mode: "direct",
-  serverUrl: "https://app.example.invalid",
+  serverUrl: "https://app.omnyohq.com",
 };
 
 const relay: PushTargetProfile = {
@@ -153,7 +153,7 @@ describe("resolvePushTargetProfile", () => {
 
     expect(
       await resolvePushTargetProfile(
-        { ...target, serverUrl: "https://app.example.invalid" },
+        { ...target, serverUrl: "https://app.omnyohq.com" },
         { profiles: [tailnet, relay], activeProfileId: "p5", probeThread },
       ),
     ).toBe(relay);
@@ -166,7 +166,7 @@ describe("resolvePushTargetProfile", () => {
   it("opens the hinted server only when the active relay route answers that the thread is missing", async () => {
     expect(
       await resolvePushTargetProfile(
-        { ...target, serverUrl: "https://app.example.invalid" },
+        { ...target, serverUrl: "https://app.omnyohq.com" },
         {
           profiles: [tailnet, relay],
           activeProfileId: "p5",
@@ -177,7 +177,7 @@ describe("resolvePushTargetProfile", () => {
   });
 
   it("stays on the active relay route when its probe is refused, fails or times out", async () => {
-    const hint = { ...target, serverUrl: "https://app.example.invalid" };
+    const hint = { ...target, serverUrl: "https://app.omnyohq.com" };
 
     const timeout = Object.assign(new Error("The operation timed out."), {
       name: "TimeoutError",
@@ -206,7 +206,7 @@ describe("resolvePushTargetProfile", () => {
     const probeThread = vi.fn(async (): Promise<ThreadProbe> => "found");
     expect(
       await resolvePushTargetProfile(
-        { ...target, serverUrl: "https://app.example.invalid" },
+        { ...target, serverUrl: "https://app.omnyohq.com" },
         { profiles: [tailnet, relay], activeProfileId: "p4", probeThread },
       ),
     ).toBe(tailnet);
@@ -227,7 +227,7 @@ describe("resolvePushTargetProfile", () => {
 it("routes queued old-domain notifications to the migrated profile without probing the retired host", async () => {
   const target = parsePushNotificationData({
     threadId: "thr_original",
-    serverUrl: "https://owner-relay.example.invalid",
+    serverUrl: "https://alexb.slashnew.com",
   });
 
   expect(target).toEqual({

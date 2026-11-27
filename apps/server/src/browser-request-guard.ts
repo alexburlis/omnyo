@@ -249,8 +249,8 @@ export function originAdoptionRequestUrlV1(
     ![
       "bb.alexburlis.com",
       "bb.alexburlis.com:443",
-      "app.example.invalid",
-      "app.example.invalid:443",
+      "app.omnyohq.com",
+      "app.omnyohq.com:443",
     ].includes(host)
   )
     return null;

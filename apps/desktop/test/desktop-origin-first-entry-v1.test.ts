@@ -22,7 +22,7 @@ async function selection() {
     version: 1 as const,
     adoptionId: "selected-multi-device-adoption",
     fromOrigin: "https://bb.alexburlis.com",
-    toOrigin: "https://app.example.invalid",
+    toOrigin: "https://app.omnyohq.com",
     serverHostId: "fixture-host",
     runtimeId: "held-control-runtime",
     selectedIds,

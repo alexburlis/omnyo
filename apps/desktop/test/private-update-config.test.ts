@@ -63,7 +63,7 @@ describe("private desktop feed configuration", () => {
         expect(await readPrivateUpdateConfig(root, platform, channel)).toEqual({
           provider: "generic",
           channel,
-          url: `https://app.example.invalid/private-updates/${channel}/${platform}/`,
+          url: `https://app.omnyo.link/private-updates/${channel}/${platform}/`,
         });
         await writeFile(
           join(root, "private-updates.json"),
@@ -130,17 +130,17 @@ describe("private desktop feed configuration", () => {
       parsePrivateUpdateConfig({
         ...configured,
         channel: "nightly",
-        url: "https://app.example.invalid/private-updates/nightly/macos/",
+        url: "https://app.omnyohq.com/private-updates/nightly/macos/",
       }),
     ).toEqual({
       provider: "generic",
       channel: "nightly",
-      url: "https://app.example.invalid/private-updates/nightly/macos/",
+      url: "https://app.omnyo.link/private-updates/nightly/macos/",
     });
 
     for (const url of [
-      "https://app.example.invalid.example/private-updates/latest/macos/",
-      "https://app.example.invalid:8443/private-updates/latest/macos/",
+      "https://app.omnyohq.com.example/private-updates/latest/macos/",
+      "https://app.omnyohq.com:8443/private-updates/latest/macos/",
       "https://private.fixture.invalid/releases/",
     ])
       expect(parsePrivateUpdateConfig({ ...configured, url })?.url).toBe(url);

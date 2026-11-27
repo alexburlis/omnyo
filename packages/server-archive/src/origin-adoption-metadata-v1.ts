@@ -15,7 +15,7 @@ export const originAdoptionRecordSchemaV1 = z
     selectedIds: z.array(digest).min(1).max(32),
     nonceSha256: digest,
     fromOrigin: z.literal("https://bb.alexburlis.com"),
-    toOrigin: z.literal("https://app.example.invalid"),
+    toOrigin: z.literal("https://app.omnyohq.com"),
     holdId: z.string().min(1),
     ownerId: z.string().min(1),
     runtimeId: z.string().min(1),

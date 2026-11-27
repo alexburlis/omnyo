@@ -3,7 +3,7 @@ const LEGACY_APEXES = [
   ["slashnew.com", "omnyo.link"],
 ] as const;
 
-export const PRIVATE_APP_HOSTNAME = "app.example.invalid";
+export const PRIVATE_APP_HOSTNAME = "app.omnyo.link";
 
 function secureUrl(value: string): URL | null {
   try {
@@ -44,7 +44,7 @@ function replaceHostname(value: string, url: URL, hostname: string): string {
 export function migrateLegacyPrivateServerUrl(value: string): string | null {
   const url = secureUrl(value);
 
-  return url?.hostname === "app.example.invalid"
+  return url?.hostname === "app.omnyohq.com"
     ? replaceHostname(value, url, PRIVATE_APP_HOSTNAME)
     : null;
 }

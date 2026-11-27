@@ -180,8 +180,8 @@ describe("collection manifest in a checkout", () => {
   });
 
   it.each([
-    "https://app.example.invalid/schemas/plugins.schema.json",
-    "https://app.example.invalid/schemas/plugins.schema.json",
+    "https://app.omnyo.link/schemas/plugins.schema.json",
+    "https://app.omnyohq.com/schemas/plugins.schema.json",
   ])(
     "reads existing collection manifests with schema identifier %s",
     async ($schema) => {

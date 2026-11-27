@@ -98,7 +98,7 @@ async function fixture() {
     selectedIds: ["a".repeat(64)],
     nonce: "b".repeat(64),
     fromOrigin: "https://bb.alexburlis.com",
-    toOrigin: "https://app.example.invalid",
+    toOrigin: "https://app.omnyohq.com",
   };
 
   await owner.prepare({
@@ -117,7 +117,7 @@ async function fixture() {
     return context.text("ordinary", 418);
   });
 
-  const request = (path: string, host = "app.example.invalid") =>
+  const request = (path: string, host = "app.omnyohq.com") =>
     app.request("https://" + host + path, { headers: { host } });
 
   return {
