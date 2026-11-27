@@ -179,3 +179,5 @@ export * from "./inbox.js";
 export * from "./provider-session-housekeeping.js";
 
 export * from "./usage-telemetry.js";
+
+export * from "./realtime-target-retention.js";

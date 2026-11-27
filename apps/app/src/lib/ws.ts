@@ -1,9 +1,9 @@
 import ReconnectingWebSocket from "partysocket/ws";
+import { RealtimeTargetRetention } from "@omnyo/domain";
 import {
   changedMessageLenientSchema,
   pluginSignalLenientSchema,
   pongMessageLenientSchema,
-  realtimeSubscriptionTargetKey,
   threadOpenSignalLenientSchema,
   threadPaneActionSignalLenientSchema,
 } from "@omnyo/server-contract";
@@ -91,14 +91,9 @@ function createDefaultBrowserEvents(): WebSocketManagerBrowserEvents {
   };
 }
 
-interface ActiveSubscription {
-  count: number;
-  target: RealtimeSubscriptionTarget;
-}
-
 export class WebSocketManager {
   private socket: ReconnectingWebSocket | null = null;
-  private subscriptions = new Map<string, ActiveSubscription>();
+  private subscriptions = new RealtimeTargetRetention();
   private callbacks = new Set<ChangeCallback>();
   private threadOpenCallbacks = new Set<ThreadOpenCallback>();
   private threadPaneActionCallbacks = new Set<ThreadPaneActionCallback>();
@@ -167,8 +162,8 @@ export class WebSocketManager {
       this.setConnectionState("connected");
       this.startPingLoop();
 
-      for (const subscription of this.subscriptions.values()) {
-        this.sendMessage({ type: "subscribe", target: subscription.target });
+      for (const target of this.subscriptions.values()) {
+        this.sendMessage({ type: "subscribe", target });
       }
 
       const event: WebSocketConnectedEvent = reconnected
@@ -493,16 +488,7 @@ export class WebSocketManager {
   }
 
   subscribe(target: RealtimeSubscriptionTarget): void {
-    const key = realtimeSubscriptionTargetKey(target);
-    const existing = this.subscriptions.get(key);
-
-    if (existing) {
-      existing.count += 1;
-
-      return;
-    }
-
-    this.subscriptions.set(key, { count: 1, target });
+    if (!this.subscriptions.retain(target)) return;
 
     if (this.socket?.readyState === WebSocket.OPEN) {
       this.sendMessage({ type: "subscribe", target });
@@ -510,20 +496,7 @@ export class WebSocketManager {
   }
 
   unsubscribe(target: RealtimeSubscriptionTarget): void {
-    const key = realtimeSubscriptionTargetKey(target);
-    const existing = this.subscriptions.get(key);
-
-    if (!existing) {
-      return;
-    }
-
-    if (existing.count > 1) {
-      existing.count -= 1;
-
-      return;
-    }
-
-    this.subscriptions.delete(key);
+    if (!this.subscriptions.release(target)) return;
 
     if (this.socket?.readyState === WebSocket.OPEN) {
       this.sendMessage({ type: "unsubscribe", target });

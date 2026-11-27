@@ -3,7 +3,7 @@ import type {
   ClientMessage,
   RealtimeSubscriptionTarget,
 } from "@omnyo/domain";
-import { realtimeSubscriptionTargetKey } from "@omnyo/domain";
+import { RealtimeTargetRetention } from "@omnyo/domain";
 import { serverMessageLenientSchema } from "@omnyo/server-contract";
 import { resolveRealtimeUrl } from "./realtime-url.js";
 import type {
@@ -36,11 +36,6 @@ const RECONNECT_DELAY_MULTIPLIER = 1.5;
 
 interface CreateOmnyoRealtimeClientArgs {
   transport: OmnyoSdkTransport;
-}
-
-interface TargetSubscription {
-  count: number;
-  target: RealtimeSubscriptionTarget;
 }
 
 interface OptionalTargetIdMatchesArgs {
@@ -182,7 +177,7 @@ function isIdScopedChangedListenerFor<
 
 export class OmnyoRealtimeClient implements OmnyoRealtime {
   private readonly listeners = new Set<RealtimeListenerRecord>();
-  private readonly targetSubscriptions = new Map<string, TargetSubscription>();
+  private readonly targetSubscriptions = new RealtimeTargetRetention();
   private readonly transport: OmnyoSdkTransport;
   private lastConnectionEvent: OmnyoRealtimeConnectionEvent | null = null;
   private reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS;
@@ -318,16 +313,7 @@ export class OmnyoRealtimeClient implements OmnyoRealtime {
   }
 
   private addTarget(target: RealtimeSubscriptionTarget): void {
-    const key = realtimeSubscriptionTargetKey(target);
-    const existing = this.targetSubscriptions.get(key);
-
-    if (existing) {
-      existing.count += 1;
-
-      return;
-    }
-
-    this.targetSubscriptions.set(key, { count: 1, target });
+    if (!this.targetSubscriptions.retain(target)) return;
 
     if (this.socket?.readyState === SOCKET_OPEN) {
       this.sendTargetMessage("subscribe", target);
@@ -335,20 +321,7 @@ export class OmnyoRealtimeClient implements OmnyoRealtime {
   }
 
   private removeTarget(target: RealtimeSubscriptionTarget): void {
-    const key = realtimeSubscriptionTargetKey(target);
-    const existing = this.targetSubscriptions.get(key);
-
-    if (!existing) {
-      return;
-    }
-
-    if (existing.count > 1) {
-      existing.count -= 1;
-
-      return;
-    }
-
-    this.targetSubscriptions.delete(key);
+    if (!this.targetSubscriptions.release(target)) return;
 
     if (this.socket?.readyState === SOCKET_OPEN) {
       this.sendTargetMessage("unsubscribe", target);
@@ -405,8 +378,8 @@ export class OmnyoRealtimeClient implements OmnyoRealtime {
       this.reconnectingAfterUnexpectedClose = false;
       this.reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS;
 
-      for (const subscription of this.targetSubscriptions.values()) {
-        this.sendTargetMessage("subscribe", subscription.target);
+      for (const target of this.targetSubscriptions.values()) {
+        this.sendTargetMessage("subscribe", target);
       }
 
       this.resolveSocketReadyPromise();

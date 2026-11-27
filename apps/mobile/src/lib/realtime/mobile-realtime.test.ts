@@ -112,6 +112,43 @@ describe("createMobileRealtime", () => {
     expect(factory.sockets).toHaveLength(5);
   });
 
+  it("keeps equal-key holders across suspension and clears retained targets on disposal", () => {
+    const { factory, realtime } = setup();
+    realtime.subscribe(THREAD_TARGET);
+    realtime.subscribe({ ...THREAD_TARGET });
+    realtime.subscribe(LIST_TARGET);
+    realtime.connect();
+    factory.latest().open();
+    const first = factory.latest();
+    realtime.suspend();
+    realtime.unsubscribe({ ...THREAD_TARGET });
+    realtime.unsubscribe(LIST_TARGET);
+    realtime.unsubscribe(LIST_TARGET);
+    expect(first.sentMessages()).toEqual([
+      { type: "subscribe", target: THREAD_TARGET },
+      { type: "subscribe", target: LIST_TARGET },
+    ]);
+    realtime.resume();
+    const replacement = factory.latest();
+    replacement.open();
+    expect(replacement.sentMessages()).toEqual([
+      { type: "subscribe", target: THREAD_TARGET },
+    ]);
+    realtime.unsubscribe({ ...THREAD_TARGET });
+    realtime.unsubscribe(THREAD_TARGET);
+    expect(replacement.sentMessages()).toEqual([
+      { type: "subscribe", target: THREAD_TARGET },
+      { type: "unsubscribe", target: THREAD_TARGET },
+    ]);
+    realtime.subscribe(LIST_TARGET);
+    realtime.dispose();
+    realtime.dispose();
+    realtime.resume();
+    realtime.connect();
+    vi.advanceTimersByTime(60_000);
+    expect(factory.sockets).toHaveLength(2);
+  });
+
   it("caps the backoff at 30s", () => {
     const options = { minDelayMs: 1000, maxDelayMs: 30_000, growFactor: 1.5 };
     expect(reconnectDelayMs(0, options)).toBe(1000);
