@@ -1,4 +1,4 @@
-import { defineRpcContract } from "@omnyo/plugin-sdk";
+import { defineRpcContract } from "./rpc-contract.js";
 import { z } from "zod";
 
 const id = z.string().min(1).max(200);
@@ -10,7 +10,7 @@ const boundedText = (max: number) =>
     .max(max)
     .refine((value) => Buffer.byteLength(value, "utf8") <= max);
 
-export const workflowModelInputSchema = z
+const workflowModelInputSchema = z
   .object({
     hostId: id,
     attemptId: id,
@@ -25,7 +25,7 @@ export const workflowModelInputSchema = z
   })
   .strict();
 
-export const workflowModelFailureCodeSchema = z.enum([
+const workflowModelFailureCodeSchema = z.enum([
   "caller_not_allowed",
   "subscription_transport_unverified",
   "allowance_unavailable",
@@ -35,7 +35,7 @@ export const workflowModelFailureCodeSchema = z.enum([
   "cancelled",
 ]);
 
-export const workflowModelFailureSchema = z
+const workflowModelFailureSchema = z
   .object({
     ok: z.literal(false),
     attemptId: id,
@@ -44,7 +44,7 @@ export const workflowModelFailureSchema = z
   })
   .strict();
 
-export const workflowModelResultSchema = z.union([
+const workflowModelResultSchema = z.union([
   z
     .object({
       ok: z.literal(true),
@@ -55,7 +55,7 @@ export const workflowModelResultSchema = z.union([
   workflowModelFailureSchema,
 ]);
 
-export const workflowModelCapabilitiesSchema = z.union([
+const workflowModelCapabilitiesSchema = z.union([
   z.object({ available: z.literal(true) }).strict(),
   z
     .object({
@@ -70,19 +70,23 @@ export const workflowModelCapabilitiesSchema = z.union([
     .strict(),
 ]);
 
-export type WorkflowModelCapabilities = z.infer<
+export type ExperimentalWorkflowModelV1Capabilities = z.infer<
   typeof workflowModelCapabilitiesSchema
 >;
 
-export type WorkflowModelInput = z.infer<typeof workflowModelInputSchema>;
+export type ExperimentalWorkflowModelV1Input = z.infer<
+  typeof workflowModelInputSchema
+>;
 
-export type WorkflowModelResult = z.infer<typeof workflowModelResultSchema>;
+export type ExperimentalWorkflowModelV1Result = z.infer<
+  typeof workflowModelResultSchema
+>;
 
-export type WorkflowModelFailureCode = z.infer<
+export type ExperimentalWorkflowModelV1FailureCode = z.infer<
   typeof workflowModelFailureCodeSchema
 >;
 
-export const workflowModelContract = defineRpcContract({
+const workflowModelContract = defineRpcContract({
   workflowModelCapabilities: {
     input: workflowModelInputSchema.pick({ hostId: true, model: true }),
     output: workflowModelCapabilitiesSchema,
@@ -92,3 +96,12 @@ export const workflowModelContract = defineRpcContract({
     output: workflowModelResultSchema,
   },
 });
+
+export const experimental_workflowModelV1 = {
+  inputSchema: workflowModelInputSchema,
+  resultSchema: workflowModelResultSchema,
+  capabilitiesSchema: workflowModelCapabilitiesSchema,
+  failureSchema: workflowModelFailureSchema,
+  failureCodeSchema: workflowModelFailureCodeSchema,
+  contract: workflowModelContract,
+} as const;

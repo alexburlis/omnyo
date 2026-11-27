@@ -1254,6 +1254,19 @@ content-block vocabulary; decide whether legacy aggregate fields still need to
 be accepted; and define any image MIME validation, decoding, or payload-size
 policy at the server boundary before making the helper stable.
 
+## Workflow model contract v1
+
+`experimental_workflowModelV1` from `@omnyo/plugin-sdk/workflow-model` provides
+strict input, result, capability and failure schemas plus the
+`workflowModelCapabilities` and `workflowModelComplete` RPC contract. The schema
+limits remain 128 KiB of UTF-8 prompt text, 64 KiB of output and a 60-second
+deadline. Inferred `ExperimentalWorkflowModelV1*` types describe these schemas.
+
+Provider caller authorization, included-subscription eligibility, pool routing
+and host execution remain local to each plugin. Account Pooler extends the base
+input schema with its provider and route fields and validates both RPC boundaries.
+This subpath is for Node server and host entries; it is not a frontend export.
+
 ## Provider usage source v1
 
 `experimental_providerUsageSourceV1` from

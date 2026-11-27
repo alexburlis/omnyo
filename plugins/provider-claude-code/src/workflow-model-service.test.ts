@@ -1,7 +1,9 @@
 import { createFakePluginHost } from "@omnyo/plugin-sdk/testing";
 import { describe, expect, it, vi } from "vitest";
 import { registerWorkflowModelService } from "./workflow-model-service.js";
-import { workflowModelInputSchema } from "./workflow-contract.js";
+import { experimental_workflowModelV1 } from "@omnyo/plugin-sdk/workflow-model";
+
+const { inputSchema: workflowModelInputSchema } = experimental_workflowModelV1;
 
 const input = {
   hostId: "host-1",

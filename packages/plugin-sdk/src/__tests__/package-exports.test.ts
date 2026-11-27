@@ -35,6 +35,7 @@ describe("packed plugin SDK exports", () => {
     expect(Object.keys(packageJson.exports)).toEqual([
       ".",
       "./provider-usage",
+      "./workflow-model",
       "./provider-bridge",
       "./provider-bridge/testing",
       "./provider-bridge/acp",

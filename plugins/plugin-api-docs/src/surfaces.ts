@@ -1165,6 +1165,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "ExperimentalPluginWebSocketHandlers",
           "defineRpcContract",
           "experimental_providerUsageSourceV1",
+          "experimental_workflowModelV1",
           "experimental_registerHostProviderUsageSourceV1",
           "PluginRpcContract",
           "PluginRpcError",
