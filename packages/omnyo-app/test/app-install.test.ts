@@ -39,7 +39,7 @@ async function checkoutWithOrigin(url: string): Promise<string> {
 }
 
 describe("app install resolution", { timeout: 30_000 }, () => {
-  it("recognizes get-bb/bb over https and ssh, and nothing else", () => {
+  it("recognizes alexburlis/omnyo and get-bb/bb over https and ssh, and nothing else", () => {
     expect(isOfficialSourceRemote("https://github.com/get-bb/bb.git")).toBe(
       true,
     );
@@ -51,9 +51,21 @@ describe("app install resolution", { timeout: 30_000 }, () => {
     expect(
       isOfficialSourceRemote("https://x-access-token@github.com/get-bb/bb.git"),
     ).toBe(true);
+    expect(
+      isOfficialSourceRemote("https://github.com/alexburlis/omnyo.git"),
+    ).toBe(true);
+    expect(isOfficialSourceRemote("git@github.com:alexburlis/omnyo.git")).toBe(
+      true,
+    );
+    expect(
+      isOfficialSourceRemote("ssh://git@github.com/alexburlis/omnyo"),
+    ).toBe(true);
     expect(isOfficialSourceRemote("git@github.com:someone/omnyo.git")).toBe(
       false,
     );
+    expect(
+      isOfficialSourceRemote("https://github.com/alexburlis/omnyo-fork"),
+    ).toBe(false);
     expect(isOfficialSourceRemote("https://github.com/get-bb/bb-fork")).toBe(
       false,
     );
