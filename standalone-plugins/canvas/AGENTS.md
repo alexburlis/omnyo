@@ -32,7 +32,7 @@
   visual work. Task length or multiple steps alone do not justify a board.
 - On desktop, enabled boards open in their own chat's side panel without
   changing chats or pane focus. Reopen on return, but preserve manual panel
-  choices during the current visit. Compact screens keep the header button.
+  choices during the current visit. On compact screens, open the board from Thread actions → Open Canvas.
 - Serve only passive raster images and video. HTML nodes stay in a sandboxed
   frame without same-origin access.
 - Module heights are measured before modules come into view and remembered per
