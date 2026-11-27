@@ -34,7 +34,7 @@ const PRIVATE_KEY_PATTERN =
   /-----BEGIN (?:[A-Z ]* )?PRIVATE KEY-----[\s\S]*?(?:-----END (?:[A-Z ]* )?PRIVATE KEY-----|$)/g;
 
 const PROVIDER_TOKEN_PATTERN =
-  /\boseo_[A-Za-z0-9._-]{11,}|\b(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9_]{8,}|github_pat_[A-Za-z0-9_]{8,}|xox[baprs]-[A-Za-z0-9-]{8,}|(?:bb|omnyo)(?:de|cm|cred|dh)_[A-Za-z0-9_-]{8,}|AKIA[A-Z0-9]{16})\b/g;
+  /\boseo_[A-Za-z0-9._-]{11,}|\bghs_[0-9]+_[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+){2}(?![A-Za-z0-9_-])|\b(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9_]{8,}|github_pat_[A-Za-z0-9_]{8,}|xox[baprs]-[A-Za-z0-9-]{8,}|(?:bb|omnyo)(?:de|cm|cred|dh)_[A-Za-z0-9_-]{8,}|AKIA[A-Z0-9]{16})\b/g;
 
 const JWT_PATTERN = /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g;
 

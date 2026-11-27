@@ -327,6 +327,7 @@
     "thread/goal/clear",
     "thread/name/set",
     "thread/resume",
+    "thread/speed/set",
     "thread/start",
     "thread/stop",
     "thread/unarchive",

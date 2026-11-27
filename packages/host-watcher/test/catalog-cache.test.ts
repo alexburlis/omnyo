@@ -629,6 +629,7 @@ describe("observed command catalog", () => {
       const file = path.join(child, "SKILL.md");
       await fs.mkdir(child);
       await fs.writeFile(file, "metadata");
+      const rootStampStarted = createDeferredPromise<void>();
       const releaseRoot = createDeferredPromise<void>();
       const originalLstat = fs.lstat.bind(fs);
       let held = false;
@@ -638,6 +639,7 @@ describe("observed command catalog", () => {
         .mockImplementation(async (...args) => {
           if (String(args[0]) === root && !held) {
             held = true;
+            rootStampStarted.resolve();
             await releaseRoot.promise;
           }
 
@@ -647,6 +649,7 @@ describe("observed command catalog", () => {
       try {
         const first = await cache.getSnapshot("key", async (observe) => {
           const observingRoot = observe(root);
+          await rootStampStarted.promise;
           await observe(file);
           releaseRoot.resolve();
           await observingRoot;
