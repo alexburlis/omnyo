@@ -36,6 +36,13 @@ const plugin = {
   icons: {},
 };
 
+const normalizedPlugin = {
+  ...plugin,
+  official: false,
+  repositoryUrl: null,
+  shortName: null,
+};
+
 const job = {
   id: "job-1",
   target: { kind: "source", source: "npm:notes", selection: { kind: "root" } },
@@ -93,7 +100,7 @@ it("keeps legacy installed responses and names Omnyo when a caller requires a jo
   );
   expect(calls).toBe(1);
   await expect(sdk.plugins.install({ source: "npm:notes" })).resolves.toEqual(
-    plugin,
+    normalizedPlugin,
   );
   expect(calls).toBe(2);
 });
@@ -106,7 +113,7 @@ describe("plugin installs through server jobs", () => {
     ]);
 
     await expect(sdk.plugins.install({ source: "npm:notes" })).resolves.toEqual(
-      plugin,
+      normalizedPlugin,
     );
     expect(requests[0]).toEqual({
       url: "http://omnyo.test/api/v1/plugins/install",

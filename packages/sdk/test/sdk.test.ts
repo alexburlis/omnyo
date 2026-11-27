@@ -2303,6 +2303,13 @@ describe("@omnyo/sdk", () => {
       icons: {},
     };
 
+    const normalizedPlugin = {
+      ...plugin,
+      official: false,
+      repositoryUrl: null,
+      shortName: null,
+    };
+
     const catalog = {
       pluginCount: 1,
       includedPluginCount: 1,
@@ -2384,15 +2391,17 @@ describe("@omnyo/sdk", () => {
       }),
     });
 
-    await expect(sdk.plugins.list()).resolves.toEqual({ plugins: [plugin] });
+    await expect(sdk.plugins.list()).resolves.toEqual({
+      plugins: [normalizedPlugin],
+    });
     await expect(
       sdk.plugins.install({ source: "npm:@example/notes@^1" }),
-    ).resolves.toEqual(plugin);
+    ).resolves.toEqual(normalizedPlugin);
     await expect(
       sdk.plugins.catalog.install({
         entryId: "notes",
       }),
-    ).resolves.toEqual(plugin);
+    ).resolves.toEqual(normalizedPlugin);
     await expect(
       sdk.plugins.getSource({ pluginId: "notes" }),
     ).resolves.toMatchObject({ history: [{ version: "1.2.0" }] });

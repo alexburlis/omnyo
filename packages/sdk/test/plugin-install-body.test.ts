@@ -77,6 +77,9 @@ describe("issue #1662: plugin install against a pre-0.38.0 server", () => {
       sdk.plugins.install({ source: "path:/tmp/my-plugin" }),
     ).resolves.toEqual({
       ...legacyInstalledPlugin,
+      official: false,
+      repositoryUrl: null,
+      shortName: null,
       publisherLabel: null,
       removable: false,
       screenshots: [],
