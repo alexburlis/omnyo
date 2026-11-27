@@ -3,41 +3,34 @@ import type { BrowserFixedPanelTab } from "@/lib/fixed-panel-tabs-state";
 import { getDesktopBrowserApi } from "@/lib/omnyo-desktop";
 import { destroyPersistedBrowserView } from "./browserViewVisibilityCoordinator";
 
-interface BrowserTabLifecycleObserverProps {
+interface UseBrowserTabLifecycleArgs {
   browserTabs: readonly BrowserFixedPanelTab[];
-  threadId: string;
+  scopeId: string | null;
 }
 
 interface BrowserTabIdSnapshot {
+  scopeId: string | null;
   tabIds: ReadonlySet<string>;
-  threadId: string;
 }
 
-interface BuildBrowserTabIdSetArgs {
-  browserTabs: readonly BrowserFixedPanelTab[];
-}
-
-function buildBrowserTabIdSet({
+export function useBrowserTabLifecycle({
   browserTabs,
-}: BuildBrowserTabIdSetArgs): ReadonlySet<string> {
-  return new Set(browserTabs.map((tab) => tab.id));
-}
-
-export function BrowserTabLifecycleObserver({
-  browserTabs,
-  threadId,
-}: BrowserTabLifecycleObserverProps) {
+  scopeId,
+}: UseBrowserTabLifecycleArgs): void {
   const desktopBrowser = useMemo(() => getDesktopBrowserApi(), []);
   const previousTabIdsRef = useRef<BrowserTabIdSnapshot | null>(null);
 
   useEffect(() => {
-    const tabIds = buildBrowserTabIdSet({ browserTabs });
+    const tabIds: ReadonlySet<string> = new Set(
+      browserTabs.map((tab) => tab.id),
+    );
+
     const previous = previousTabIdsRef.current;
 
     if (
       desktopBrowser !== null &&
       previous !== null &&
-      previous.threadId === threadId
+      previous.scopeId === scopeId
     ) {
       for (const tabId of previous.tabIds) {
         if (!tabIds.has(tabId)) {
@@ -46,8 +39,6 @@ export function BrowserTabLifecycleObserver({
       }
     }
 
-    previousTabIdsRef.current = { tabIds, threadId };
-  }, [browserTabs, desktopBrowser, threadId]);
-
-  return null;
+    previousTabIdsRef.current = { scopeId, tabIds };
+  }, [browserTabs, desktopBrowser, scopeId]);
 }

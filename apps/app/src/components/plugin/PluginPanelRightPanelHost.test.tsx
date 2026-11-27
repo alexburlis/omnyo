@@ -25,6 +25,7 @@ import {
   vi,
 } from "vitest";
 import { resetFixedPanelTabsStateForTest } from "@/lib/fixed-panel-tabs";
+import { createNoopDesktopBrowserApi } from "@/test/omnyo-desktop-test-utils";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { TooltipProvider } from "@omnyo/shared-ui/tooltip";
@@ -84,7 +85,10 @@ interface TestNewThreadPanelActionRegistration {
   generation: number;
 }
 
-const browserState = vi.hoisted(() => ({ available: false }));
+const browserState = vi.hoisted(() => ({
+  available: false,
+  detach: vi.fn(),
+}));
 
 const appCommandHandlers = vi.hoisted(
   () =>
@@ -293,7 +297,10 @@ vi.mock("@/lib/file-opener-preference", () => ({
 }));
 
 vi.mock("@/lib/omnyo-desktop", () => ({
-  getDesktopBrowserApi: () => null,
+  getDesktopBrowserApi: () =>
+    browserState.available
+      ? { ...createNoopDesktopBrowserApi(), detach: browserState.detach }
+      : null,
   isDesktopBrowserAvailable: () => browserState.available,
 }));
 
@@ -796,6 +803,7 @@ describe("PluginPanelRightPanelHost", () => {
     appCommandHandlers.clear();
     resetRecentlyClosedPanelTabsForTest();
     browserState.available = false;
+    browserState.detach.mockReset();
     viewportState.isCompactViewport = false;
     titleBarState.hostsRightPanelToggle = false;
     createTerminal.mockReset();
@@ -1542,6 +1550,26 @@ describe("PluginPanelRightPanelHost", () => {
     ).toBeTruthy();
     expect(screen.queryByTestId("plugin-page-new-tab")).toBeNull();
     expect(screen.queryByTestId("plugin-page-browser")).toBeNull();
+  });
+
+  it("detaches the native browser view once when its tab closes", async () => {
+    browserState.available = true;
+    renderHost();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Show right panel" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open browser" }),
+    );
+    await screen.findByTestId("plugin-page-browser");
+    expect(browserState.detach).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close Browser" }));
+
+    await waitFor(() => expect(browserState.detach).toHaveBeenCalledTimes(1));
+    expect(browserState.detach).toHaveBeenCalledWith(
+      expect.stringMatching(/^browser:/),
+    );
   });
 
   it("closes an open panel when refresh leaves no persisted tabs", async () => {

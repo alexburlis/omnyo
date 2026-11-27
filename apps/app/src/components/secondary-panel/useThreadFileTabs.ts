@@ -27,6 +27,7 @@ import {
 } from "@/lib/fixed-panel-tabs-state";
 import { usePluginSlots } from "@/lib/plugin-slots";
 import { allowBrowserViewRecreation } from "./browserViewVisibilityCoordinator";
+import { useBrowserTabLifecycle } from "./useBrowserTabLifecycle";
 import { useFileOpenerPreferenceValue } from "@/lib/file-opener-preference";
 import {
   createFileOpenerTabForRequest,
@@ -753,6 +754,11 @@ export function useThreadFileTabs({
     () => fixedPanelTabsState.secondary.tabs.filter(isBrowserTab),
     [fixedPanelTabsState.secondary.tabs],
   );
+
+  useBrowserTabLifecycle({
+    browserTabs,
+    scopeId: resolvedPanelStateId,
+  });
 
   const activeWorkspaceFileTab =
     activeTab?.kind === "workspace-file-preview" &&

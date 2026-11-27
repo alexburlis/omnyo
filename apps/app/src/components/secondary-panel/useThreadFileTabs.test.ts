@@ -67,8 +67,11 @@ function QueryWrapper({ children }: { children: ReactNode }) {
   return createElement(QueryClientProvider, { client: queryClient }, children);
 }
 
-function renderThreadHook<Result>(hook: () => Result) {
-  return renderHook(hook, { wrapper: QueryWrapper });
+function renderThreadHook<Result, Props = undefined>(
+  hook: (props: Props) => Result,
+  options?: { initialProps?: Props },
+) {
+  return renderHook(hook, { wrapper: QueryWrapper, ...options });
 }
 
 function useThreadFileTabsWithActiveTab(
@@ -795,6 +798,53 @@ describe("useThreadFileTabs terminal pruning", () => {
     });
     expect(syncMocks.scheduleLocalThreadTabsMigration).not.toHaveBeenCalled();
     expect(syncMocks.scheduleThreadTabsPersistence).not.toHaveBeenCalled();
+  });
+
+  it("detaches a closed root-compose browser view once across an environment switch", async () => {
+    const browser = createNoopDesktopBrowserApi();
+    const detach = vi.fn();
+    browser.detach = detach;
+    window.omnyoDesktop = createOmnyoDesktopApi(
+      {
+        lastCheckedAt: null,
+        latestVersion: null,
+        pendingVersion: null,
+        platform: "macos",
+        updateAvailable: false,
+        updateDownloaded: false,
+        version: "0.0.0-test",
+      },
+      browser,
+    );
+
+    const { result, rerender } = renderThreadHook(
+      ({ environmentId }: { environmentId: string }) =>
+        useThreadFileTabs({
+          panelStateId: "root-compose",
+          syncThreadId: null,
+          environmentId,
+          fileOwnerThreadId: environmentId,
+          preserveWorkspaceTabsAcrossContexts: true,
+          storageFiles: undefined,
+          terminalSessions: undefined,
+        }),
+      { initialProps: { environmentId: "env_a" } },
+    );
+
+    act(() => {
+      result.current.openTab({ kind: "browser", url: "https://example.com" });
+    });
+    const tabId = result.current.browserTabs[0]?.id;
+    expect(tabId).toBeDefined();
+    expect(detach).not.toHaveBeenCalled();
+
+    act(() => {
+      result.current.closeTab(tabId ?? "");
+    });
+    rerender({ environmentId: "env_b" });
+
+    await waitFor(() => expect(detach).toHaveBeenCalledTimes(1));
+    expect(detach).toHaveBeenCalledWith(tabId);
   });
 
   it("drops terminal tabs whose sessions exited", async () => {

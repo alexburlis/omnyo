@@ -232,7 +232,6 @@ import {
   getThreadConversationCollapsedAtom,
   widenSecondaryPanelForPreviewAtom,
 } from "@/components/secondary-panel/threadSecondaryPanelAtoms";
-import { BrowserTabLifecycleObserver } from "@/components/secondary-panel/BrowserTabLifecycleObserver";
 import {
   LazyBrowserTabDeck,
   LazyHostFilePreviewTabContent,
@@ -3559,10 +3558,6 @@ function ThreadDetailViewInternal(
     <MarkdownLocalFileContextMenuContext.Provider
       value={getLocalFileContextMenuItems}
     >
-      <BrowserTabLifecycleObserver
-        browserTabs={browserTabs}
-        threadId={thread.id}
-      />
       <UrlOpenRoutingProvider openInAppBrowser={openBrowser}>
         <AppNavigationHostProvider capabilities={appNavigationCapabilities}>
           <ThreadDetailSecondaryContent

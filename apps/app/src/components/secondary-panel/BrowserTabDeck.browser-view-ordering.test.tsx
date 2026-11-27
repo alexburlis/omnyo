@@ -5,6 +5,7 @@ import {
   cleanup,
   fireEvent,
   render,
+  renderHook,
   screen,
   waitFor,
 } from "@testing-library/react";
@@ -24,7 +25,7 @@ import {
 import { POINTER_COARSE_QUERY } from "@omnyo/shared-ui/hooks/use-pointer-coarse";
 import { sdk } from "@/lib/sdk";
 import { BrowserTabDeck } from "./BrowserTabDeck";
-import { BrowserTabLifecycleObserver } from "./BrowserTabLifecycleObserver";
+import { useBrowserTabLifecycle } from "./useBrowserTabLifecycle";
 import {
   allowBrowserViewRecreation,
   resetBrowserViewPersistence,
@@ -193,7 +194,7 @@ function lastCallIndex(
   return -1;
 }
 
-describe("BrowserTabLifecycleObserver", () => {
+describe("useBrowserTabLifecycle", () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
@@ -206,14 +207,14 @@ describe("BrowserTabLifecycleObserver", () => {
     installDesktopBrowser(api);
     const tab = makeBrowserTab("tab-closed", "https://example.com");
 
-    const view = render(
-      <BrowserTabLifecycleObserver browserTabs={[tab]} threadId="thread-1" />,
+    const view = renderHook(
+      ({ browserTabs }: { browserTabs: BrowserFixedPanelTab[] }) =>
+        useBrowserTabLifecycle({ browserTabs, scopeId: "thread-1" }),
+      { initialProps: { browserTabs: [tab] } },
     );
 
     await waitFor(() => expect(detachments).toHaveLength(0));
-    view.rerender(
-      <BrowserTabLifecycleObserver browserTabs={[]} threadId="thread-1" />,
-    );
+    view.rerender({ browserTabs: [] });
 
     await waitFor(() => expect(detachments).toEqual(["tab-closed"]));
     expect(
