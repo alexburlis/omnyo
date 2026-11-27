@@ -2,7 +2,7 @@ import type { ComponentType } from "react";
 
 export interface LabDesign {
   slug: string;
-  group: "open" | "cinematic-o" | "eclipse" | "combined" | "tools";
+  group: "open" | "cinematic-o" | "combined" | "tools";
   title: string;
   territory: string;
   load: () => Promise<{ default: ComponentType }>;
@@ -45,13 +45,6 @@ export const LAB_DESIGNS: readonly LabDesign[] = [
     load: () => import("./open-5/page"),
   },
   {
-    slug: "o-1",
-    group: "cinematic-o",
-    title: "Cinematic O 1",
-    territory: "Eclipse",
-    load: () => import("./o-1/page"),
-  },
-  {
     slug: "o-2",
     group: "cinematic-o",
     title: "Cinematic O 2",
@@ -64,41 +57,6 @@ export const LAB_DESIGNS: readonly LabDesign[] = [
     title: "Cinematic O 3",
     territory: "Through the O",
     load: () => import("./o-3/page"),
-  },
-  {
-    slug: "eclipse-1",
-    group: "eclipse",
-    title: "Eclipse 1",
-    territory: "Purist totality",
-    load: () => import("./eclipse-1/page"),
-  },
-  {
-    slug: "eclipse-2",
-    group: "eclipse",
-    title: "Eclipse 2",
-    territory: "Trailer cut",
-    load: () => import("./eclipse-2/page"),
-  },
-  {
-    slug: "eclipse-3",
-    group: "eclipse",
-    title: "Eclipse 3",
-    territory: "Cold corona",
-    load: () => import("./eclipse-3/page"),
-  },
-  {
-    slug: "eclipse-4",
-    group: "eclipse",
-    title: "Eclipse 4",
-    territory: "Eclipse over the product",
-    load: () => import("./eclipse-4/page"),
-  },
-  {
-    slug: "eclipse-5",
-    group: "eclipse",
-    title: "Eclipse 5",
-    territory: "Path of totality",
-    load: () => import("./eclipse-5/page"),
   },
   {
     slug: "combined-a",
