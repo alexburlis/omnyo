@@ -155,37 +155,31 @@ function activateStylesheet(
   link.setAttribute(CSS_MARKER, pluginId);
   record.pendingStylesheet = link;
 
-  const fail = () => {
-    link.remove();
+  const finish = (loaded: boolean) => {
+    if (record.pendingStylesheet !== link) return;
 
-    if (record.pendingStylesheet !== link || record.url !== url) return;
-    record.pendingStylesheet = null;
-    warnLoadFailure(pluginId, url);
-
-    if (retry && record.consumers > 0) {
-      activateStylesheet(pluginId, record, url, false);
-
-      return;
-    }
-
-    record.failed = true;
-    settle(url);
-  };
-
-  link.onerror = fail;
-  link.onload = () => {
-    if (record.pendingStylesheet !== link || record.url !== url) {
+    if (record.url !== url) {
+      record.pendingStylesheet = null;
       link.remove();
 
-      if (record.pendingStylesheet === link) record.pendingStylesheet = null;
-
       return;
     }
 
-    const sheet = link.sheet;
+    const sheet = loaded ? link.sheet : null;
 
     if (sheet === null) {
-      fail();
+      record.pendingStylesheet = null;
+      link.remove();
+      warnLoadFailure(pluginId, url);
+
+      if (retry && record.consumers > 0) {
+        activateStylesheet(pluginId, record, url, false);
+
+        return;
+      }
+
+      record.failed = true;
+      settle(url);
 
       return;
     }
@@ -199,6 +193,9 @@ function activateStylesheet(
     record.loadedUrl = url;
     settle(url);
   };
+
+  link.onload = () => finish(true);
+  link.onerror = () => finish(false);
 
   document.head.appendChild(link);
 }

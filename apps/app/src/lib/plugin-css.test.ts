@@ -53,6 +53,45 @@ describe("usePluginCssStatus", () => {
     expect(result.current).toBe(true);
   });
 
+  it.each(["load", "error"] as const)(
+    "keeps the active stylesheet attached after a late %s event on the link",
+    (event) => {
+      applyPluginCss("demo", "/demo.css?h=1");
+      const { result } = renderHook(() => useMountedPluginCssReady("demo"));
+      dispatchLinkEvent(DEMO_STYLESHEET, "load");
+      const active = document.head.querySelector(DEMO_STYLESHEET);
+
+      dispatchLinkEvent(DEMO_STYLESHEET, event);
+
+      expect(active).not.toBeNull();
+      expect(document.head.querySelector(DEMO_STYLESHEET)).toBe(active);
+      expect(result.current).toBe(true);
+    },
+  );
+
+  it("drops a pending stylesheet whose URL was superseded by the active one", () => {
+    applyPluginCss("demo", "/demo.css?h=1");
+    const { result } = renderHook(() => useMountedPluginCssReady("demo"));
+    dispatchLinkEvent(DEMO_STYLESHEET, "load");
+    const active = document.head.querySelector(DEMO_STYLESHEET);
+
+    act(() => applyPluginCss("demo", "/demo.css?h=2"));
+
+    const superseded = document.head.querySelector(
+      `${DEMO_STYLESHEET}[href="/demo.css?h=2"]`,
+    );
+
+    expect(superseded).not.toBeNull();
+
+    act(() => applyPluginCss("demo", "/demo.css?h=1"));
+    act(() => superseded?.dispatchEvent(new Event("load")));
+    act(() => superseded?.dispatchEvent(new Event("error")));
+
+    expect(document.head.querySelectorAll(DEMO_STYLESHEET)).toHaveLength(1);
+    expect(document.head.querySelector(DEMO_STYLESHEET)).toBe(active);
+    expect(result.current).toBe(true);
+  });
+
   it("retries a stylesheet that failed to load before showing the slot", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     applyPluginCss("demo", "/demo.css?h=1");
