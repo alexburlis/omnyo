@@ -1,4 +1,4 @@
-import type { ChildProcess } from "node:child_process";
+import { execFileSync, type ChildProcess } from "node:child_process";
 import {
   mkdtempSync,
   readFileSync,
@@ -10,7 +10,11 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { spawnLoggedProcess } from "../src/logged-process.js";
+import {
+  managedProcessQosClamp,
+  resolveLoggedProcessLaunch,
+  spawnLoggedProcess,
+} from "../src/logged-process.js";
 
 const scratchDirs: string[] = [];
 
@@ -154,4 +158,103 @@ describe("spawnLoggedProcess", () => {
 
     await expect(waitForExit(child)).rejects.toThrow("ENOENT");
   });
+});
+
+describe("macOS QoS clamp", () => {
+  it("clamps only the host daemon, which owns chat and tool processes", () => {
+    expect(managedProcessQosClamp("daemon")).toBe("utility");
+    expect(managedProcessQosClamp("server")).toBeUndefined();
+  });
+
+  it("wraps the command in taskpolicy only on macOS", () => {
+    const launch = { command: "/bin/node", args: ["daemon.js", "--x"] };
+
+    expect(
+      resolveLoggedProcessLaunch({ ...launch, qosClamp: "utility" }, "darwin"),
+    ).toEqual({
+      command: "/usr/sbin/taskpolicy",
+      args: ["-c", "utility", "/bin/node", "daemon.js", "--x"],
+    });
+
+    for (const platform of ["linux", "win32"] as const)
+      expect(
+        resolveLoggedProcessLaunch(
+          { ...launch, qosClamp: "utility" },
+          platform,
+        ),
+      ).toEqual(launch);
+
+    expect(resolveLoggedProcessLaunch(launch, "darwin")).toEqual(launch);
+  });
+
+  it.runIf(process.platform === "darwin")(
+    "keeps the PID and IPC channel and caps descendants at the utility tier, whatever the runner's own tier",
+    async () => {
+      const logDir = scratchDir();
+
+      const priority = (pid: number) =>
+        Number(
+          execFileSync("/bin/ps", ["-o", "pri=", "-p", String(pid)], {
+            encoding: "utf8",
+          }).trim(),
+        );
+
+      const report = (qosClamp?: "utility") => {
+        const child = spawnLoggedProcess({
+          command: process.execPath,
+          args: [
+            "-e",
+            `
+              const { spawn } = require("node:child_process");
+              const grandchild = spawn("/bin/sleep", ["5"]);
+              process.on("message", () => {
+                process.send({ pid: process.pid, grandchild: grandchild.pid });
+              });
+              process.on("disconnect", () => {
+                grandchild.kill();
+                process.exit(0);
+              });
+            `,
+          ],
+          env: process.env,
+          ipc: true,
+          logDir,
+          logName: "host-daemon",
+          ...(qosClamp ? { qosClamp } : {}),
+        });
+
+        return new Promise<{
+          child: ChildProcess;
+          pid: number;
+          grandchild: number;
+        }>((resolve, reject) => {
+          child.once("error", reject);
+          child.once("message", (message) =>
+            resolve({
+              child,
+              ...(message as { pid: number; grandchild: number }),
+            }),
+          );
+          child.send("report");
+        });
+      };
+
+      const [clamped, plain] = await Promise.all([report("utility"), report()]);
+
+      try {
+        expect(clamped.pid).toBe(clamped.child.pid);
+
+        const clampedPriority = priority(clamped.pid);
+        expect(clampedPriority).toBeLessThanOrEqual(20);
+        expect(clampedPriority).toBeLessThanOrEqual(priority(plain.pid));
+        expect(priority(clamped.grandchild)).toBeLessThanOrEqual(20);
+      } finally {
+        for (const run of [clamped, plain]) {
+          const exited = waitForExit(run.child);
+          run.child.disconnect();
+          expect(await exited).toBe(0);
+        }
+      }
+    },
+  );
 });

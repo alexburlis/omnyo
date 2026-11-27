@@ -4,7 +4,10 @@ import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { spawnLoggedProcess } from "./logged-process.js";
+import {
+  managedProcessQosClamp,
+  spawnLoggedProcess,
+} from "./logged-process.js";
 import { startHostDaemonLivenessMonitor } from "./host-daemon-liveness.js";
 import {
   formatServerMovedNotice,
@@ -2730,6 +2733,7 @@ function spawnNamedManagedProcess(
   const childProcess = spawnLoggedProcess({
     ...args,
     logName: args.processName === "server" ? "server" : "host-daemon",
+    qosClamp: managedProcessQosClamp(args.processName),
   });
 
   let recoveryRequested = false;
