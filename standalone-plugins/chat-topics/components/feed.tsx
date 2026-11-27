@@ -2626,14 +2626,14 @@ export function InboxFeed({
       "waiting",
       VIEW_LABEL.waiting,
       waitingCount,
-      <>
+      <div className="ctf-timeline">
         {waitingLanes.map(({ lane, rows }) => (
           <Fragment key={lane}>
             <SubGroup label={WAITING_LANE_LABEL[lane]} motionKey={`group:wait-${lane}`} />
             {members(rows)}
           </Fragment>
         ))}
-      </>,
+      </div>,
     ),
     shelf: block(
       "shelf",

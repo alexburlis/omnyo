@@ -1542,7 +1542,7 @@
     opacity: 0;
   }
 }
-.ctf-section[data-arrive] > :is(.ctf-row, .ctf-group),
+.ctf-section[data-arrive] > :is(.ctf-row, .ctf-group, .ctf-timeline),
 .ctf-section[data-arrive] > [data-chat-row-menu] > .ctf-row {
   animation: ctf-arrive var(--motion-duration-fast, 150ms)
     var(--motion-ease-out, cubic-bezier(0, 0, 0.58, 1)) both;
@@ -1564,7 +1564,7 @@
   --ctf-arrive-step: 5;
 }
 @media (prefers-reduced-motion: reduce) {
-  .ctf-section[data-arrive] > :is(.ctf-row, .ctf-group),
+  .ctf-section[data-arrive] > :is(.ctf-row, .ctf-group, .ctf-timeline),
   .ctf-section[data-arrive] > [data-chat-row-menu] > .ctf-row {
     animation-name: ctf-arrive-fade;
     animation-delay: 0s;
@@ -2011,10 +2011,28 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-/* Waiting rows sit on a timeline: the gutter says how soon each chat comes back
-   (data-wait-in), a rail joins the rows of one lane, and a dot marks each row. */
+.ctf {
+  --ctf-time-width: 32px;
+  --ctf-track: calc(var(--ctf-time-width) + 9px);
+  --ctf-content: calc(var(--ctf-track) + 8px);
+}
+.ctf-timeline {
+  position: relative;
+}
+.ctf-timeline::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: var(--ctf-track);
+  width: 1px;
+  background: var(--ctf-line);
+  pointer-events: none;
+}
+.ctf-timeline > .ctf-group {
+  padding-inline-start: calc(var(--ctf-content) + 6px);
+}
 .ctf-row[data-wait-in] {
-  padding-inline-start: 30px;
+  padding-inline-start: var(--ctf-content);
 }
 .ctf-row[data-wait-in] .ctf-row-link {
   padding-inline-start: 6px;
@@ -2027,7 +2045,7 @@
   position: absolute;
   inset-inline-start: 0;
   top: 8px;
-  width: 21px;
+  width: var(--ctf-time-width);
   font-size: 10.5px;
   font-weight: 600;
   line-height: 14px;
@@ -2035,11 +2053,11 @@
   text-align: end;
   color: var(--ctf-label3);
 }
-.ctf-row[data-wait-in]::after {
+.ctf-kids-list .ctf-row[data-wait-in]::after {
   content: "";
   position: absolute;
   inset-block: 0;
-  inset-inline-start: 26px;
+  inset-inline-start: var(--ctf-track);
   width: 1px;
   background: var(--ctf-line);
 }
@@ -2048,7 +2066,7 @@
   position: absolute;
   z-index: 1;
   top: 12px;
-  inset-inline-start: -6.5px;
+  inset-inline-start: calc(var(--ctf-track) - var(--ctf-content) - 2.5px);
   width: 6px;
   height: 6px;
   box-sizing: border-box;
@@ -2061,6 +2079,43 @@
 .ctf-row[data-wait-in=""] > .ctf-row-surface::before {
   border: 1.5px solid var(--brand, var(--muted-foreground));
   background: var(--sidebar, var(--background));
+}
+@media (hover: hover) and (pointer: fine) {
+  .ctf-timeline :is(.ct-rail-kids, .ct-continuation, .ct-dot + .ct-dot, .ct-dot-count) {
+    transition: opacity var(--motion-duration-fast, 150ms) ease-out;
+  }
+  .ctf-timeline
+    :is(.ctf-row-main, .ctf-kid-row):not(
+      :hover,
+      :focus-within,
+      [data-menu-open="true"],
+      .ctf-row[data-menu-open="true"] > .ctf-row-surface > .ctf-row-main
+    ) {
+    & > .ct-rail {
+      padding-inline-end: 0;
+    }
+    & :is(.ct-rail-kids, .ct-continuation, .ct-dot + .ct-dot) {
+      width: 0;
+      overflow: clip;
+      padding-inline: 0;
+      opacity: 0;
+    }
+    & .ct-dot-count {
+      opacity: 0;
+    }
+    & .ct-dot[data-agents] .ct-dot-ring {
+      width: 10px;
+      height: 10px;
+    }
+    & :is(.ct-continuation, .ct-dot + .ct-dot) {
+      margin-inline-start: -8px;
+    }
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ctf-timeline :is(.ct-rail-kids, .ct-continuation, .ct-dot + .ct-dot, .ct-dot-count) {
+    transition: none;
+  }
 }
 .ctf-wait-chip {
   display: inline-flex;

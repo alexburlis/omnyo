@@ -2016,6 +2016,12 @@ try {
     await page.evaluate(() => {
       const fixture = globalThis.__rowInteractions;
       fixture.scope = { kind: "inbox" };
+      fixture.append(1);
+      fixture.patch("extra-0", {
+        parentThreadId: "callback",
+        status: "active",
+        activity: { experimental_subagents: 2 },
+      });
       fixture.render();
     });
     await supplyInbox(
@@ -2038,6 +2044,67 @@ try {
     );
     assert.equal(await toggle.getAttribute("aria-expanded"), "true");
     await waiting.locator('[data-feed-row="callback"]').waitFor();
+    const timeline = waiting.locator(".ctf-timeline");
+
+    const track = await timeline.evaluate((element) => {
+      const line = getComputedStyle(element, "::before");
+      const rect = element.getBoundingClientRect();
+
+      return {
+        x: rect.left + parseFloat(line.left),
+        height: parseFloat(line.height),
+        rowsHeight: rect.height,
+      };
+    });
+
+    assert.equal(track.height, track.rowsHeight, "one track spans all waiting groups");
+
+    for (const element of await timeline.locator("[data-wait-in]").all()) {
+      const geometry = await element.evaluate((row) => {
+        const surface = row.querySelector(".ctf-row-surface");
+        const dot = getComputedStyle(surface, "::before");
+
+        return {
+          dotCenter:
+            surface.getBoundingClientRect().left + parseFloat(dot.left) + parseFloat(dot.width) / 2,
+          timeEnd:
+            row.getBoundingClientRect().left + parseFloat(getComputedStyle(row, "::before").width),
+        };
+      });
+
+      assert.ok(Math.abs(geometry.dotCenter - track.x - 0.5) < 1, "dot centered on track");
+      assert.ok(track.x - geometry.timeEnd >= 8, "time clears track");
+    }
+
+    const parent = timeline.locator(
+      '[data-feed-row="callback"] > .ctf-row-surface > .ctf-row-main',
+    );
+
+    const rail = parent.locator(".ct-rail");
+    const kids = parent.locator(".ct-kids");
+    const railWidth = () => rail.evaluate((element) => element.getBoundingClientRect().width);
+    await page.mouse.move(1200, 700);
+    assert.equal(await railWidth(), 0, "subchat controls take no idle width");
+    await parent.hover();
+    assert.ok((await railWidth()) > 0, "hover reveals subchat controls");
+    await kids.click();
+    assert.equal(await kids.getAttribute("aria-expanded"), "true");
+    await page.mouse.move(1200, 700);
+    const child = timeline.locator('.ctf-kid-row:has([data-sidebar-thread-id="extra-0"])');
+    const count = child.locator(".ct-dot-count");
+    await page.waitForFunction(() => {
+      const dot = document.querySelector(".ctf-timeline .ct-dot-count");
+
+      return dot && getComputedStyle(dot).opacity === "0";
+    });
+    await child.hover();
+    await count.waitFor();
+    await page.waitForFunction(
+      () => getComputedStyle(document.querySelector(".ctf-timeline .ct-dot-count")).opacity === "1",
+    );
+    await page.mouse.move(1200, 700);
+    await kids.focus();
+    assert.ok((await railWidth()) > 0, "focused subchat controls stay visible");
     await toggle.click();
     assert.equal(await toggle.getAttribute("aria-expanded"), "false");
     assert.equal(await waiting.locator('[data-feed-row="callback"]').count(), 0);
