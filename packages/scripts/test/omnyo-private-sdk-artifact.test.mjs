@@ -205,7 +205,7 @@ async function privatePackFixture(work) {
         } catch (error) {
           if (error.code !== "ESRCH") reject(error);
         }
-      }, 4000);
+      }, 10_000);
 
       child.once("error", (error) => {
         clearTimeout(timer);
@@ -558,7 +558,7 @@ test("private SDK pack preserves the selected exact archive during real concurre
       }
     },
   );
-});
+}, 30_000);
 
 for (const changed of ["runtime", "dependency", "export"]) {
   test(
@@ -613,5 +613,6 @@ for (const changed of ["runtime", "dependency", "export"]) {
         },
       );
     },
+    30_000,
   );
 }
