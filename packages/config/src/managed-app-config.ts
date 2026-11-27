@@ -44,7 +44,7 @@ export const PORTABLE_ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 const REMOVED_CUSTOM_ACP_AGENTS_CONFIG_KEY = "customAcpAgents";
 
 const REMOVED_CUSTOM_ACP_AGENTS_MESSAGE =
-  "customAcpAgents in config.json is no longer read. Declare the agents with `omnyo plugin config provider-acp set customAgents '<json>'`.";
+  "customAcpAgents in config.json is no longer read. Declare the agents with `omnyo plugin config omnyo--provider-acp-next set customAgents '<json>'`.";
 
 interface AppManagedConfigWarningLogger {
   warn(fields: Record<string, unknown>, message: string): void;

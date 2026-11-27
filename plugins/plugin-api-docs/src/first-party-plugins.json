@@ -150,13 +150,8 @@
     "icon": "FolderGit"
   },
   {
-    "id": "provider-acp",
-    "name": "ACP Providers",
-    "icon": null
-  },
-  {
     "id": "omnyo--provider-acp-next",
-    "name": "ACP Providers (New Adapter)",
+    "name": "ACP Providers",
     "icon": null
   },
   {

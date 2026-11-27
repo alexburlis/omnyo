@@ -186,7 +186,9 @@ async function main(): Promise<void> {
       continue;
     }
 
-    const missingOld = missingBridgeModule(oldLeg.checkoutRoot, cell.provider);
+    const missingOld = missingBridgeModule(oldLeg.checkoutRoot, cell.provider, {
+      allowLegacyAcp: true,
+    });
 
     if (missingOld !== null) {
       skipped += 1;
@@ -201,7 +203,12 @@ async function main(): Promise<void> {
       : undefined;
 
     const [oldInputs, newInputs] = await Promise.all([
-      replayCell(cell, { ...oldLeg, timeoutMs: args.timeoutMs, onStderr }),
+      replayCell(cell, {
+        ...oldLeg,
+        timeoutMs: args.timeoutMs,
+        onStderr,
+        allowLegacyAcp: true,
+      }),
       replayCell(cell, {
         ...newLeg,
         timeoutMs: args.timeoutMs,

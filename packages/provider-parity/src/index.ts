@@ -9,11 +9,12 @@ import {
   firstPartyReplayBridge,
   readBridgeRecording,
   replayRecording,
-  FIRST_PARTY_BRIDGE_MODULES,
+  resolveFirstPartyBridgeEntry,
   resolveFirstPartyBridgeModulePath,
   resolveReplayProfile,
   UnreplayableProviderError,
   withCurrentBridgeLane,
+  type FirstPartyReplayOptions,
   type CreateParityAssembler,
   type ParityAllowlistEntry,
   type ParityComparison,
@@ -140,7 +141,7 @@ export function recordedCellInputs(
   };
 }
 
-export interface ReplayCellOptions {
+export interface ReplayCellOptions extends FirstPartyReplayOptions {
   checkoutRoot: string;
   timeoutMs?: number;
   onStderr?: (text: string) => void;
@@ -163,9 +164,9 @@ export function isReplayable(providerId: string): boolean {
 export function missingBridgeModule(
   checkoutRoot: string,
   providerId: string,
+  options: FirstPartyReplayOptions = {},
 ): string | null {
-  const entry =
-    FIRST_PARTY_BRIDGE_MODULES[resolveReplayProfile(providerId).bridgeFamily]!;
+  const entry = resolveFirstPartyBridgeEntry(checkoutRoot, providerId, options);
 
   return resolveFirstPartyBridgeModulePath(checkoutRoot, entry) === null
     ? entry.modulePath
@@ -177,7 +178,12 @@ export async function replayCell(
   options: ReplayCellOptions,
 ): Promise<CellInputs & { run: ParityRun }> {
   const projectRows = options.projectRows ?? projectParityRows;
-  const bridge = firstPartyReplayBridge(cell.provider, options.checkoutRoot);
+
+  const bridge = firstPartyReplayBridge(
+    cell.provider,
+    options.checkoutRoot,
+    options,
+  );
 
   const run = await replayRecording({
     recordingDir: cell.dir,

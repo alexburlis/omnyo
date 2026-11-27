@@ -322,12 +322,13 @@ describe("getProviderStates", () => {
             opencodeCalls += 1;
 
             if (opencodeCalls === 1) {
-              const artifact =
-                harness.deps.pluginHostArtifacts.get("provider-acp");
+              const artifact = harness.deps.pluginHostArtifacts.get(
+                "omnyo--provider-acp-next",
+              );
 
               if (artifact === undefined)
                 throw new Error("Missing fixture bridge");
-              harness.deps.pluginHostArtifacts.set("provider-acp", {
+              harness.deps.pluginHostArtifacts.set("omnyo--provider-acp-next", {
                 ...artifact,
                 digest: "b".repeat(64),
               });

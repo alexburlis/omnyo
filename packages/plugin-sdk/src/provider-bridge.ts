@@ -415,9 +415,9 @@ export type {
 export {
   acpLaunchSpecSchema as hostDaemonAcpLaunchSpecSchema,
   normalizeAcpLaunchSpec as normalizeHostDaemonAcpLaunchSpec,
-} from "@omnyo/provider-bridge-acp/launch-spec";
+} from "@omnyo/provider-bridge-protocol/acp/launch-spec";
 
-export type { AcpLaunchSpec as HostDaemonAcpLaunchSpec } from "@omnyo/provider-bridge-acp/launch-spec";
+export type { AcpLaunchSpec as HostDaemonAcpLaunchSpec } from "@omnyo/provider-bridge-protocol/acp/launch-spec";
 
 /**
  * The Claude Code task-tool names and outputs core once shared with the

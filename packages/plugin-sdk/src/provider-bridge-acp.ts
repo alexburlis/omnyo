@@ -1,5 +1,6 @@
 /**
- * `@omnyo/plugin-sdk/provider-bridge/acp` — the published ACP bridge kit.
+ * `@omnyo/plugin-sdk/provider-bridge/acp` — the stable import path for the
+ * original ACP kit exports, backed by the current ACP implementation.
  *
  * The Agent Client Protocol (https://agentclientprotocol.com) is one wire
  * protocol spoken by many agents, so Omnyo runs all of them through one generic
@@ -42,9 +43,9 @@
  * consumes are not published: the surface grows with a consumer, not ahead
  * of one.
  */
-import type { AcpLaunchSpec } from "@omnyo/provider-bridge-acp";
+import type { AcpLaunchSpec } from "@omnyo/provider-bridge-acp-next";
 
-export { acpProviderBridge as experimental_acpProviderBridge } from "@omnyo/provider-bridge-acp";
+export { acpProviderBridge as experimental_acpProviderBridge } from "@omnyo/provider-bridge-acp-next";
 
 export type {
   AcpClassifiedToolCall,
@@ -52,21 +53,21 @@ export type {
   AcpDelegationReport,
   AcpDialect,
   AcpToolIdentity,
-} from "@omnyo/provider-bridge-acp";
+} from "@omnyo/provider-bridge-acp-next";
 
 export {
   acpAgentProbeSchema as experimental_acpAgentProbeSchema,
   probeAcpAgent as experimental_probeAcpAgent,
-} from "@omnyo/provider-bridge-acp";
+} from "@omnyo/provider-bridge-acp-next";
 
 export type {
   AcpAgentProbe,
   AcpAgentProbeRequest,
-} from "@omnyo/provider-bridge-acp";
+} from "@omnyo/provider-bridge-acp-next";
 
-export { acpLaunchSpecSchema as experimental_acpLaunchSpecSchema } from "@omnyo/provider-bridge-acp";
+export { acpLaunchSpecSchema as experimental_acpLaunchSpecSchema } from "@omnyo/provider-bridge-acp-next";
 
-export type { AcpLaunchSpec } from "@omnyo/provider-bridge-acp";
+export type { AcpLaunchSpec } from "@omnyo/provider-bridge-acp-next";
 
 /**
  * @deprecated The bridge reads the parsed `AcpLaunchSpec` directly; the
@@ -82,6 +83,6 @@ export type {
   AcpToolCallStatus,
   AcpToolCallUpdateEvent,
   AcpToolKind,
-} from "@omnyo/provider-bridge-acp";
+} from "@omnyo/provider-bridge-acp-next";
 
-export type { AgentModelCatalog as AcpAgentModelCatalog } from "@omnyo/provider-bridge-acp";
+export type { AgentModelCatalog as AcpAgentModelCatalog } from "@omnyo/provider-bridge-acp-next";

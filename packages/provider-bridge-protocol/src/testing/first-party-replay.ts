@@ -29,11 +29,6 @@ export const FIRST_PARTY_BRIDGE_MODULES = {
     pluginId: "provider-claude-code",
   },
   acp: {
-    modulePath: "plugins/provider-acp/src/host.ts",
-    legacyModulePaths: ["plugins/provider-acp/src/bridge/bridge.ts"],
-    pluginId: "provider-acp",
-  },
-  "acp-next": {
     modulePath: "plugins/provider-acp-next/src/host.ts",
     pluginId: "omnyo--provider-acp-next",
   },
@@ -50,6 +45,37 @@ export const FIRST_PARTY_BRIDGE_MODULES = {
 >;
 
 type FirstPartyBridgeFamily = keyof typeof FIRST_PARTY_BRIDGE_MODULES;
+
+const LEGACY_ACP_BRIDGE_MODULE = {
+  modulePath: "plugins/provider-acp/src/host.ts",
+  legacyModulePaths: ["plugins/provider-acp/src/bridge/bridge.ts"],
+  pluginId: "provider-acp",
+};
+
+export interface FirstPartyReplayOptions {
+  allowLegacyAcp?: boolean;
+}
+
+export function resolveFirstPartyBridgeEntry(
+  checkoutRoot: string,
+  providerId: string,
+  options: FirstPartyReplayOptions = {},
+): { modulePath: string; legacyModulePaths?: string[]; pluginId: string } {
+  const family = resolveReplayProfile(providerId).bridgeFamily;
+
+  if (
+    family === "acp" &&
+    options.allowLegacyAcp === true &&
+    resolveFirstPartyBridgeModulePath(
+      checkoutRoot,
+      LEGACY_ACP_BRIDGE_MODULE,
+    ) !== null
+  ) {
+    return LEGACY_ACP_BRIDGE_MODULE;
+  }
+
+  return FIRST_PARTY_BRIDGE_MODULES[family];
+}
 
 const BRIDGE_WORKER_ENTRY =
   "packages/provider-bridge-protocol/src/bridge-worker-entry.ts";
@@ -306,10 +332,10 @@ function resolveModulePath(
 export function resolveBridgeLaunch(
   checkoutRoot: string,
   providerId: string,
-  bridgeFamily = resolveReplayProfile(providerId).bridgeFamily,
+  options: FirstPartyReplayOptions = {},
 ): ProviderBridgeLaunch {
   const root = resolve(checkoutRoot);
-  const entry = FIRST_PARTY_BRIDGE_MODULES[bridgeFamily];
+  const entry = resolveFirstPartyBridgeEntry(root, providerId, options);
 
   return resolveProviderBridgeLaunch({
     modulePath: join(root, resolveModulePath(root, entry)),
@@ -322,10 +348,10 @@ export function resolveBridgeLaunch(
 export function firstPartyReplayBridge(
   providerId: string,
   checkoutRoot: string,
-  bridgeFamily?: FirstPartyBridgeFamily,
+  options: FirstPartyReplayOptions = {},
 ): { launch: ProviderBridgeLaunch; profile: ReplayProviderProfile } {
   return {
-    launch: resolveBridgeLaunch(checkoutRoot, providerId, bridgeFamily),
+    launch: resolveBridgeLaunch(checkoutRoot, providerId, options),
     profile: resolveReplayProfile(providerId),
   };
 }
@@ -333,7 +359,6 @@ export function firstPartyReplayBridge(
 export interface FirstPartyRecordedConformanceOptions {
   servesProvider: (providerId: string) => boolean;
   label: string;
-  bridgeFamily?: FirstPartyBridgeFamily;
 }
 
 export interface FirstPartyRecordedConformanceRun {
@@ -359,11 +384,7 @@ export async function runFirstPartyRecordedConformance(
     onStderr: (text) => process.stderr.write(`[bridge] ${text}`),
     recordingsRoot: COMMITTED_RECORDINGS_ROOT,
     bridge: (cell) =>
-      firstPartyReplayBridge(
-        cell.provider,
-        RECORDINGS_CHECKOUT_ROOT,
-        options.bridgeFamily,
-      ),
+      firstPartyReplayBridge(cell.provider, RECORDINGS_CHECKOUT_ROOT),
   });
 
   const results = replays.flatMap((replay) => checkRecordedCellReplay(replay));

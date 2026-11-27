@@ -14,7 +14,10 @@ const launcherEntry = join(packageRoot, "dist", "omnyo-app.js");
 
 const cliEntry = join(packageRoot, "dist", "omnyo.js");
 
-const EXPECTED_DISABLED_BUILTIN_PLUGINS = ["provider-acp", "resources"];
+const EXPECTED_DISABLED_BUILTIN_PLUGINS = [
+  "omnyo--provider-acp-next",
+  "resources",
+];
 
 const EXPECTED_RUNNING_BUILTIN_PLUGINS = [
   "automations",

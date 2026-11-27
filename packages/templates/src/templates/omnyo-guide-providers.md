@@ -322,7 +322,7 @@ General setting hides every entry from these lists; see the customization
 chapter.
 
 Custom ACP agents live in the ACP providers plugin's customAgents setting, a
-JSON array. Set it with omnyo plugin config provider-acp set customAgents '[...]'.
+JSON array. Set it with omnyo plugin config omnyo--provider-acp-next set customAgents '[...]'.
 Each entry needs id (lowercase letters, digits and dashes), displayName, and
 command. Omnyo derives provider id acp-<id> from the slug id. The id is permanent.
 The id cursor is reserved because Omnyo always lists that agent. The ids opencode,

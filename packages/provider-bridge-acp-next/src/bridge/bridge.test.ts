@@ -5139,6 +5139,57 @@ describe("acp bridge: busy agents, restored sessions and stop reasons", () => {
     expect(threadEventsOfType("provider/warning")).toEqual([]);
   });
 
+  it("loads the same historical session when an advertised session/resume is unavailable", async () => {
+    const requestLog = join(workspaceDir, "requests.log");
+
+    const envVars = {
+      FAKE_ACP_RESUME_SESSION: "1",
+      FAKE_ACP_LOAD_SESSION: "1",
+      FAKE_ACP_RESUME_METHOD_NOT_FOUND: "1",
+      FAKE_ACP_REQUEST_LOG: requestLog,
+    };
+
+    const first = await startThread({ envVars });
+    await stopThread(first.providerThreadId);
+    startedProviderThreadIds.pop();
+
+    const resumeId = sendRequest("thread/resume", {
+      threadId: first.appThreadId,
+      cwd: workspaceDir,
+      instructionMode: "append",
+      options: executionOptions({
+        providerOptions: { acpLaunchSpec: acpLaunchSpec({ envVars }) },
+      }),
+      providerThreadId: first.providerThreadId,
+    });
+
+    const response = await waitForResponse(resumeId);
+    const restoredId = providerThreadIdOf(response);
+    omnyoThreadIdByProviderThreadId.set(restoredId, first.appThreadId);
+    startedProviderThreadIds.push(restoredId);
+
+    expect(response.result).toEqual({
+      providerThreadId: first.providerThreadId,
+      sessionRestorable: true,
+    });
+
+    const setupRequests = loggedAcpRequests(requestLog).filter((request) =>
+      ["session/new", "session/resume", "session/load"].includes(
+        request.method ?? "",
+      ),
+    );
+
+    expect(setupRequests).toMatchObject([
+      { method: "session/new" },
+      {
+        method: "session/resume",
+        params: { sessionId: first.providerThreadId },
+      },
+      { method: "session/load", params: { sessionId: first.providerThreadId } },
+    ]);
+    expect(threadEventsOfType("provider/warning")).toEqual([]);
+  });
+
   it("reports a session as restorable when the agent offers only session/resume", async () => {
     const response = await startThreadResponse({
       FAKE_ACP_RESUME_SESSION: "1",

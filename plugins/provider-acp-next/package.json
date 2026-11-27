@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Preview of the rebuilt ACP adapter for Omnyo threads with ACP agents.",
+  "description": "ACP agent providers for Omnyo threads.",
   "author": {
     "name": "bb",
     "url": "https://github.com/get-bb"
@@ -18,8 +18,8 @@
     "omnyoPluginSdk": ">=0.4.90 >=0.6.58"
   },
   "omnyo": {
-    "name": "ACP Providers (New Adapter)",
-    "description": "Preview of the rebuilt ACP adapter. Turning it on turns ACP providers off.",
+    "name": "ACP Providers",
+    "description": "Connect to coding agents on your machine using the Agent Client Protocol.",
     "branding": {
       "icon": "./icons/acp.svg",
       "experimental_icons": {

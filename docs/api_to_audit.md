@@ -1274,10 +1274,10 @@ This subpath is for Node server and host entries; it is not a frontend export.
 resources and collecting one resource at a time. A list call reads local
 metadata. A fetch allows cached data with `refresh: false` and requests a new
 collection attempt with `refresh: true`. Provider Usage consumes the same
-contract that Account Pooler, ACP Providers, ACP Providers (New Adapter),
-Claude Code Provider, and Codex Provider register.
+contract that Account Pooler, ACP Providers, Claude Code Provider, and Codex
+Provider register.
 
-The four host-local providers use
+The three host-local providers use
 `experimental_registerHostProviderUsageSourceV1(api, { ownsProvider, description })`
 from the same entry. The helper registers both methods with a separate cache
 for each registration. The caller supplies the ownership predicate and
@@ -1291,11 +1291,9 @@ schemas while v1 is supported.
 
 ## The ACP bridge kit (`@omnyo/plugin-sdk/provider-bridge/acp`)
 
-**Kept experimental (2026-08-22).** Four members remain, each with an open
-question below; the fourteen exports no plugin consumed (the dialect
-registry and ids, the raw line handler, the protocol constants, the launch
-profile and the model-catalog helpers) left the public surface in the
-stabilization audit — the kit grows with a consumer, not ahead of one.
+**Experimental legacy import.** This subpath keeps the existing export names,
+including the bridge and dialect helpers, and runs the same implementation as
+`provider-bridge/acp-next`.
 
 **What it does.** Publishes Omnyo's generic Agent Client Protocol bridge so any
 plugin can add an ACP agent without Omnyo-side code. `experimental_acpProviderBridge`
@@ -1311,8 +1309,8 @@ plugin can replace a declared guess with the agent's own answer, and
 `experimental_acpAgentProbeSchema` validates that answer across a host RPC
 boundary. `experimental_acpLaunchSpecSchema` (and its `AcpLaunchSpec` type)
 is the launch spec the bridge parses, published so a plugin validates what
-it declares against exactly what the bridge will accept; the ACP package
-owns the definition (it is no longer a host-daemon-contract shape).
+it declares against exactly what the bridge will accept. The shared
+provider bridge protocol package owns the definition.
 
 **Audit before stabilizing.** Decide what `probeAcpAgent` owes a caller:
 today it spawns the agent with a 10s timeout, advertises the bridge's own
@@ -1332,13 +1330,11 @@ plugin is owed when the spec grows a field.
 
 ## The rebuilt ACP bridge kit (`@omnyo/plugin-sdk/provider-bridge/acp-next`)
 
-**Experimental preview (2026-10-09).** The rebuilt ACP bridge, published
-beside the original kit so the two can be compared before one replaces the
-other. The built-in "ACP providers (new adapter)" plugin
-(`plugins/provider-acp-next`, off by default) is its consumer: its `omnyo.host`
-artifact re-exports `experimental_acpProviderBridge` from this subpath the way
-the original plugin re-exports it from `provider-bridge/acp`. Turning that
-plugin on turns the original ACP plugin off, and the reverse.
+**Experimental.** The built-in ACP Providers plugin
+(`plugins/provider-acp-next`) re-exports `experimental_acpProviderBridge`
+from this subpath in its `omnyo.host` artifact. The legacy
+`provider-bridge/acp` import retains its original export names and uses the
+same implementation.
 
 **What it does.** The same members as the original kit
 (`experimental_acpProviderBridge`, `experimental_probeAcpAgent`,
@@ -1363,12 +1359,9 @@ registry (`packages/provider-bridge-acp-next/src/dialect.ts`,
 `resolveAcpDialect`), and the built-in plugin names its dialects by id the way
 a third-party plugin does.
 
-**Audit before stabilizing.** Decide when this kit replaces the original: the
-subpath should then be removed and its members move to `provider-bridge/acp`,
-so no plugin is left importing a name that says "next". The open questions
-on the original kit apply here unchanged (what `probeAcpAgent` owes a caller,
+**Audit before stabilizing.** Decide what `probeAcpAgent` owes a caller,
 hook versioning for `AcpDialect`, naming a dialect by value, a bridge factory
-instead of a module-level registry).
+instead of a module-level registry.
 
 ## `PluginProviderDeclaration.experimental_nativeSkillRoots`
 

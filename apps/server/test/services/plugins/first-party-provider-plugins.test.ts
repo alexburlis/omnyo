@@ -47,8 +47,8 @@ const FIRST_PARTY_PROVIDER_DECLARATIONS = [
     hasLogo: true,
   },
   {
-    builtinName: "provider-acp",
-    pluginId: "provider-acp",
+    builtinName: "provider-acp-next",
+    pluginId: "omnyo--provider-acp-next",
     providerId: "acp-cursor",
     displayName: "Cursor",
     supportsThreadArchive: false,
@@ -60,8 +60,8 @@ const FIRST_PARTY_PROVIDER_DECLARATIONS = [
     hasLogo: true,
   },
   {
-    builtinName: "provider-acp",
-    pluginId: "provider-acp",
+    builtinName: "provider-acp-next",
+    pluginId: "omnyo--provider-acp-next",
     providerId: "acp-opencode",
     displayName: "opencode",
     supportsThreadArchive: false,
@@ -73,8 +73,8 @@ const FIRST_PARTY_PROVIDER_DECLARATIONS = [
     hasLogo: true,
   },
   {
-    builtinName: "provider-acp",
-    pluginId: "provider-acp",
+    builtinName: "provider-acp-next",
+    pluginId: "omnyo--provider-acp-next",
     providerId: "acp-omp",
     displayName: "omp",
     supportsThreadArchive: false,
@@ -86,8 +86,8 @@ const FIRST_PARTY_PROVIDER_DECLARATIONS = [
     hasLogo: true,
   },
   {
-    builtinName: "provider-acp",
-    pluginId: "provider-acp",
+    builtinName: "provider-acp-next",
+    pluginId: "omnyo--provider-acp-next",
     providerId: "acp-grok",
     displayName: "Grok Build",
     supportsThreadArchive: false,
@@ -99,8 +99,8 @@ const FIRST_PARTY_PROVIDER_DECLARATIONS = [
     hasLogo: true,
   },
   {
-    builtinName: "provider-acp",
-    pluginId: "provider-acp",
+    builtinName: "provider-acp-next",
+    pluginId: "omnyo--provider-acp-next",
     providerId: "acp-hermes-agent",
     displayName: "Hermes Agent",
     supportsThreadArchive: false,
@@ -124,7 +124,7 @@ const ALWAYS_VISIBLE_PROVIDER_IDS = FIRST_PARTY_PROVIDER_DECLARATIONS.filter(
 const NEW_ACP_PLUGIN_ID = "omnyo--provider-acp-next";
 
 const ACP_PROVIDER_IDS = FIRST_PARTY_PROVIDER_DECLARATIONS.filter(
-  (plugin) => plugin.builtinName === "provider-acp",
+  (plugin) => plugin.builtinName === "provider-acp-next",
 ).map((plugin) => plugin.providerId);
 
 function expectedLogoUrl(
@@ -412,13 +412,14 @@ describe("first-party provider plugins", () => {
       },
     );
   }, 60_000);
-  it("moves every ACP provider to the new adapter plugin when it is turned on, and back when it is turned off", async () => {
+  it("keeps the stable ACP providers owned by the sole adapter across disable and enable", async () => {
     await withTestHarness(
       { seedFirstPartyProviders: false },
       async (harness) => {
+        await installFirstPartyProviderPlugins(harness);
         const registry = harness.deps.providerRegistry;
 
-        const acpOwners = () =>
+        const owners = () =>
           Object.fromEntries(
             registry
               .list()
@@ -426,49 +427,28 @@ describe("first-party provider plugins", () => {
               .map((entry) => [entry.info.id, entry.pluginId]),
           );
 
-        const owners = (pluginId: string) =>
-          Object.fromEntries(
-            ACP_PROVIDER_IDS.map((providerId) => [providerId, pluginId]),
-          );
+        const expectedOwners = Object.fromEntries(
+          ACP_PROVIDER_IDS.map((id) => [id, NEW_ACP_PLUGIN_ID]),
+        );
 
-        const enabled = (pluginId: string) =>
-          harness.pluginService.list().find((plugin) => plugin.id === pluginId)
-            ?.enabled;
+        expect(owners()).toEqual(expectedOwners);
+        expect(
+          harness.pluginService
+            .list()
+            .some((plugin) => plugin.id === "provider-acp"),
+        ).toBe(false);
 
-        const settingsCatalog = () =>
+        await harness.pluginService.setEnabled(NEW_ACP_PLUGIN_ID, false);
+        expect(owners()).toEqual({});
+        expect(
           providerManagementCatalog(harness.deps, harness.pluginService)
             .filter((entry) => entry.id.startsWith("acp-"))
-            .map((entry) => [entry.id, entry.pluginId, entry.pluginEnabled]);
-
-        await installFirstPartyProviderPlugins(harness);
-        await harness.pluginService.install("builtin:provider-acp-next", {
-          kind: "root",
-        });
-        await harness.pluginService.setEnabled(NEW_ACP_PLUGIN_ID, false);
-        expect(acpOwners()).toEqual(owners("provider-acp"));
+            .map((entry) => [entry.id, entry.pluginId, entry.pluginEnabled]),
+        ).toEqual(ACP_PROVIDER_IDS.map((id) => [id, NEW_ACP_PLUGIN_ID, false]));
 
         await harness.pluginService.setEnabled(NEW_ACP_PLUGIN_ID, true);
-        expect(acpOwners()).toEqual(owners(NEW_ACP_PLUGIN_ID));
-        expect(enabled("provider-acp")).toBe(false);
-        expect(settingsCatalog()).toEqual(
-          ACP_PROVIDER_IDS.map((providerId) => [
-            providerId,
-            NEW_ACP_PLUGIN_ID,
-            true,
-          ]),
-        );
+        expect(owners()).toEqual(expectedOwners);
         expect(registry.get("codex")?.pluginId).toBe("provider-codex");
-
-        await harness.pluginService.setEnabled(NEW_ACP_PLUGIN_ID, false);
-        expect(acpOwners()).toEqual(owners("provider-acp"));
-        expect(enabled("provider-acp")).toBe(true);
-        expect(settingsCatalog()).toEqual(
-          ACP_PROVIDER_IDS.map((providerId) => [
-            providerId,
-            "provider-acp",
-            true,
-          ]),
-        );
       },
     );
   }, 120_000);

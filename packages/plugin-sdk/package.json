@@ -162,7 +162,6 @@
   "devDependencies": {
     "@omnyo/domain": "workspace:*",
     "@omnyo/process-utils": "workspace:*",
-    "@omnyo/provider-bridge-acp": "workspace:*",
     "@omnyo/provider-bridge-acp-next": "workspace:*",
     "@omnyo/provider-bridge-protocol": "workspace:*",
     "@omnyo/sdk": "workspace:*",

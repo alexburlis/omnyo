@@ -1,14 +1,17 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { pluginPackageJsonSchema } from "@omnyo/domain";
 import type { PluginSettingValue } from "@omnyo/plugin-sdk";
 import type { NormalizedPluginProviderDeclaration } from "@omnyo/plugin-sdk/internal/host-policy";
 import { createFakePluginHost } from "@omnyo/plugin-sdk/testing";
 
 export function firstPartyPluginRootDir(pluginId: string): string {
+  const directory =
+    pluginId === "omnyo--provider-acp-next" ? "provider-acp-next" : pluginId;
+
   return fileURLToPath(
-    new URL(`../../../../plugins/${pluginId}`, import.meta.url),
+    new URL(`../../../../plugins/${directory}`, import.meta.url),
   );
 }
 
@@ -33,9 +36,8 @@ export async function captureFirstPartyProviderDeclarations(
   pluginId: string,
   options: CaptureFirstPartyProviderDeclarationsOptions = {},
 ): Promise<NormalizedPluginProviderDeclaration[]> {
-  const moduleUrl = new URL(
-    `../../../../plugins/${pluginId}/server.ts`,
-    import.meta.url,
+  const moduleUrl = pathToFileURL(
+    path.join(firstPartyPluginRootDir(pluginId), "server.ts"),
   ).href;
 
   const loaded: unknown = await import(/* @vite-ignore */ moduleUrl);

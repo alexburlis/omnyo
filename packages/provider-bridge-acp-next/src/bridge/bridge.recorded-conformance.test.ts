@@ -5,7 +5,6 @@ it("reproduces every recorded matrix cell", async () => {
   const run = await runFirstPartyRecordedConformance({
     servesProvider: (providerId) => providerId.startsWith("acp-"),
     label: "acp-next",
-    bridgeFamily: "acp-next",
   });
 
   expect(run.cells.length).toBeGreaterThan(0);

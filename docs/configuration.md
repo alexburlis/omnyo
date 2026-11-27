@@ -1286,17 +1286,13 @@ CLI is on PATH and can be launched as `grok agent stdio`, and
 `acp-hermes-agent` when Hermes' `hermes` CLI is on PATH. `acp-cursor` is always
 listed.
 
-The rebuilt ACP adapter ships as a second built-in plugin, "ACP providers (new
-adapter)", which is off by default. Turn it on in Settings → Plugins or with
-`omnyo plugin enable omnyo--provider-acp-next`. It registers the same provider ids,
-so existing threads keep working, and only one of the two ACP plugins runs at
-a time: turning the new one on turns "ACP providers" off, turning it off
-turns "ACP providers" back on, and the `customAgents` list follows the switch
-in both directions. The new adapter adds agent options in the model picker
-(the agent's mode stays in the composer footer), live slash commands in the
-composer, agent questions as question cards, sign-in
-guidance, and the official ACP registry: its settings page lists the
-registry's agents with an Add button, and `omnyo acp registry`, `omnyo acp add
+ACP Providers is the built-in ACP plugin. Its plugin ID is
+`omnyo--provider-acp-next`. Enable it in Settings → Plugins or with
+`omnyo plugin enable omnyo--provider-acp-next`. Existing installations keep their
+provider IDs, agent settings, and enabled or disabled choice. The plugin exposes
+agent options in the model picker, agent modes in the composer footer, live
+slash commands, question cards, sign-in guidance, and the official ACP registry.
+Its settings page lists the registry's agents with an Add button, and `omnyo acp registry`, `omnyo acp add
 <agent-id>` and `omnyo acp remove <agent-id>` do the same from the CLI. Adding
 one writes a `customAgents` entry that runs the registry's `npx` or `uvx`
 package on the thread's host, so the host needs Node.js or uv. Agents the
@@ -1308,7 +1304,7 @@ which holds a JSON array. In the app it is the multi-line editor on the
 plugin's settings page (Settings → Plugins → ACP providers); from the CLI:
 
 ```bash
-omnyo plugin config provider-acp set customAgents '[
+omnyo plugin config omnyo--provider-acp-next set customAgents '[
   {"id": "amp", "displayName": "Amp", "command": "amp", "args": ["acp"]}
 ]'
 ```

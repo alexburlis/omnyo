@@ -146,11 +146,6 @@ export const BUILTIN_PLUGINS: readonly BundledPluginDefinition[] = [
     defaultEnabled: false,
   },
   {
-    name: "provider-acp",
-    pluginId: "provider-acp",
-    defaultEnabled: false,
-  },
-  {
     name: "provider-acp-next",
     pluginId: "omnyo--provider-acp-next",
     defaultEnabled: false,
@@ -298,13 +293,7 @@ export interface BundledPluginReplacement {
 }
 
 export const BUNDLED_PLUGIN_REPLACEMENTS: readonly BundledPluginReplacement[] =
-  [
-    {
-      pluginId: "omnyo--provider-acp-next",
-      replaces: "provider-acp",
-      carriedSettings: ["customAgents"],
-    },
-  ];
+  [];
 
 const builtinPluginsModuleDir = path.dirname(fileURLToPath(import.meta.url));
 

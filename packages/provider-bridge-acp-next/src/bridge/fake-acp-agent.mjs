@@ -974,7 +974,10 @@ async function handleMessage(message) {
         return;
       }
 
-      if (!resumeSession) {
+      if (
+        !resumeSession ||
+        process.env.FAKE_ACP_RESUME_METHOD_NOT_FOUND === "1"
+      ) {
         send({
           jsonrpc: "2.0",
           id: message.id,

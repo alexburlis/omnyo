@@ -212,6 +212,7 @@ import type {
 } from "./plugin-service-internal.js";
 import type { PluginMachineProviderBridge } from "./plugin-machine-provider-registry.js";
 import { fillPluginPresentation } from "./plugin-presentation.js";
+import { retireClassicAcp } from "./classic-acp-retirement.js";
 
 export type {
   PluginAgentToolContribution,
@@ -1737,6 +1738,12 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
           }
 
           await recoverIncompletePluginRollbacks();
+          await retireClassicAcp({
+            db: deps.db,
+            bundledPlugins,
+            checkEngineRange,
+            checkPluginSdkRange,
+          });
         });
         await reconcileBundled();
         await removeUnbundledBuiltins();
