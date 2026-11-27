@@ -4,6 +4,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createConnection, migrate, type DbConnection } from "../src/index.js";
 import {
+  dropThreadShelfSortKeyColumn,
+  dropPostShelfMigrationArtifacts,
   dropNativeThreadImportsTable,
   dropThreadStatusChangedAtColumn,
 } from "./helpers/rewind.js";
@@ -53,6 +55,8 @@ function seedKey(db: DbConnection, id: string, referenceId: string): void {
 }
 
 function replayPrincipalMigration(db: DbConnection): void {
+  dropPostShelfMigrationArtifacts(db);
+  dropThreadShelfSortKeyColumn(db);
   dropThreadStatusChangedAtColumn(db);
   dropNativeThreadImportsTable(db);
   db.$client

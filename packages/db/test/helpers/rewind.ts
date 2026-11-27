@@ -216,7 +216,7 @@ export function dropNativeThreadImportsTable(db: DbConnection): void {
   db.$client.exec("DROP TABLE IF EXISTS native_thread_imports");
 }
 
-export function dropReplayCreatedTables(db: DbConnection): void {
+export function dropPostShelfMigrationArtifacts(db: DbConnection): void {
   db.$client.exec("DROP INDEX IF EXISTS threads_group_idx");
 
   const replayColumns = db.$client
@@ -238,6 +238,17 @@ export function dropReplayCreatedTables(db: DbConnection): void {
     DROP TABLE IF EXISTS submission_receipts;
     DROP TABLE IF EXISTS dispatched_queued_thread_messages;
   `);
+
+  const questionColumns = db.$client
+    .prepare<[], { name: string }>("PRAGMA table_info(thread_questions)")
+    .all();
+
+  if (questionColumns.some((column) => column.name === "answered_by"))
+    db.$client.exec("ALTER TABLE thread_questions DROP COLUMN answered_by");
+}
+
+export function dropReplayCreatedTables(db: DbConnection): void {
+  dropPostShelfMigrationArtifacts(db);
   dropThreadShelfSortKeyColumn(db);
   dropThreadStatusChangedAtColumn(db);
   dropNativeThreadImportsTable(db);

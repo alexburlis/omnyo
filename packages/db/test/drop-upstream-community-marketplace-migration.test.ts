@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createConnection, migrate, type DbConnection } from "../src/index.js";
 import {
+  dropPostShelfMigrationArtifacts,
   dropNativeThreadImportsTable,
   dropThreadShelfSortKeyColumn,
   dropThreadStatusChangedAtColumn,
@@ -69,6 +70,7 @@ function seedMarketplace(db: DbConnection, name: string): void {
 }
 
 function replay(db: DbConnection): void {
+  dropPostShelfMigrationArtifacts(db);
   dropThreadShelfSortKeyColumn(db);
   dropThreadStatusChangedAtColumn(db);
   dropNativeThreadImportsTable(db);

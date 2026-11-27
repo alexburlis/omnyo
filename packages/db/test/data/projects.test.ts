@@ -18,6 +18,7 @@ import {
 import { upsertHost } from "../../src/data/hosts.js";
 import { createMigratedConnection } from "../helpers/migrated-connection.js";
 import {
+  dropPostShelfMigrationArtifacts,
   dropPluginArtifactBundledRootDirColumn,
   dropQueuedMessageCoalesceColumns,
   dropQueuedMessageDeliveryModeColumn,
@@ -84,6 +85,7 @@ describe("projects", () => {
       rewindInboxStateMigration(db);
       dropThreadLaunchedByColumn(db);
       dropQueuedMessageOverridesFailureColumn(db);
+      dropPostShelfMigrationArtifacts(db);
       dropThreadShelfSortKeyColumn(db);
       dropThreadStatusChangedAtColumn(db);
       dropNativeThreadImportsTable(db);

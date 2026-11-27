@@ -8,6 +8,7 @@ import {
   upsertHost,
 } from "../src/index.js";
 import {
+  dropPostShelfMigrationArtifacts,
   dropNativeThreadImportsTable,
   dropThreadShelfSortKeyColumn,
   dropThreadStatusChangedAtColumn,
@@ -77,6 +78,7 @@ it("closes only dispatched waits whose woken turn completed with a follow-up wai
       "completed",
     );
 
+    dropPostShelfMigrationArtifacts(db);
     dropThreadShelfSortKeyColumn(db);
     dropThreadStatusChangedAtColumn(db);
     dropNativeThreadImportsTable(db);

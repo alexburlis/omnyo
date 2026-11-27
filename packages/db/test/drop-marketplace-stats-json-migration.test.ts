@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createConnection, migrate, type DbConnection } from "../src/index.js";
 import {
+  dropPostShelfMigrationArtifacts,
   dropNativeThreadImportsTable,
   dropThreadShelfSortKeyColumn,
   dropThreadStatusChangedAtColumn,
@@ -37,6 +38,7 @@ describe("0167_drop_marketplace_stats_json", () => {
     const db = createConnection(":memory:");
     connections.push(db);
     migrate(db);
+    dropPostShelfMigrationArtifacts(db);
     dropThreadShelfSortKeyColumn(db);
     dropThreadStatusChangedAtColumn(db);
     dropNativeThreadImportsTable(db);

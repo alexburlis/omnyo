@@ -311,7 +311,16 @@ it("upgrades the unchanged published 0–160 schema once without rewriting histo
       additions
         .filter((entry) => entry.type === "table")
         .map((entry) => entry.name),
-    ).toEqual(["native_thread_imports", ...inboxTables]);
+    ).toEqual(
+      [
+        "coordinator_store",
+        "dispatched_queued_thread_messages",
+        "native_thread_imports",
+        "submission_receipts",
+        "thread_groups",
+        ...inboxTables,
+      ].sort(),
+    );
     const indexes = additions.filter((entry) => entry.type === "index");
     expect(
       indexes.filter((entry) => inboxTables.includes(entry.tableName)),
@@ -320,10 +329,21 @@ it("upgrades the unchanged published 0–160 schema once without rewriting histo
       indexes.filter((entry) => !inboxTables.includes(entry.tableName)),
     ).toEqual([
       {
+        name: "dispatched_queued_thread_messages_dispatched_at_idx",
+        type: "index",
+        tableName: "dispatched_queued_thread_messages",
+      },
+      {
         name: "native_thread_imports_source_idx",
         type: "index",
         tableName: "native_thread_imports",
       },
+      {
+        name: "thread_groups_project_idx",
+        type: "index",
+        tableName: "thread_groups",
+      },
+      { name: "threads_group_idx", type: "index", tableName: "threads" },
       { name: "threads_launched_by_idx", type: "index", tableName: "threads" },
     ]);
     expect(sqlite.pragma("integrity_check")).toEqual([

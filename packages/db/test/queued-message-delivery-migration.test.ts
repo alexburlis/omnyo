@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import {
+  dropPostShelfMigrationArtifacts,
   dropQueuedMessageCoalesceColumns,
   dropQueuedMessageOverridesFailureColumn,
   dropThreadLaunchedByColumn,
@@ -62,6 +63,7 @@ it("upgrades legacy queued messages with steer intent while preserving their pay
     rewindInboxStateMigration(db);
     dropThreadLaunchedByColumn(db);
     dropQueuedMessageOverridesFailureColumn(db);
+    dropPostShelfMigrationArtifacts(db);
     dropThreadShelfSortKeyColumn(db);
     dropThreadStatusChangedAtColumn(db);
     dropNativeThreadImportsTable(db);

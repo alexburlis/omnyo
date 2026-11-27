@@ -7,7 +7,10 @@ import {
   noopNotifier,
   upsertHost,
 } from "../src/index.js";
-import { dropThreadShelfSortKeyColumn } from "./helpers/rewind.js";
+import {
+  dropPostShelfMigrationArtifacts,
+  dropThreadShelfSortKeyColumn,
+} from "./helpers/rewind.js";
 
 const MIGRATION_CREATED_AT = 1794756731604;
 
@@ -48,6 +51,7 @@ it("orders existing Shelf families newest shelved first and keeps each family to
     ] as const)
       setShelvedAt.run(shelvedAt, id);
 
+    dropPostShelfMigrationArtifacts(db);
     dropThreadShelfSortKeyColumn(db);
     db.$client
       .prepare("DELETE FROM __drizzle_migrations WHERE created_at >= ?")
