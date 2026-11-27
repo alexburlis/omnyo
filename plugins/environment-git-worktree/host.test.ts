@@ -307,7 +307,6 @@ describe("worktree host entry", () => {
     "retires a fresh pnpm worktree only when there is no extra ignored artifact (artifact: %s)",
     async (hasArtifact) => {
       const { sourcePath, dataDir } = await createSourceRepository();
-      const setupScript = new URL("../../.omnyo-env-setup.sh", import.meta.url);
 
       const { packageManager } = JSON.parse(
         await readFile(new URL("../../package.json", import.meta.url), "utf8"),
@@ -368,20 +367,20 @@ describe("worktree host entry", () => {
         );
 
         await execFileAsync(
-          "bash",
-          [
-            fileURLToPath(
-              new URL("../../.omnyo-env-setup.sh", import.meta.url),
-            ),
-          ],
+          "pnpm",
+          ["install", "--offline", "--frozen-lockfile"],
           {
             cwd: worktreePath,
-            env: {
-              ...process.env,
-              COREPACK_ENABLE_NETWORK: "0",
-              npm_config_offline: "true",
-            },
+            env: { ...process.env, COREPACK_ENABLE_NETWORK: "0" },
           },
+        );
+        await execFileAsync(
+          process.execPath,
+          [
+            "--experimental-strip-types",
+            fileURLToPath(new URL("./host/setup-outputs.ts", import.meta.url)),
+          ],
+          { cwd: worktreePath },
         );
         expect(existsSync(dependencyPath)).toBe(true);
 

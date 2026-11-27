@@ -9,6 +9,7 @@ import {
 } from "./host-contract";
 import {
   rpcContract,
+  reclaimResult,
   savedRecord,
   sidebarRepository,
   type CleanupOutcome,
@@ -528,7 +529,100 @@ export function registerWorktrees(
     { experimental_discoverable: true },
   );
 
+  const reclaims = new Map<string, { admitted: boolean; cancelled: boolean }>();
+
   api.rpc.register(rpcContract, {
+    hostInventory: async ({ hostId }) => readInventory(hostId),
+    cancelReclaim: async ({ hostId }) => {
+      const operation = reclaims.get(hostId);
+
+      if (!operation) return { cancelled: false };
+      operation.cancelled = true;
+
+      if (!operation.admitted) return { cancelled: true };
+
+      return api.sdk.plugins.callRpc({
+        pluginId: "environment-git-worktree",
+        method: "cancelWorktreeStorage",
+        input: { hostId },
+        outputSchema: z.object({ cancelled: z.boolean() }),
+      });
+    },
+    reclaimSpace: async ({
+      hostId,
+      worktrees,
+    }): Promise<z.infer<typeof reclaimResult>> => {
+      if (reclaims.has(hostId))
+        throw new Error("Space reclaim is already running on this machine.");
+      const operation = { admitted: false, cancelled: false };
+      reclaims.set(hostId, operation);
+
+      try {
+        const inventory = await readInventory(hostId);
+
+        const resolved = new Map<
+          string,
+          { sourcePath: string; path: string }
+        >();
+
+        const skippedWorktrees: z.infer<
+          typeof reclaimResult
+        >["skippedWorktrees"] = [];
+
+        for (const selected of worktrees) {
+          const entry = inventory.entries.find(
+            (candidate) =>
+              candidate.projectId === selected.projectId &&
+              candidate.path === selected.repo,
+          );
+
+          const tree = entry?.repo?.worktrees.find(
+            (candidate) => candidate.path === selected.path,
+          );
+
+          const reason =
+            !entry?.repo || !tree
+              ? "This worktree is no longer in the selected machine's inventory."
+              : selected.path === entry.path
+                ? "The primary checkout cannot be reclaimed."
+                : tree.error || tree.missing || tree.bare || tree.locked
+                  ? "This worktree is locked or unavailable. Rescan before reclaiming space."
+                  : null;
+
+          if (reason) skippedWorktrees.push({ path: selected.path, reason });
+          else
+            resolved.set(selected.path, {
+              sourcePath: selected.repo,
+              path: selected.path,
+            });
+        }
+
+        if (operation.cancelled)
+          return {
+            status: "cancelled",
+            sharedFiles: 0,
+            privateBytesReleased: 0,
+            skippedFiles: 0,
+            skippedWorktrees,
+          };
+
+        operation.admitted = true;
+
+        const result = await api.sdk.plugins.callRpc({
+          pluginId: "environment-git-worktree",
+          method: "reclaimWorktreeStorage",
+          input: { hostId, worktrees: [...resolved.values()] },
+          outputSchema: reclaimResult,
+        });
+
+        return {
+          ...result,
+          skippedWorktrees: [...skippedWorktrees, ...result.skippedWorktrees],
+        };
+      } finally {
+        reclaims.delete(hostId);
+      }
+    },
     savedScan: () => state(),
     rescan: () => requestScan(),
     cleanSaved: ({ snapshotId }) => cleanSaved(snapshotId),
@@ -614,13 +708,13 @@ export function registerWorktrees(
 
       return host.call("scan", input, options(input));
     },
-    files: async (request) => {
-      const input = await envelope(request);
+    files: async ({ hostId, ...request }) => {
+      const input = await envelope(request, hostId);
 
       return host.call("files", input, options(input));
     },
-    diff: async (request) => {
-      const input = await envelope(request);
+    diff: async ({ hostId, ...request }) => {
+      const input = await envelope(request, hostId);
 
       return host.call("diff", input, options(input));
     },

@@ -13,10 +13,13 @@ import { reportHostProgress } from "omnyo-environment-provider-host/progress";
 import { z } from "zod";
 import {
   discoveredWorktreeSchema,
+  storageSharingResultSchema,
+  storageWorktreeSchema,
   worktreeBaseBranchSchema,
   worktreeHostContract,
   worktreeHostSignals,
   type WorktreeBaseBranch,
+  type StorageSharingResult,
 } from "./contract.js";
 import { GIT_WORKTREE_ENVIRONMENT_PROVIDER_ID } from "./provider-id.js";
 
@@ -54,6 +57,19 @@ type WorktreeOperation = Pick<
 >;
 
 export const worktreeRpcContract = defineRpcContract({
+  reclaimWorktreeStorage: {
+    input: z
+      .object({
+        hostId: z.string().min(1),
+        worktrees: z.array(storageWorktreeSchema).max(256),
+      })
+      .strict(),
+    output: storageSharingResultSchema,
+  },
+  cancelWorktreeStorage: {
+    input: z.object({ hostId: z.string().min(1) }).strict(),
+    output: z.object({ cancelled: z.boolean() }).strict(),
+  },
   previewMissingRegistrationCleanup: {
     input: z
       .object({
@@ -117,12 +133,42 @@ function errorMessage(error: unknown): string {
 }
 
 export default async function worktreePlugin(api: PluginApi): Promise<void> {
+  const settings = api.settings.define({
+    shareWorktreeStorage: {
+      type: "boolean",
+      label: "Share disk space between worktrees",
+      description:
+        "On APFS, identical files share disk space until you edit them.",
+      default: true,
+    },
+  });
+
   const host = api.hosts.experimental_client({
     contract: worktreeHostContract,
     experimental_signals: worktreeHostSignals,
   });
 
   const reports = new Map<string, PluginEnvironmentProviderProgress>();
+
+  const sharingOperations = new Map<
+    string,
+    { hostId: string; kind: "create" | "reclaim" }
+  >();
+
+  async function cancelSharing(operationId: string, hostId: string) {
+    return host.call("cancelStorageSharing", { operationId }, { hostId });
+  }
+
+  settings.onChange((next) => {
+    if (next.shareWorktreeStorage) return;
+    void Promise.all(
+      [...sharingOperations].map(([operationId, { hostId }]) =>
+        cancelSharing(operationId, hostId),
+      ),
+    ).catch((error: unknown) => {
+      api.log.warn(`Could not stop storage sharing: ${errorMessage(error)}`);
+    });
+  });
 
   type Recovery = {
     environmentId: string;
@@ -250,12 +296,21 @@ export default async function worktreePlugin(api: PluginApi): Promise<void> {
     reports.set(operationId, context.report);
 
     try {
+      const { shareWorktreeStorage } = await settings.get();
+
+      if (shareWorktreeStorage)
+        sharingOperations.set(operationId, {
+          hostId: context.host.id,
+          kind: "create",
+        });
+
       const result = await host.call(
         "create",
         {
           operationId,
           sourcePath: context.projectCheckout.path,
           pathKey: context.pathKey,
+          shareWorktreeStorage,
           ...branch,
         },
         {
@@ -283,6 +338,7 @@ export default async function worktreePlugin(api: PluginApi): Promise<void> {
       return { status: "failed", message: errorMessage(error) };
     } finally {
       reports.delete(operationId);
+      sharingOperations.delete(operationId);
     }
   }
 
@@ -395,6 +451,198 @@ export default async function worktreePlugin(api: PluginApi): Promise<void> {
   });
 
   api.rpc.register(worktreeRpcContract, {
+    async reclaimWorktreeStorage({ hostId, worktrees }, context) {
+      if (
+        context.experimental_caller.kind !== "plugin" ||
+        context.experimental_caller.pluginId !== "omnyo--storage-retention"
+      )
+        throw new Error("Only Storage Retention can reclaim worktree storage.");
+
+      const empty: StorageSharingResult = {
+        status: "completed",
+        sharedFiles: 0,
+        privateBytesReleased: 0,
+        skippedFiles: 0,
+        skippedWorktrees: [],
+      };
+
+      if (!(await settings.get()).shareWorktreeStorage)
+        return {
+          ...empty,
+          status: "disabled" as const,
+          skippedWorktrees: worktrees.map(({ path }) => ({
+            path,
+            reason: "Worktree storage sharing is switched off.",
+          })),
+        };
+
+      if (
+        [...sharingOperations.values()].some(
+          (operation) =>
+            operation.hostId === hostId && operation.kind === "reclaim",
+        )
+      )
+        throw new Error("Storage sharing is already running on this machine.");
+
+      const operationId = `reclaim#${randomUUID()}`;
+      sharingOperations.set(operationId, { hostId, kind: "reclaim" });
+
+      try {
+        const [projects, environments, threadPages] = await Promise.all([
+          api.sdk.projects.list({ includePersonal: true }),
+          (async () => {
+            const result = [];
+
+            for (let offset = 0; ; offset += 100) {
+              const page = await api.sdk.environments.list({
+                hostId,
+                offset,
+                limit: 100,
+              });
+
+              result.push(...page);
+
+              if (page.length < 100) return result;
+            }
+          })(),
+          Promise.all(
+            [false, true].map(async (archived) => {
+              const result = [];
+
+              for (let offset = 0; ; offset += 200) {
+                const page = await api.sdk.threads.list({
+                  archived,
+                  includeHidden: true,
+                  offset,
+                  limit: 200,
+                });
+
+                result.push(...page);
+
+                if (page.length < 200) return result;
+              }
+            }),
+          ),
+        ]);
+
+        const sources = new Set(
+          projects.flatMap((project) =>
+            project.sources
+              .filter(
+                (source) =>
+                  source.type === "local_path" && source.hostId === hostId,
+              )
+              .map((source) => source.path),
+          ),
+        );
+
+        const protectedPaths = new Set([
+          ...environments
+            .filter(
+              (environment) =>
+                environment.hostLifecycle !== "removed" &&
+                environment.status !== "destroyed",
+            )
+            .map((environment) => environment.path),
+          ...threadPages
+            .flat()
+            .filter(
+              (thread) =>
+                thread.environmentHostId === hostId &&
+                ["pending", "starting", "active", "stopping"].includes(
+                  thread.status,
+                ),
+            )
+            .map((thread) => thread.environmentPath),
+        ]);
+
+        const seen = new Set<string>();
+
+        const eligible = worktrees.filter((worktree) => {
+          const reason = !sources.has(worktree.sourcePath)
+            ? "The source is not a configured repository on this machine."
+            : sources.has(worktree.path)
+              ? "A configured project checkout cannot be reclaimed."
+              : protectedPaths.has(worktree.path)
+                ? "The worktree belongs to an active environment or thread."
+                : seen.has(worktree.path)
+                  ? "The worktree was selected more than once."
+                  : null;
+
+          seen.add(worktree.path);
+
+          if (!reason) return true;
+          empty.skippedWorktrees.push({ path: worktree.path, reason });
+
+          return false;
+        });
+
+        if (!(await settings.get()).shareWorktreeStorage)
+          return { ...empty, status: "disabled" as const };
+
+        if (eligible.length === 0) return empty;
+
+        const cancel = () => {
+          void cancelSharing(operationId, hostId).catch((error: unknown) => {
+            api.log.warn(
+              `Could not cancel storage sharing: ${errorMessage(error)}`,
+            );
+          });
+        };
+
+        context.experimental_signal.addEventListener("abort", cancel, {
+          once: true,
+        });
+
+        if (context.experimental_signal.aborted) cancel();
+
+        try {
+          const result = await host.call(
+            "reclaimWorktreeStorage",
+            {
+              operationId,
+              worktrees: eligible,
+              protectedPaths: [...protectedPaths].filter(
+                (path): path is string => path !== null,
+              ),
+            },
+            { hostId, timeoutMs: CREATE_TIMEOUT_MS },
+          );
+
+          return {
+            ...result,
+            skippedWorktrees: [
+              ...empty.skippedWorktrees,
+              ...result.skippedWorktrees,
+            ],
+          };
+        } finally {
+          context.experimental_signal.removeEventListener("abort", cancel);
+        }
+      } finally {
+        sharingOperations.delete(operationId);
+      }
+    },
+    async cancelWorktreeStorage({ hostId }, context) {
+      if (
+        context.experimental_caller.kind !== "plugin" ||
+        context.experimental_caller.pluginId !== "omnyo--storage-retention"
+      )
+        throw new Error(
+          "Only Storage Retention can cancel worktree storage sharing.",
+        );
+
+      const operations = [...sharingOperations].filter(
+        ([, operation]) =>
+          operation.hostId === hostId && operation.kind === "reclaim",
+      );
+
+      await Promise.all(
+        operations.map(([operationId]) => cancelSharing(operationId, hostId)),
+      );
+
+      return { cancelled: operations.length > 0 };
+    },
     async previewMissingRegistrationCleanup(
       { environmentId, sourcePath, ref },
       context,

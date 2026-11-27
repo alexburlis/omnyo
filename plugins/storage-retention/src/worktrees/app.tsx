@@ -391,9 +391,13 @@ function CleanupOutcomeView({ outcome }: { outcome: CleanupOutcome }) {
 
 export function WorktreesSection({
   machineName,
+  hostId,
+  isCoordinator = true,
   onSummaryChange,
 }: {
   machineName?: string;
+  hostId?: string;
+  isCoordinator?: boolean;
   onSummaryChange: (summary: string) => void;
 }) {
   const rpc = useRpc<typeof rpcContract>();
@@ -402,6 +406,19 @@ export function WorktreesSection({
   const [issues, setIssues] = useState<string[]>([]);
   const [busy, setBusy] = useState(true);
   const [refresh, setRefresh] = useState(0);
+
+  const [selectedWorktrees, setSelectedWorktrees] = useState<Set<string>>(
+    new Set(),
+  );
+
+  const [reclaiming, setReclaiming] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+
+  const [reclaimOutcome, setReclaimOutcome] = useState<z.infer<
+    typeof rpcContract.reclaimSpace.output
+  > | null>(null);
+
+  const [hostScannedAt, setHostScannedAt] = useState<string | null>(null);
 
   const [scanState, setScanState] = useState<z.infer<
     typeof rpcContract.savedScan.output
@@ -484,6 +501,27 @@ export function WorktreesSection({
 
     async function read() {
       try {
+        if (!isCoordinator) {
+          if (!hostId)
+            throw new Error("Select a machine to view its worktrees.");
+          const result = await rpc.call("hostInventory", { hostId });
+
+          if (!active) return;
+          setScanState(null);
+          setEntries(
+            result.entries.map((entry) => ({
+              ...entry,
+              storagePending: false,
+            })),
+          );
+          setIssues(result.issues);
+          setHostScannedAt(result.scannedAt);
+          setLoadError(null);
+          setBusy(false);
+
+          return;
+        }
+
         const result = await rpc.call("savedScan");
 
         if (!active) return;
@@ -513,7 +551,7 @@ export function WorktreesSection({
       active = false;
       clearTimeout(timer);
     };
-  }, [rpc, refresh, connection]);
+  }, [rpc, refresh, connection, hostId, isCoordinator]);
   useEffect(() => {
     setFiles(null);
     setFile("");
@@ -522,7 +560,7 @@ export function WorktreesSection({
 
     if (!selection) return;
     let active = true;
-    rpc.call("files", selection).then(
+    rpc.call("files", { ...selection, hostId }).then(
       (result) => {
         if (active) {
           setFiles(result);
@@ -537,14 +575,14 @@ export function WorktreesSection({
     return () => {
       active = false;
     };
-  }, [rpc, selection]);
+  }, [rpc, selection, hostId]);
   useEffect(() => {
     setPatch(null);
     setDiffError(null);
 
     if (!selection || !file) return;
     let active = true;
-    rpc.call("diff", { ...selection, path: file }).then(
+    rpc.call("diff", { ...selection, path: file, hostId }).then(
       (result) => {
         if (active) setPatch(result.patch);
       },
@@ -556,8 +594,23 @@ export function WorktreesSection({
     return () => {
       active = false;
     };
-  }, [rpc, selection, file]);
+  }, [rpc, selection, file, hostId]);
   const worktrees = entries.flatMap((e) => e.repo?.worktrees ?? []);
+  const mutationBusy = purging || reclaiming;
+
+  const reclaimTargets = entries.flatMap((entry) =>
+    (entry.repo?.worktrees ?? [])
+      .filter((tree) =>
+        selectedWorktrees.has(
+          JSON.stringify([entry.projectId, entry.path, tree.path]),
+        ),
+      )
+      .map((tree) => ({
+        projectId: entry.projectId,
+        repo: entry.path,
+        path: tree.path,
+      })),
+  );
 
   const looseBranches = entries.flatMap(
     (e) => e.repo?.branches.filter((b) => !b.worktrees.length) ?? [],
@@ -674,15 +727,19 @@ export function WorktreesSection({
 
   const summary = loadError
     ? "Worktree scan unavailable"
-    : scanState?.snapshot
-      ? cleanupItems.length
-        ? `${plural(cleanupItems.length, "item", "items")} ready · ${estimateLabel(cleanupItems)}${allIssues.length ? " · Partial scan" : ""}`
-        : allIssues.length
-          ? "No reviewed items · Partial scan"
-          : "Nothing ready to clean"
-      : busy
-        ? "Waiting for the first scan"
-        : "No saved scan yet";
+    : !isCoordinator
+      ? busy
+        ? "Scanning worktrees…"
+        : `${plural(worktrees.length, "working folder", "working folders")}`
+      : scanState?.snapshot
+        ? cleanupItems.length
+          ? `${plural(cleanupItems.length, "item", "items")} ready · ${estimateLabel(cleanupItems)}${allIssues.length ? " · Partial scan" : ""}`
+          : allIssues.length
+            ? "No reviewed items · Partial scan"
+            : "Nothing ready to clean"
+        : busy
+          ? "Waiting for the first scan"
+          : "No saved scan yet";
 
   useEffect(() => onSummaryChange(summary), [onSummaryChange, summary]);
 
@@ -716,6 +773,42 @@ export function WorktreesSection({
     else sectionHeading.current?.focus();
   }
 
+  async function reclaim() {
+    if (!hostId || !reclaimTargets.length || mutationPending.current) return;
+    mutationPending.current = true;
+    setReclaiming(true);
+    setBulkError(null);
+    setReclaimOutcome(null);
+
+    try {
+      const result = await rpc.call("reclaimSpace", {
+        hostId,
+        worktrees: reclaimTargets,
+      });
+
+      setReclaimOutcome(result);
+
+      if (result.status === "disabled")
+        setBulkError(
+          "Space sharing is switched off. Enable Share disk space between worktrees in Worktree settings to reclaim space.",
+        );
+      setSelectedWorktrees(new Set());
+
+      if (isCoordinator) {
+        const updated = await rpc.call("rescan");
+        setScanState(updated);
+        setBusy(updated.scanning);
+      }
+    } catch (error) {
+      setBulkError(error instanceof Error ? error.message : String(error));
+    } finally {
+      mutationPending.current = false;
+      setReclaiming(false);
+      setCancelling(false);
+      setRefresh((value) => value + 1);
+    }
+  }
+
   return (
     <section className="wt-app" aria-labelledby="storage-worktrees">
       <header className="wt-header">
@@ -734,58 +827,102 @@ export function WorktreesSection({
         </div>
         <div className="wt-refresh">
           <span role="status">
-            {scanState?.snapshot
-              ? `Last scan ${new Date(scanState.snapshot.scannedAt).toLocaleString()}`
-              : "No saved scan yet"}
+            {!isCoordinator && hostScannedAt
+              ? `Last scan ${new Date(hostScannedAt).toLocaleString()}`
+              : scanState?.snapshot
+                ? `Last scan ${new Date(scanState.snapshot.scannedAt).toLocaleString()}`
+                : "No saved scan yet"}
             {scanState?.scanning && " · Scanning…"}
           </span>
-          <span
-            className="wt-measure-status"
-            title={
-              scanState
-                ? `Next scan ${new Date(scanState.nextScanAt).toLocaleString()}`
-                : undefined
-            }
-          >
-            Automatically scans every 3 hours
-          </span>
+          {isCoordinator && (
+            <span
+              className="wt-measure-status"
+              title={
+                scanState
+                  ? `Next scan ${new Date(scanState.nextScanAt).toLocaleString()}`
+                  : undefined
+              }
+            >
+              Automatically scans every 3 hours
+            </span>
+          )}
+          {isCoordinator && (
+            <Button
+              size="sm"
+              className="wt-cleanup-all"
+              disabled={
+                busy ||
+                mutationBusy ||
+                preparing ||
+                Boolean(loadError) ||
+                !cleanupItems.length
+              }
+              onClick={(event) => {
+                const id = scanState?.snapshot?.id;
+
+                if (!id || mutationPending.current) return;
+                actionTrigger.current = event.currentTarget;
+                setConfirmation(null);
+                setBulkError(null);
+                setCleanupReview({
+                  snapshotId: id,
+                  items: [...cleanupItems],
+                  entries,
+                });
+              }}
+            >
+              <Icon name="Archive" aria-hidden="true" />
+              {purging
+                ? `Cleaning up ${cleanupProgress}/${cleanupId.current?.total ?? cleanupItems.length}…`
+                : `Review cleanup (${cleanupItems.length})`}
+            </Button>
+          )}
           <Button
             size="sm"
-            className="wt-cleanup-all"
             disabled={
               busy ||
-              purging ||
-              preparing ||
+              mutationBusy ||
               Boolean(loadError) ||
-              !cleanupItems.length
+              !hostId ||
+              preparing ||
+              !reclaimTargets.length
             }
-            onClick={(event) => {
-              const id = scanState?.snapshot?.id;
-
-              if (!id || mutationPending.current) return;
-              actionTrigger.current = event.currentTarget;
-              setConfirmation(null);
-              setBulkError(null);
-              setCleanupReview({
-                snapshotId: id,
-                items: [...cleanupItems],
-                entries,
-              });
-            }}
+            onClick={() => void reclaim()}
           >
-            <Icon name="Archive" aria-hidden="true" />
-            {purging
-              ? `Cleaning up ${cleanupProgress}/${cleanupId.current?.total ?? cleanupItems.length}…`
-              : `Review cleanup (${cleanupItems.length})`}
+            {reclaiming
+              ? "Reclaiming space…"
+              : `Reclaim space${reclaimTargets.length ? ` (${reclaimTargets.length})` : ""}`}
           </Button>
+          {reclaiming && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={cancelling}
+              onClick={async () => {
+                if (!hostId) return;
+                setCancelling(true);
+
+                try {
+                  await rpc.call("cancelReclaim", { hostId });
+                } catch (error) {
+                  setBulkError(
+                    error instanceof Error ? error.message : String(error),
+                  );
+                  setCancelling(false);
+                }
+              }}
+            >
+              {cancelling ? "Cancelling…" : "Cancel reclaim"}
+            </Button>
+          )}
           <Button
             size="sm"
             variant="outline"
-            disabled={busy || purging}
+            disabled={busy || mutationBusy}
             onClick={async () => {
               setBusy(true);
 
-              if (loadError) {
+              if (loadError || !isCoordinator) {
                 setRefresh((value) => value + 1);
 
                 return;
@@ -808,7 +945,7 @@ export function WorktreesSection({
           >
             {loadError
               ? "Retry"
-              : !scanState
+              : !scanState && isCoordinator
                 ? "Loading scan…"
                 : busy
                   ? "Scanning…"
@@ -884,31 +1021,81 @@ export function WorktreesSection({
           onChange={(e) => setQuery(e.target.value)}
         />
       </div>
-      <div className="wt-cleanup-guide">
-        <Icon name="Archive" aria-hidden="true" />
-        <strong>
-          {removableFolders} {removableFolders === 1 ? "folder" : "folders"}{" "}
-          removable · {deletableBranches}{" "}
-          {deletableBranches === 1 ? "branch" : "branches"} deletable across all
-          projects
-        </strong>
-        <span>
-          {spaceSummary(cleanupItems)}
-          {allIssues.length > 0 &&
-            ` · Partial inventory: ${allIssues.length} ${allIssues.length === 1 ? "path" : "paths"} unchecked`}
-          .
-        </span>
-        {sort !== "status" && (
-          <small className="wt-sort-help">
-            {sort === "storage"
-              ? "Largest folders first; shared Git storage excluded."
-              : sort === "files"
-                ? "Most uncommitted files first; branch refs have no working files."
-                : "Most ahead + behind commits first, against each repository’s shown baseline."}{" "}
-            Projects and repositories follow their top matching item.
-          </small>
-        )}
-      </div>
+      {isCoordinator && (
+        <div className="wt-cleanup-guide">
+          <Icon name="Archive" aria-hidden="true" />
+          <strong>
+            {removableFolders} {removableFolders === 1 ? "folder" : "folders"}{" "}
+            removable · {deletableBranches}{" "}
+            {deletableBranches === 1 ? "branch" : "branches"} deletable across
+            all projects
+          </strong>
+          <span>
+            {spaceSummary(cleanupItems)}
+            {allIssues.length > 0 &&
+              ` · Partial inventory: ${allIssues.length} ${allIssues.length === 1 ? "path" : "paths"} unchecked`}
+            .
+          </span>
+          {sort !== "status" && (
+            <small className="wt-sort-help">
+              {sort === "storage"
+                ? "Largest folders first; shared Git storage excluded."
+                : sort === "files"
+                  ? "Most uncommitted files first; branch refs have no working files."
+                  : "Most ahead + behind commits first, against each repository’s shown baseline."}{" "}
+              Projects and repositories follow their top matching item.
+            </small>
+          )}
+        </div>
+      )}
+      <p className="wt-scope">
+        Select idle worktrees to share identical files on APFS. Busy worktrees
+        are skipped; edited and untracked files are kept.
+      </p>
+      {reclaiming && (
+        <p role="status">
+          Checking selected worktrees and sharing identical files…
+        </p>
+      )}
+      {reclaimOutcome && (
+        <div className="wt-cleanup-outcome" role="status">
+          <p>
+            {reclaimOutcome.status === "unsupported"
+              ? "Space sharing is unavailable on this machine or volume."
+              : reclaimOutcome.status === "cancelled"
+                ? "Space reclaim cancelled."
+                : reclaimOutcome.status === "disabled"
+                  ? "Space sharing is switched off."
+                  : "Space reclaim completed."}{" "}
+            {plural(reclaimOutcome.sharedFiles, "file shared", "files shared")}{" "}
+            · {bytesLabel(reclaimOutcome.privateBytesReleased)} of private data
+            released ·{" "}
+            {plural(
+              reclaimOutcome.skippedFiles,
+              "file skipped",
+              "files skipped",
+            )}
+            .
+          </p>
+          <p>
+            {reclaimOutcome.volumeFreeBytesChange == null
+              ? "Volume free-space change was unavailable."
+              : `Observed volume free-space change: ${reclaimOutcome.volumeFreeBytesChange < 0 ? "−" : "+"}${bytesLabel(Math.abs(reclaimOutcome.volumeFreeBytesChange))}. Other activity and snapshots can affect this measurement.`}
+          </p>
+          {reclaimOutcome.skippedWorktrees.length > 0 && (
+            <details>
+              <summary>
+                Skipped worktrees ({reclaimOutcome.skippedWorktrees.length})
+              </summary>
+              {reclaimOutcome.skippedWorktrees.map((item, index) => (
+                <p key={`${item.path}-${index}`}>
+                  {item.path} · {item.reason}
+                </p>
+              ))}
+            </details>
+          )}
+        </div>
+      )}
       {(bulkError || loadError || scanState?.lastError) && (
         <p role="alert" className="wt-error" tabIndex={-1} ref={errorNotice}>
           {bulkError || loadError || scanState?.lastError}
@@ -1018,7 +1205,7 @@ export function WorktreesSection({
           <footer>
             <Button
               variant="outline"
-              disabled={purging}
+              disabled={mutationBusy}
               onClick={() => {
                 setCleanupReview(null);
                 restoreFocus();
@@ -1030,7 +1217,7 @@ export function WorktreesSection({
               variant="destructive"
               disabled={
                 busy ||
-                purging ||
+                mutationBusy ||
                 Boolean(loadError) ||
                 cleanupReview.snapshotId !== scanState?.snapshot?.id
               }
@@ -1119,7 +1306,7 @@ export function WorktreesSection({
           <footer>
             <Button
               variant="outline"
-              disabled={purging}
+              disabled={mutationBusy}
               onClick={() => {
                 setConfirmation(null);
                 restoreFocus();
@@ -1129,7 +1316,7 @@ export function WorktreesSection({
             </Button>
             <Button
               variant="destructive"
-              disabled={purging}
+              disabled={mutationBusy}
               onClick={async () => {
                 if (mutationPending.current) return;
                 mutationPending.current = true;
@@ -1322,6 +1509,42 @@ export function WorktreesSection({
                           key={w.path}
                           className={`wt-row ${selection?.target === w.path ? "wt-selected" : ""}`}
                         >
+                          <input
+                            type="checkbox"
+                            aria-label={`Select worktree ${w.path}`}
+                            disabled={
+                              busy ||
+                              mutationBusy ||
+                              w.path === entry.path ||
+                              w.missing ||
+                              w.bare ||
+                              w.locked ||
+                              Boolean(w.error)
+                            }
+                            checked={selectedWorktrees.has(
+                              JSON.stringify([
+                                entry.projectId,
+                                entry.path,
+                                w.path,
+                              ]),
+                            )}
+                            onChange={(event) => {
+                              const key = JSON.stringify([
+                                entry.projectId,
+                                entry.path,
+                                w.path,
+                              ]);
+
+                              setSelectedWorktrees((current) => {
+                                const next = new Set(current);
+
+                                if (event.target.checked) next.add(key);
+                                else next.delete(key);
+
+                                return next;
+                              });
+                            }}
+                          />
                           <button
                             className="wt-open"
                             title={`View changes in ${w.path}`}
@@ -1396,10 +1619,10 @@ export function WorktreesSection({
                               </span>
                             </span>
                           </button>
-                          {w.purgeReady && (
+                          {isCoordinator && w.purgeReady && (
                             <button
                               className="wt-purge"
-                              disabled={busy || purging || preparing}
+                              disabled={busy || mutationBusy || preparing}
                               onClick={async (event) => {
                                 if (mutationPending.current) return;
                                 mutationPending.current = true;
@@ -1492,10 +1715,10 @@ export function WorktreesSection({
                                   </span>
                                 </span>
                               </button>
-                              {b.deleteReady && (
+                              {isCoordinator && b.deleteReady && (
                                 <button
                                   className="wt-purge"
-                                  disabled={busy || purging || preparing}
+                                  disabled={busy || mutationBusy || preparing}
                                   onClick={async (event) => {
                                     if (mutationPending.current) return;
                                     mutationPending.current = true;

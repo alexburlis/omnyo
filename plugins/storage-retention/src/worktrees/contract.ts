@@ -250,8 +250,53 @@ export const ownerRpcContract = defineRpcContract({
   },
 });
 
+export const reclaimSelection = z
+  .object({
+    projectId: z.string().min(1),
+    repo: z.string().min(1),
+    path: z.string().min(1),
+  })
+  .strict();
+
+export const reclaimResult = z.object({
+  status: z.enum(["completed", "unsupported", "disabled", "cancelled"]),
+  sharedFiles: z.number().int().nonnegative(),
+  privateBytesReleased: z.number().nonnegative(),
+  volumeFreeBytesChange: z.number().safe().nullable().optional(),
+  skippedFiles: z.number().int().nonnegative(),
+  skippedWorktrees: z.array(z.object({ path: z.string(), reason: z.string() })),
+});
+
 export const rpcContract = defineRpcContract({
   ...ownerRpcContract,
+  hostInventory: {
+    input: z.object({ hostId: z.string().min(1) }).strict(),
+    output: scanInventory,
+  },
+  cancelReclaim: {
+    input: z.object({ hostId: z.string().min(1) }).strict(),
+    output: z.object({ cancelled: z.boolean() }),
+  },
+  reclaimSpace: {
+    input: z
+      .object({
+        hostId: z.string().min(1),
+        worktrees: z.array(reclaimSelection).min(1).max(256),
+      })
+      .strict(),
+    output: reclaimResult,
+  },
+  files: {
+    ...ownerRpcContract.files,
+    input: selection.extend({ hostId: z.string().min(1).optional() }),
+  },
+  diff: {
+    ...ownerRpcContract.diff,
+    input: selection.extend({
+      path: z.string(),
+      hostId: z.string().min(1).optional(),
+    }),
+  },
   savedScan: { input: z.null(), output: scanState },
   rescan: { input: z.null(), output: scanState },
   cleanSaved: {

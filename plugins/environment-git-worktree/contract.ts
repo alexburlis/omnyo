@@ -20,6 +20,27 @@ export const discoveredWorktreeSchema = z
 
 export type DiscoveredWorktree = z.infer<typeof discoveredWorktreeSchema>;
 
+export const storageWorktreeSchema = z
+  .object({ sourcePath: z.string().min(1), path: z.string().min(1) })
+  .strict();
+
+export const storageSharingResultSchema = z
+  .object({
+    status: z.enum(["completed", "unsupported", "disabled", "cancelled"]),
+    sharedFiles: z.number().int().nonnegative(),
+    privateBytesReleased: z.number().nonnegative(),
+    volumeFreeBytesChange: z.number().safe().nullable().optional(),
+    skippedFiles: z.number().int().nonnegative(),
+    skippedWorktrees: z.array(
+      z.object({ path: z.string(), reason: z.string() }).strict(),
+    ),
+  })
+  .strict();
+
+export type StorageWorktree = z.infer<typeof storageWorktreeSchema>;
+
+export type StorageSharingResult = z.infer<typeof storageSharingResultSchema>;
+
 const missingRegistrationInput = z.object({
   sourcePath: z.string().min(1),
   path: z.string().min(1),
@@ -33,6 +54,20 @@ const missingRegistrationProof = z.object({
 });
 
 export const worktreeHostContract = defineRpcContract({
+  reclaimWorktreeStorage: {
+    input: z
+      .object({
+        operationId: z.string().min(1),
+        worktrees: z.array(storageWorktreeSchema).max(256),
+        protectedPaths: z.array(z.string().min(1)),
+      })
+      .strict(),
+    output: storageSharingResultSchema,
+  },
+  cancelStorageSharing: {
+    input: z.object({ operationId: z.string().min(1) }).strict(),
+    output: z.object({ cancelled: z.boolean() }).strict(),
+  },
   inspectMissingRegistration: {
     input: missingRegistrationInput.extend({ pathKey: z.string().min(1) }),
     output: missingRegistrationProof.extend({
@@ -77,6 +112,7 @@ export const worktreeHostContract = defineRpcContract({
         branchName: z.string().min(1),
         baseBranch: worktreeBaseBranchSchema,
         branchMode: z.enum(["reset", "reuse-existing"]),
+        shareWorktreeStorage: z.boolean().optional(),
       })
       .strict(),
     output: z.discriminatedUnion("status", [

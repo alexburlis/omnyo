@@ -63,6 +63,7 @@ interface CreateWorktreeArgs {
   branchName: string;
   baseBranch: ResolvedWorktreeBaseBranch | null;
   branchMode: BranchMode;
+  shareStorage?: () => Promise<void>;
   onProgress?: ProgressCallback | undefined;
   signal?: AbortSignal | undefined;
 }
@@ -717,6 +718,21 @@ export async function createWorktree(
       metadata: { durationMs: Date.now() - worktreeStartedAt },
     });
     worktreeCreated = true;
+
+    if (args.shareStorage) {
+      try {
+        await args.shareStorage();
+      } catch (error) {
+        throwIfProvisionAborted(args.signal);
+        emitOutput(
+          args.onProgress,
+          "worktree-storage-sharing",
+          `Storage sharing failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
+    throwIfProvisionAborted(args.signal);
     await finishWorktreeSetup(args);
 
     return { path: args.targetPath };

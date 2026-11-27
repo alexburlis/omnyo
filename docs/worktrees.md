@@ -61,6 +61,14 @@ upstream, even when Git's `branch.autoSetupMerge` is enabled. Publish with
 `git push -u origin HEAD` to set the upstream to the task's remote branch.
 Reusing an existing branch preserves its upstream configuration.
 
+## Share disk space on macOS
+
+**Settings → Installed plugins → Worktree → Share disk space between worktrees** is on by default. When Omnyo creates a worktree on a supported APFS volume, Git checks out the selected revision first. Omnyo then shares storage for identical tracked files before running project setup. Each file stays independently editable. The initial checkout still needs enough free disk space.
+
+To reclaim space in existing worktrees, open **Storage → Worktrees**, choose the machine, select idle linked worktrees and click **Reclaim space**. Omnyo reports the private bytes released, the worktrees it skipped, and the observed change in volume free space. Other activity and snapshots can affect the volume reading. Eligible files include clean tracked files and ignored build or dependency files in directories such as `build`, `dist`, and `node_modules`. Changed files, untracked user files, and recorded setup outputs are protected. Switching sharing off stops new operations and lets an in-progress file exchange settle. Existing copies continue to work.
+
+From the CLI, run `omnyo plugin config environment-git-worktree set shareWorktreeStorage false` to switch it off, or use `true` to turn it back on.
+
 ## Copy local files with `.worktreeinclude`
 
 A new worktree checks out tracked files only. Your `.env`, your local

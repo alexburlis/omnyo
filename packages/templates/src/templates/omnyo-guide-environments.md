@@ -12,6 +12,8 @@ Environments determine where threads run. Multiple threads can share an environm
 The first-party choices are Project checkout (the project's existing directory),
 Worktree (a fresh Git worktree), and Personal workspace (a projectless workspace).
 
+On supported APFS volumes, the Worktree plugin shares storage for identical tracked files when creating a managed worktree. Each copy remains independently editable. The default-on switch is under Settings → Installed plugins → Worktree. Storage → Worktrees offers Reclaim space for selected idle worktrees on a machine.
+
 New Worktree branches start at the selected base without an upstream, regardless
 of Git's branch.autoSetupMerge setting. Publish with `git push -u origin HEAD`
 to track the task's remote branch. Existing branches keep their upstream.

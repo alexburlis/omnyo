@@ -1662,7 +1662,12 @@ function StoragePage({
           </>
         )}
         <WorktreesSection
-          machineName={coordinator}
+          key={hostId ?? "coordinator"}
+          hostId={hostId ?? primaryHostId ?? undefined}
+          isCoordinator={!hostId || hostId === primaryHostId}
+          machineName={
+            hostId ? (machines[hostId]?.name ?? hostId) : coordinator
+          }
           onSummaryChange={setWorktreeSummary}
         />
         {state && (
