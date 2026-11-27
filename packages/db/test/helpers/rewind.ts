@@ -217,6 +217,27 @@ export function dropNativeThreadImportsTable(db: DbConnection): void {
 }
 
 export function dropReplayCreatedTables(db: DbConnection): void {
+  db.$client.exec("DROP INDEX IF EXISTS threads_group_idx");
+
+  const replayColumns = db.$client
+    .prepare<[], { name: string }>("PRAGMA table_info(threads)")
+    .all();
+
+  for (const name of [
+    "group_id",
+    "plugin_home",
+    "quiet",
+    "claude_profile_binding",
+  ])
+    if (replayColumns.some((column) => column.name === name))
+      db.$client.exec(`ALTER TABLE threads DROP COLUMN ${name}`);
+
+  db.$client.exec(`
+    DROP TABLE IF EXISTS thread_groups;
+    DROP TABLE IF EXISTS coordinator_store;
+    DROP TABLE IF EXISTS submission_receipts;
+    DROP TABLE IF EXISTS dispatched_queued_thread_messages;
+  `);
   dropThreadShelfSortKeyColumn(db);
   dropThreadStatusChangedAtColumn(db);
   dropNativeThreadImportsTable(db);

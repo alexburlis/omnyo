@@ -19,11 +19,6 @@ export {
 export type { ReorderProjectResult } from "./projects.js";
 
 export {
-  getThreadConversationOutlineRecord,
-  upsertThreadConversationOutlineRecord,
-} from "./thread-conversation-outlines.js";
-
-export {
   createThreadSection,
   deleteThreadSection,
   getThreadSectionById,
@@ -457,13 +452,6 @@ export {
   getThreadHistoryEpoch,
   getThreadHistoryState,
 } from "./timeline-history-epoch.js";
-
-export {
-  getThreadTimelineRecord,
-  putThreadTimelineRecord,
-  type ThreadTimelineRecordInput,
-  type ThreadTimelineRecordLimits,
-} from "./timeline-derived-cache.js";
 
 export {
   canHydrateRetainedEventOutputRowsWithinDataByteLimit,

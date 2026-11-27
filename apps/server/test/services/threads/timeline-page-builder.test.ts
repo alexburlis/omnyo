@@ -17,7 +17,6 @@ import {
   migrate,
   noopNotifier,
   openHistoryCache,
-  putThreadTimelineRecord,
   upsertHost,
   type DbConnection,
 } from "@omnyo/db";
@@ -792,18 +791,11 @@ describe("file-backed canonical page workers", () => {
           itemId: "message",
           delta: `next${index}\n`,
         });
-        putThreadTimelineRecord(
-          db,
-          {
-            key: `unrelated${index}`,
-            threadId,
-            kind: "page",
-            body: "{}",
-            createdAt: Date.now(),
-            expiresAt: null,
-          },
-          { maxBytes: 8, maxEntries: 1, maxEntryBytes: 8 },
-        );
+        db.$client
+          .prepare(
+            "UPDATE projects SET updated_at = updated_at + 1 WHERE id = (SELECT project_id FROM threads WHERE id = ?)",
+          )
+          .run(threadId);
         const next = await buildThreadTimelinePage(db, { threadId, options });
         expect(next.workerThreadId).toBe(first.workerThreadId);
         expect(next.profile.decodedEventCount).toBeLessThan(10);
