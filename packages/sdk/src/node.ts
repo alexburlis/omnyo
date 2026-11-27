@@ -108,6 +108,11 @@ export {
   type PluginMutationResponse,
 } from "./areas/plugins.js";
 
+export {
+  requestCompatiblePluginSettings,
+  type CompatiblePluginSettingsResult,
+} from "./areas/plugin-settings.js";
+
 export { createBuiltinPlanCommandTextInput } from "./core.js";
 
 export { createGuideArea } from "./areas/guide.js";

@@ -71,6 +71,7 @@ import {
   type PluginUpdateCheckEntry,
 } from "@omnyo/server-contract";
 import { z } from "zod";
+import type { OmnyoSdkTransport } from "../transport.js";
 import type { CreateSdkAreaArgs } from "./common.js";
 
 const installedPluginResponseSchema = installedPluginSchema.extend({
@@ -389,6 +390,35 @@ function pluginPath(pluginId: string, suffix = ""): string {
   return `/api/v1/plugins/${encodeURIComponent(id)}${suffix}`;
 }
 
+export type PluginSettingsTransport = Pick<
+  OmnyoSdkTransport,
+  "baseUrl" | "fetch"
+>;
+
+export type PluginSettingsRequest = { pluginId: string } & (
+  | { method: "GET"; signal?: AbortSignal }
+  | { method: "PUT"; values: Record<string, JsonValue> }
+);
+
+export function fetchPluginSettings(
+  transport: PluginSettingsTransport,
+  request: PluginSettingsRequest,
+  baseUrl = transport.baseUrl,
+): { path: string; response: Promise<Response> } {
+  const path = `/api/v1/plugins/${encodeURIComponent(request.pluginId)}/settings`;
+
+  const init: RequestInit =
+    request.method === "PUT"
+      ? {
+          method: request.method,
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ values: request.values }),
+        }
+      : { method: request.method, signal: request.signal };
+
+  return { path, response: transport.fetch(`${baseUrl}${path}`, init) };
+}
+
 export function createPluginsArea(args: CreateSdkAreaArgs): PluginsArea {
   const { transport } = args;
 
@@ -405,6 +435,22 @@ export function createPluginsArea(args: CreateSdkAreaArgs): PluginsArea {
     const json: unknown = await response.json();
 
     return schema.parse(json);
+  }
+
+  async function requestSettings(
+    request: PluginSettingsRequest,
+  ): Promise<PluginSettingsResponse> {
+    z.string().min(1).parse(request.pluginId);
+
+    const { response } = fetchPluginSettings(
+      transport,
+      request,
+      transport.baseUrl.replace(/\/$/u, ""),
+    );
+
+    const resolved = await transport.resolve(response);
+
+    return pluginSettingsResponseSchema.parse(await resolved.json());
   }
 
   function jsonInit(method: "POST" | "PUT", body: unknown): RequestInit {
@@ -789,11 +835,11 @@ export function createPluginsArea(args: CreateSdkAreaArgs): PluginsArea {
       return response.plugin;
     },
     async getSettings(input) {
-      return requestParsed(
-        pluginPath(input.pluginId, "/settings"),
-        pluginSettingsResponseSchema,
-        { signal: input.signal },
-      );
+      return requestSettings({
+        pluginId: input.pluginId,
+        method: "GET",
+        signal: input.signal,
+      });
     },
     async getSource(input) {
       return requestParsed(
@@ -860,11 +906,11 @@ export function createPluginsArea(args: CreateSdkAreaArgs): PluginsArea {
         values: input.values,
       });
 
-      return requestParsed(
-        pluginPath(input.pluginId, "/settings"),
-        pluginSettingsResponseSchema,
-        jsonInit("PUT", body),
-      );
+      return requestSettings({
+        pluginId: input.pluginId,
+        method: "PUT",
+        values: body.values,
+      });
     },
   };
 }
