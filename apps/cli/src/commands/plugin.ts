@@ -30,6 +30,10 @@ import {
 } from "@omnyo/server-contract";
 import { OmnyoHttpError, pluginMutationResponseSchema } from "@omnyo/sdk";
 import {
+  requestCompatiblePluginSettings,
+  type CompatiblePluginSettingsResult,
+} from "@omnyo/sdk/node";
+import {
   parseDataDirEnvValue,
   resolveProdDataDir,
 } from "@omnyo/config/runtime";
@@ -156,25 +160,8 @@ async function searchCatalog(
     .results;
 }
 
-const pluginSettingDescriptorSchema = z.looseObject({
-  type: z.enum(["string", "number", "boolean", "select", "project"]),
-  label: z.string(),
-  description: z.string().optional(),
-  experimental_section: z.looseObject({ title: z.string() }).optional(),
-  secret: z.literal(true).optional(),
-  default: z.union([z.string(), z.number().finite(), z.boolean()]).optional(),
-  options: z.array(z.string()).optional(),
-});
-
 const negativeNumberValuePattern =
   /^-(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/;
-
-const pluginSettingsResultSchema = z.object({
-  ok: z.boolean(),
-  error: z.string().optional(),
-  schema: z.record(z.string(), pluginSettingDescriptorSchema).optional(),
-  values: z.record(z.string(), z.unknown()).optional(),
-});
 
 const pluginTokenResultSchema = z.object({
   ok: z.boolean(),
@@ -424,9 +411,9 @@ async function installScaffoldDependencies(
   return true;
 }
 
-type PluginSettingDescriptor = z.infer<typeof pluginSettingDescriptorSchema>;
-
-type PluginSettingsResult = z.infer<typeof pluginSettingsResultSchema>;
+type PluginSettingDescriptor = NonNullable<
+  CompatiblePluginSettingsResult["schema"]
+>[string];
 
 async function callPlugins(
   baseUrl: string,
@@ -785,7 +772,7 @@ function sdkErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function printSettings(result: PluginSettingsResult): void {
+function printSettings(result: CompatiblePluginSettingsResult): void {
   const schema = result.schema ?? {};
   const values = result.values ?? {};
   const keys = Object.keys(schema);
@@ -2304,11 +2291,11 @@ export function registerPluginCommands(
             command.error(
               `error: too many arguments for 'config'. Expected ${expectedArgumentCount} arguments but got ${command.args.length}.`,
             );
-          const settingsPath = `/${encodeURIComponent(id)}/settings`;
 
           if (actionName === undefined) {
-            const result = pluginSettingsResultSchema.parse(
-              await callPlugins(getUrl(), settingsPath, "GET"),
+            const result = await requestCompatiblePluginSettings(
+              { baseUrl: getUrl(), fetch: cliFetch },
+              { pluginId: id, method: "GET" },
             );
 
             if (outputMutationJson(opts, result)) return;
@@ -2348,8 +2335,9 @@ export function registerPluginCommands(
               process.exit(1);
             }
 
-            const current = pluginSettingsResultSchema.parse(
-              await callPlugins(getUrl(), settingsPath, "GET"),
+            const current = await requestCompatiblePluginSettings(
+              { baseUrl: getUrl(), fetch: cliFetch },
+              { pluginId: id, method: "GET" },
             );
 
             if (!current.ok || !current.schema) exitWithError(current);
@@ -2370,10 +2358,9 @@ export function registerPluginCommands(
             parsedValue = parseSettingValue(descriptor, key, value);
           }
 
-          const result = pluginSettingsResultSchema.parse(
-            await callPlugins(getUrl(), settingsPath, "PUT", {
-              values: { [key]: parsedValue },
-            }),
+          const result = await requestCompatiblePluginSettings(
+            { baseUrl: getUrl(), fetch: cliFetch },
+            { pluginId: id, method: "PUT", values: { [key]: parsedValue } },
           );
 
           if (outputMutationJson(opts, result)) return;
