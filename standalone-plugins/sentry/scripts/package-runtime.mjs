@@ -99,7 +99,7 @@ if (!acceptance) {
       timeout: 60000,
     }).trim();
 
-  if (git("status", "--porcelain", "--untracked-files=all"))
+  if (git("status", "--porcelain", "--untracked-files=all", "--", "."))
     throw new Error("Runtime source must be clean and committed before packaging");
   const top = git("rev-parse", "--show-toplevel");
   const sourceRoot = relative(top, root).replaceAll("\\", "/");

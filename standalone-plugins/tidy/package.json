@@ -18,7 +18,7 @@
     "lint": "npm run lint:anti-slop",
     "test": "node --test server.test.mjs readiness-store.test.mjs archive-store.test.mjs archive-approval.test.mjs",
     "typecheck": "tsc --noEmit",
-    "package:runtime": "node ../package-runtime.mjs --plugin tidy",
+    "package:runtime": "node ../package-runtime.mjs --plugin tidy --create-evidence-directory",
     "install:runtime": "node scripts/install-runtime.mjs",
     "format:check": "oxfmt --check scripts server.ts server.test.mjs readiness-store.ts readiness-store.test.mjs archive-store.ts archive-store.test.mjs archive-approval.ts archive-approval.test.mjs archive-proposals.ts app.tsx ArchiveApproval.tsx components lib skills README.md PLUGIN_OVERVIEW.md package.json"
   },
