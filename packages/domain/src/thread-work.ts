@@ -270,6 +270,7 @@ export type QueuedMessageWork =
 export function queuedMessageWork(
   message: {
     id: string;
+    pausedAfterStop?: boolean;
     sendAt: number | null;
     waitingOn: QueuedMessageWaitingOn | null;
   },
@@ -291,6 +292,16 @@ export function queuedMessageWork(
         id: message.id,
         reason:
           "A newer message overtook this retry. Send or delete the queued input.",
+        actor: { kind: "user", id: null, label: "You" },
+      },
+    };
+
+  if (message.pausedAfterStop)
+    return {
+      kind: "wait",
+      wait: {
+        id: message.id,
+        reason: "Queue paused after Stop.",
         actor: { kind: "user", id: null, label: "You" },
       },
     };

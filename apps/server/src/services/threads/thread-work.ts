@@ -665,6 +665,7 @@ export function buildThreadWorkSummaries(
       const fact = queuedMessageWork(
         {
           id: entry.id,
+          pausedAfterStop: !entry.autoSendAllowedAfterStop,
           sendAt: entry.sendAt,
           waitingOn:
             entry.waitingOn === null

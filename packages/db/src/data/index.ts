@@ -551,6 +551,7 @@ export {
   isIdleDrainableQueuedMessage,
   isOrdinaryTurnEndQueuedMessage,
   isThreadQueueAutoSendPaused,
+  queuedMessageAutoSendAllowedAfterStop,
   listDueScheduledQueuedThreadMessages,
   listIdleThreadsWithQueuedMessages,
   listQueuedThreadMessageCountsByThreadIds,

@@ -4,7 +4,12 @@ import {
   listEvents,
   listQueuedThreadMessages,
 } from "@omnyo/db";
-import { threadScope, turnScope } from "@omnyo/domain";
+import {
+  inboxSnapshotSchema,
+  threadListEntrySchema,
+  threadScope,
+  turnScope,
+} from "@omnyo/domain";
 import { groupHostDaemonEvents } from "@omnyo/host-daemon-contract";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -24,6 +29,7 @@ import {
   seedStoredEvent,
   seedThread,
   seedThreadFixture,
+  seedThreadIdentity,
   seedTurnStarted,
 } from "../helpers/seed.js";
 import { withTestHarness } from "../helpers/test-app.js";
@@ -1133,6 +1139,132 @@ describe("thread runtime stop", () => {
 
       expect(acceptedStart.status).toBe(200);
       expect(isThreadQueueAutoSendPaused(harness.db, thread.id)).toBe(false);
+    });
+  });
+
+  it("refreshes the child and parent as waiting after Stop then enqueue, until Send now", async () => {
+    await withTestHarness(async (harness) => {
+      const {
+        project,
+        environment,
+        thread: parent,
+      } = seedThreadFixture(harness);
+
+      const child = seedThread(harness.deps, {
+        projectId: project.id,
+        environmentId: environment.id,
+        parentThreadId: parent.id,
+        status: "active",
+      });
+
+      seedThreadIdentity(harness.deps, {
+        threadId: child.id,
+        providerThreadId: "provider-child-turn",
+      });
+      seedTurnStarted(harness.deps, {
+        threadId: child.id,
+        turnId: "child-turn",
+      });
+
+      const stopping = harness.app.request(`/api/v1/threads/${child.id}/stop`, {
+        method: "POST",
+      });
+
+      const stop = await waitForQueuedCommand(
+        harness,
+        ({ command }) =>
+          command.type === "thread.stop" && command.threadId === child.id,
+      );
+
+      await reportQueuedCommandSuccess(harness, stop, {
+        providerCheckpointId: null,
+      });
+      expect((await stopping).status).toBe(200);
+
+      const queueUrl = `/api/v1/threads/${child.id}/queued-messages`;
+
+      const queued = await harness.app.request(queueUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          input: [{ type: "text", text: "Follow up after Stop" }],
+          model: "gpt-5",
+          reasoningLevel: "medium",
+          permissionMode: "full",
+          serviceTier: "default",
+        }),
+      });
+
+      expect(queued.status).toBe(201);
+      await runQueuedMessageDispatch(harness.deps, {
+        kind: "idle-recovery",
+        now: Date.now(),
+      });
+      const [message] = listQueuedThreadMessages(harness.db, child.id);
+      expect(message).toBeDefined();
+      expect(
+        listQueuedThreadCommands(harness, "turn.submit", child.id),
+      ).toHaveLength(0);
+
+      const refresh = async () => {
+        const list = await harness.app.request(
+          `/api/v1/threads?threadIds=${child.id},${parent.id}`,
+        );
+
+        expect(list.status).toBe(200);
+
+        return threadListEntrySchema.array().parse(await list.json());
+      };
+
+      const entries = await refresh();
+
+      for (const [id, waitId] of [
+        [child.id, message!.id],
+        [parent.id, child.id],
+      ]) {
+        const entry = entries.find((row) => row.id === id);
+        expect(entry?.status).toBe("idle");
+        expect.soft(entry?.work?.primary.label).toBe("waiting");
+        expect(entry?.work?.activity).toEqual([]);
+        expect(entry?.work?.waits).toContainEqual(
+          expect.objectContaining({
+            id: waitId,
+            reason: expect.stringMatching(/paused after stop/i),
+          }),
+        );
+      }
+
+      const inbox = inboxSnapshotSchema.parse(
+        await (await harness.app.request("/api/v1/inbox")).json(),
+      );
+
+      expect(inbox.waiting.map((entry) => entry.threadId)).toContain(parent.id);
+
+      const sent = await harness.app.request(
+        `${queueUrl}/${message!.id}/send`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ mode: "auto" }),
+        },
+      );
+
+      expect(sent.status).toBe(200);
+      expect(listQueuedThreadMessages(harness.db, child.id)).toHaveLength(0);
+      await waitForQueuedCommand(
+        harness,
+        ({ command }) =>
+          command.type === "turn.submit" && command.threadId === child.id,
+      );
+      expect(
+        listQueuedThreadCommands(harness, "turn.submit", child.id),
+      ).toHaveLength(1);
+      const running = await refresh();
+
+      for (const id of [parent.id, child.id])
+        expect(running.find((row) => row.id === id)?.work?.primary.label).toBe(
+          "working",
+        );
     });
   });
 

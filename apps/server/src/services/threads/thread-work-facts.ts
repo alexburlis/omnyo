@@ -1,5 +1,9 @@
-import { inArray } from "drizzle-orm";
-import { queuedThreadMessages, type DbConnection } from "@omnyo/db";
+import { and, inArray, isNull } from "drizzle-orm";
+import {
+  queuedMessageAutoSendAllowedAfterStop,
+  queuedThreadMessages,
+  type DbConnection,
+} from "@omnyo/db";
 
 export class ThreadWorkFacts {
   private readonly covered = new Set<string>();
@@ -32,12 +36,17 @@ function readQueuedWorkFacts(db: DbConnection, threadIds: string[]) {
       id: queuedThreadMessages.id,
       threadId: queuedThreadMessages.threadId,
       sendAt: queuedThreadMessages.sendAt,
+      autoSendAllowedAfterStop:
+        queuedMessageAutoSendAllowedAfterStop(db).mapWith(Boolean),
       failureReason: queuedThreadMessages.failureReason,
       waitingOn: queuedThreadMessages.waitingOn,
       payloadKind: queuedThreadMessages.payloadKind,
       senderThreadId: queuedThreadMessages.senderThreadId,
-      requestedByInitiator: queuedThreadMessages.requestedByInitiator,
-      systemNotice: queuedThreadMessages.systemNotice,
+      ownerQueued: and(
+        isNull(queuedThreadMessages.senderThreadId),
+        isNull(queuedThreadMessages.requestedByInitiator),
+        isNull(queuedThreadMessages.systemNotice),
+      )!.mapWith(Boolean),
     })
     .from(queuedThreadMessages)
     .where(inArray(queuedThreadMessages.threadId, threadIds))

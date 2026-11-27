@@ -387,12 +387,7 @@ export function collectInboxEntries(
       const failure = failuresByThread.get(member.id)?.at(-1);
       const memberQueued = queuedByThread.get(member.id) ?? [];
 
-      const ownerQueued = memberQueued.filter(
-        (row) =>
-          row.senderThreadId === null &&
-          row.requestedByInitiator === null &&
-          row.systemNotice === null,
-      );
+      const ownerQueued = memberQueued.filter((row) => row.ownerQueued);
 
       const scheduled = ownerQueued.filter(
         (row) => row.sendAt !== null && row.sendAt > options.now,
@@ -497,11 +492,7 @@ export function collectInboxEntries(
     for (const member of members) {
       for (const row of (queuedByThread.get(member.id) ?? []).filter(
         (item) =>
-          item.senderThreadId === null &&
-          item.requestedByInitiator === null &&
-          item.systemNotice === null &&
-          item.sendAt !== null &&
-          item.sendAt > options.now,
+          item.ownerQueued && item.sendAt !== null && item.sendAt > options.now,
       ))
         familyWaits.push({
           id: row.id,

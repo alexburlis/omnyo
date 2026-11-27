@@ -1252,7 +1252,7 @@ function notSupersededQueuedThreadMessage() {
 
 function manuallyStoppedQueuePauseQuery(
   db: DbQueryConnection,
-  threadId: string | typeof threads.id,
+  threadId: string | typeof queuedThreadMessages.threadId,
 ) {
   const interruption = alias(events, "queue_pause_interruption");
   const laterInterruption = alias(events, "queue_pause_later_interruption");
@@ -1337,6 +1337,15 @@ function notOrdinaryTurnEndQueuedThreadMessage() {
   );
 }
 
+export function queuedMessageAutoSendAllowedAfterStop(db: DbQueryConnection) {
+  return or(
+    notExists(
+      manuallyStoppedQueuePauseQuery(db, queuedThreadMessages.threadId),
+    ),
+    notOrdinaryTurnEndQueuedThreadMessage(),
+  )!;
+}
+
 export function listReadySystemNoticesOnBusyThreads(
   db: DbQueryConnection,
 ): QueuedThreadMessageRow[] {
@@ -1386,10 +1395,7 @@ export function listIdleThreadsWithQueuedMessages(
         ),
         isNull(threads.archivedAt),
         isNull(threads.deletedAt),
-        or(
-          notExists(manuallyStoppedQueuePauseQuery(db, threads.id)),
-          notOrdinaryTurnEndQueuedThreadMessage(),
-        ),
+        queuedMessageAutoSendAllowedAfterStop(db),
         or(isNull(threads.environmentId), ne(environments.status, "destroyed")),
 
         drainableQueuedThreadMessage(),
