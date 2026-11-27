@@ -1164,6 +1164,7 @@ const onlineRpcHandlers: OnlineRpcHandlerMap = {
   "host.list_paths": readIsolatedHostCommand,
   "host.mkdir": mutateIsolatedHostCommand,
   "host.move_path": mutateIsolatedHostCommand,
+  "host.delete_thread_storage": mutateIsolatedHostCommand,
   "host.remove_path": mutateIsolatedHostCommand,
   "host.browse_directory": readIsolatedHostCommand,
   "host.paths_exist": readIsolatedHostCommand,

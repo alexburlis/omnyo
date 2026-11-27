@@ -1,3 +1,5 @@
+import path from "node:path";
+import { removeThreadStorage } from "./thread-storage-removal.js";
 import type { FilesystemMutationCommand } from "./workspace-read-protocol.js";
 import { writeHostFile } from "./command-handlers/file-write.js";
 import {
@@ -29,6 +31,12 @@ export function executeFilesystemMutation(
       return mkdirHostPath(command);
     case "host.move_path":
       return moveHostPath(command);
+    case "host.delete_thread_storage":
+      return removeThreadStorage({
+        rootPath: path.join(options.dataDir, "thread-storage"),
+        threadId: command.threadId,
+        missingDirectory: "error",
+      }).then(() => ({ ok: true }));
     case "host.remove_path":
       return removeHostPath(command);
     case "host.delete_skill":

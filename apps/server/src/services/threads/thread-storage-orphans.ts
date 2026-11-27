@@ -128,12 +128,11 @@ export async function removeOrphanedThreadStorage(
     try {
       await callHostOnlineRpc(deps, {
         command: {
-          type: "host.remove_path",
-          path: joinHostPathSegments(queue.rootPath, threadId),
-          recursive: true,
-          rootPath: queue.rootPath,
+          type: "host.delete_thread_storage",
+          threadId,
         },
         hostId,
+        expectedSessionId: session.id,
         timeoutMs: COMMAND_TIMEOUT_MS,
       });
       removed += 1;
@@ -146,7 +145,8 @@ export async function removeOrphanedThreadStorage(
       if (
         !(error instanceof ApiError) ||
         error.body.code === "command_timeout" ||
-        error.body.code === "host_unavailable"
+        error.body.code === "host_unavailable" ||
+        error.body.code === "mutation_outcome_unknown"
       ) {
         queue.parked = true;
         break;
@@ -171,6 +171,7 @@ async function listOrphanedThreadStorage(
   const listing = await callHostOnlineRpc(deps, {
     command: { type: "host.browse_directory", path: rootPath },
     hostId: args.hostId,
+    expectedSessionId: args.sessionId,
     timeoutMs: COMMAND_TIMEOUT_MS,
   });
 

@@ -372,6 +372,7 @@ const ONLINE_RPC_RESPONSE_RESULT_FIXTURES: OnlineRpcResponseResultFixtures = {
   },
   "host.mkdir": { ok: true },
   "host.move_path": { ok: true },
+  "host.delete_thread_storage": { ok: true },
   "host.remove_path": { ok: true },
   "host.browse_directory": {
     directory: "/home/me/project",
@@ -1501,8 +1502,31 @@ const CONTRIBUTED_ENV = [
 ] as const;
 
 describe("host-daemon command schemas", () => {
+  it("keeps thread storage deletion host-owned without caller paths", () => {
+    const command = {
+      type: "host.delete_thread_storage",
+      threadId: "thr_fixture",
+    };
+
+    expect(hostDaemonOnlineRpcCommandSchema.parse(command)).toEqual(command);
+
+    for (const field of ["rootPath", "path"])
+      expect(
+        hostDaemonOnlineRpcCommandSchema.safeParse({
+          ...command,
+          [field]: "/outside",
+        }).success,
+      ).toBe(false);
+    expect(
+      hostDaemonOnlineRpcCommandSchema.safeParse({
+        type: command.type,
+        threadId: "",
+      }).success,
+    ).toBe(false);
+  });
+
   it("uses the current host-daemon protocol version", () => {
-    expect(HOST_DAEMON_PROTOCOL_VERSION).toBe(268);
+    expect(HOST_DAEMON_PROTOCOL_VERSION).toBe(269);
     expect(HOST_ARTIFACT_MAX_BYTES).toBe(256 * 1024 * 1024);
   });
 

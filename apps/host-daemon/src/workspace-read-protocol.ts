@@ -85,6 +85,7 @@ export const filesystemMutationCommandSchema = z.union([
   hostDaemonCommandRegistry["host.write_file"].schema,
   hostDaemonCommandRegistry["host.mkdir"].schema,
   hostDaemonCommandRegistry["host.move_path"].schema,
+  hostDaemonCommandRegistry["host.delete_thread_storage"].schema,
   hostDaemonCommandRegistry["host.remove_path"].schema,
   hostDaemonCommandRegistry["host.delete_skill"].schema,
   hostDaemonCommandRegistry["host.write_skill"].schema,

@@ -13,6 +13,7 @@ import { registerHostRpcResponder } from "../helpers/host-rpc.js";
 import {
   seedEnvironment,
   seedHostSession,
+  seedSession,
   seedProjectWithSource,
   seedThread,
 } from "../helpers/seed.js";
@@ -33,6 +34,156 @@ function orphanedThreadIdAt(index: number): string {
 }
 
 describe("thread storage orphan cleanup", () => {
+  it("parks an unknown mutation outcome until a new session inventories its own candidates", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session } = seedHostSession(harness.deps);
+      const rootPath = path.join(session.dataDir, "thread-storage");
+      const first = orphanedThreadIdAt(1);
+      const later = orphanedThreadIdAt(2);
+      const fresh = orphanedThreadIdAt(3);
+
+      const responder = registerHostRpcResponder(harness, {
+        hostId: host.id,
+        sessionId: session.id,
+        handle: (request) =>
+          request.command.type === "host.browse_directory"
+            ? {
+                ok: true,
+                result: {
+                  directory: rootPath,
+                  parent: session.dataDir,
+                  entries: [first, later].map((name) => ({
+                    kind: "directory" as const,
+                    name,
+                    path: path.join(rootPath, name),
+                  })),
+                },
+              }
+            : {
+                ok: false,
+                errorCode: "mutation_outcome_unknown",
+                errorMessage: "Writer disconnected",
+              },
+      });
+
+      const args = {
+        hostId: host.id,
+        limits: { elapsedBudgetMs: 60_000, maxRemovals: 100 },
+      };
+
+      try {
+        await removeOrphanedThreadStorage(harness.deps, args);
+        await removeOrphanedThreadStorage(harness.deps, args);
+        expect(responder.requests.map((request) => request.command)).toEqual([
+          { type: "host.browse_directory", path: rootPath },
+          { type: "host.delete_thread_storage", threadId: first },
+        ]);
+
+        const replacement = seedSession(harness.deps, host.id, {
+          instanceId: "replacement",
+        });
+
+        const next = registerHostRpcResponder(harness, {
+          hostId: host.id,
+          sessionId: replacement.id,
+          handle: (request) =>
+            request.command.type === "host.browse_directory"
+              ? {
+                  ok: true,
+                  result: {
+                    directory: rootPath,
+                    parent: session.dataDir,
+                    entries: [
+                      {
+                        kind: "directory",
+                        name: fresh,
+                        path: path.join(rootPath, fresh),
+                      },
+                    ],
+                  },
+                }
+              : { ok: true, result: { ok: true } },
+        });
+
+        try {
+          await removeOrphanedThreadStorage(harness.deps, args);
+          expect(next.requests.map((request) => request.command)).toEqual([
+            { type: "host.browse_directory", path: rootPath },
+            { type: "host.delete_thread_storage", threadId: fresh },
+          ]);
+        } finally {
+          next.unregister();
+        }
+      } finally {
+        responder.unregister();
+      }
+    });
+  });
+
+  it("never sends the previous inventory's deletion to a replacement between the ready guard and send", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session } = seedHostSession(harness.deps);
+      const rootPath = path.join(session.dataDir, "thread-storage");
+
+      const responder = registerHostRpcResponder(harness, {
+        hostId: host.id,
+        sessionId: session.id,
+        handle: () => ({
+          ok: true,
+          result: {
+            directory: rootPath,
+            parent: session.dataDir,
+            entries: [1, 2].map((index) => ({
+              kind: "directory" as const,
+              name: orphanedThreadIdAt(index),
+              path: path.join(rootPath, orphanedThreadIdAt(index)),
+            })),
+          },
+        }),
+      });
+
+      const replacementSocket = { close() {}, send: vi.fn() };
+      const send = harness.hub.requestHostOnlineRpc.bind(harness.hub);
+
+      const request = vi
+        .spyOn(harness.hub, "requestHostOnlineRpc")
+        .mockImplementation((args) => {
+          expect(args.expectedSessionId).toBe(session.id);
+
+          if (args.message.command.type === "host.delete_thread_storage") {
+            harness.hub.unregisterDaemon(session.id);
+            harness.hub.registerDaemon(
+              "replacement-session",
+              host.id,
+              replacementSocket,
+            );
+          }
+
+          return send(args);
+        });
+
+      try {
+        await removeOrphanedThreadStorage(harness.deps, {
+          hostId: host.id,
+          limits: { elapsedBudgetMs: 60_000, maxRemovals: 100 },
+        });
+        expect(request).toHaveBeenCalledTimes(2);
+        expect(responder.requests.map((item) => item.command.type)).toEqual([
+          "host.browse_directory",
+        ]);
+        expect(replacementSocket.send.mock.calls.flat()).not.toEqual(
+          expect.arrayContaining([
+            expect.stringContaining('"type":"host-rpc.request"'),
+          ]),
+        );
+      } finally {
+        request.mockRestore();
+        harness.hub.unregisterDaemon("replacement-session");
+        responder.unregister();
+      }
+    });
+  });
+
   it("skips the sweep while app work is active", async () => {
     await withTestHarness(async (harness) => {
       const { host, session } = seedHostSession(harness.deps);
@@ -105,8 +256,8 @@ describe("thread storage orphan cleanup", () => {
             };
           }
 
-          if (request.command.type === "host.remove_path") {
-            storedIds.delete(path.basename(request.command.path));
+          if (request.command.type === "host.delete_thread_storage") {
+            storedIds.delete(request.command.threadId);
 
             return { ok: true, result: { ok: true } };
           }
@@ -134,7 +285,7 @@ describe("thread storage orphan cleanup", () => {
         runThreadStorageOrphanSweep(harness.deps);
         await sleep(20);
         expect(countOf("host.browse_directory")).toBe(1);
-        expect(countOf("host.remove_path")).toBe(
+        expect(countOf("host.delete_thread_storage")).toBe(
           THREAD_STORAGE_ORPHAN_PASS_LIMITS.maxRemovals + 50,
         );
       } finally {
@@ -170,10 +321,12 @@ describe("thread storage orphan cleanup", () => {
             };
           }
 
-          if (request.command.type === "host.remove_path") {
-            attemptedPaths.push(request.command.path);
+          if (request.command.type === "host.delete_thread_storage") {
+            attemptedPaths.push(path.join(rootPath, request.command.threadId));
 
-            if (request.command.path === rejectedPath) {
+            if (
+              path.join(rootPath, request.command.threadId) === rejectedPath
+            ) {
               return {
                 ok: false,
                 errorCode: "invalid_path",
@@ -274,10 +427,11 @@ describe("thread storage orphan cleanup", () => {
             };
           }
 
-          if (request.command.type === "host.remove_path") {
-            commandPaths.push(request.command.path);
+          if (request.command.type === "host.delete_thread_storage") {
+            commandPaths.push(path.join(rootPath, request.command.threadId));
 
-            return request.command.path === rejectedPath
+            return path.join(rootPath, request.command.threadId) ===
+              rejectedPath
               ? {
                   ok: false,
                   errorCode: "invalid_path",
@@ -333,8 +487,8 @@ describe("thread storage orphan cleanup", () => {
             };
           }
 
-          if (request.command.type === "host.remove_path") {
-            attemptedPaths.push(request.command.path);
+          if (request.command.type === "host.delete_thread_storage") {
+            attemptedPaths.push(path.join(rootPath, request.command.threadId));
 
             return new Promise(() => {});
           }
@@ -435,12 +589,12 @@ describe("thread storage orphan cleanup", () => {
             };
           }
 
-          if (request.command.type === "host.remove_path") {
-            expect(request.command).toMatchObject({
-              recursive: true,
-              rootPath,
-            });
-            removedPaths.push(request.command.path);
+          if (request.command.type === "host.delete_thread_storage") {
+            expect(Object.keys(request.command).sort()).toEqual([
+              "threadId",
+              "type",
+            ]);
+            removedPaths.push(path.join(rootPath, request.command.threadId));
 
             return { ok: true, result: { ok: true } };
           }

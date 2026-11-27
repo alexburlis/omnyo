@@ -1065,6 +1065,7 @@ export class NotificationHub implements DbNotifier {
 
   requestHostOnlineRpc(args: {
     hostId: string;
+    expectedSessionId?: string;
     message: HostDaemonOnlineRpcRequestMessage;
     signal?: AbortSignal;
     timeoutMs: number;
@@ -1072,7 +1073,11 @@ export class NotificationHub implements DbNotifier {
     if (args.signal?.aborted) return Promise.reject(args.signal.reason);
     const sessionId = this.daemonSessionIdsByHost.get(args.hostId);
 
-    if (!sessionId) {
+    if (
+      !sessionId ||
+      (args.expectedSessionId !== undefined &&
+        sessionId !== args.expectedSessionId)
+    ) {
       return Promise.reject(new HostOnlineRpcUnavailableError());
     }
 
