@@ -3066,11 +3066,27 @@ export function getLatestStoredThreadEventOfTypes(
     threadId: string;
     types: readonly ThreadEventType[];
     afterSequence: number;
+    systemErrorRequest?: {
+      requestId: ClientTurnRequestId;
+      targetTurnId: string | null;
+      legacyCodes: readonly string[];
+    };
   },
 ): StoredThreadEventDataRow | null {
   if (args.types.length === 0) {
     return null;
   }
+
+  const errorRequest = args.systemErrorRequest;
+
+  const requestId = sql<
+    string | null
+  >`json_extract(${events.data}, '$.requestId')`;
+
+  const requestMatch =
+    errorRequest === undefined
+      ? undefined
+      : eq(requestId, errorRequest.requestId);
 
   return (
     db
@@ -3086,9 +3102,38 @@ export function getLatestStoredThreadEventOfTypes(
           eq(events.threadId, args.threadId),
           inArray(events.type, [...args.types]),
           gt(events.sequence, args.afterSequence),
+          errorRequest === undefined
+            ? undefined
+            : or(
+                requestMatch,
+                and(
+                  isNull(requestId),
+                  inArray(
+                    sql<string>`json_extract(${events.data}, '$.code')`,
+                    errorRequest.legacyCodes,
+                  ),
+                  or(
+                    eq(events.scopeKind, "thread"),
+                    errorRequest.targetTurnId === null
+                      ? undefined
+                      : eq(events.turnId, errorRequest.targetTurnId),
+                    sql`EXISTS (
+                      SELECT 1 FROM events AS accepted
+                      WHERE accepted.thread_id = ${events.threadId}
+                        AND accepted.turn_id = ${events.turnId}
+                        AND accepted.type = 'turn/input/accepted'
+                        AND accepted.sequence > ${args.afterSequence}
+                        AND json_extract(accepted.data, '$.clientRequestId') = ${errorRequest.requestId}
+                    )`,
+                  ),
+                ),
+              ),
         ),
       )
-      .orderBy(desc(events.sequence))
+      .orderBy(
+        ...(requestMatch === undefined ? [] : [desc(requestMatch)]),
+        desc(events.sequence),
+      )
       .limit(1)
       .get() ?? null
   );

@@ -5,6 +5,7 @@ import Database from "better-sqlite3";
 import { expect, it } from "vitest";
 import {
   consolidatedPluginOwner,
+  isOmnyoConsolidationSource,
   stageLegacyPromptLibrary,
 } from "../../../src/services/plugins/plugin-consolidations.js";
 
@@ -27,6 +28,20 @@ it.each([
     ).toBeUndefined();
   },
 );
+
+it.each([
+  "https://github.com/alexburlis/omnyo-plugins/tree/HEAD/inline-ui",
+  "https://github.com/alexburlis/omnyo/tree/HEAD/standalone-plugins/inline-ui",
+])("treats a local inline-ui checkout from %s as Omnyo's own", (url) => {
+  expect(isOmnyoConsolidationSource("inline-ui", "path:/p", url)).toBe(true);
+  expect(
+    isOmnyoConsolidationSource(
+      "inline-ui",
+      "path:/p",
+      "https://github.com/example/fork/tree/HEAD/inline-ui",
+    ),
+  ).toBe(false);
+});
 
 it("recovers corrected legacy favorites on retry without duplicates or source mutation", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "omnyo-prompt-consolidation-"));

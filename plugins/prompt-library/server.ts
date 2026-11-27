@@ -55,8 +55,10 @@ export default function promptLibraryPlugin(api: PluginApi): void {
       plugin.id === "skill-discovery" &&
       (plugin.source === "builtin:skill-discovery" ||
         (plugin.source.startsWith("path:") &&
-          plugin.repositoryUrl ===
-            "https://github.com/alexburlis/omnyo-plugins/tree/HEAD/skill-discovery"))
+          (plugin.repositoryUrl ===
+            "https://github.com/alexburlis/omnyo-plugins/tree/HEAD/skill-discovery" ||
+            plugin.repositoryUrl ===
+              "https://github.com/alexburlis/omnyo/tree/HEAD/standalone-plugins/skill-discovery")))
     );
   }
 

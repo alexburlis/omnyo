@@ -1,6 +1,7 @@
 import {
   clearQueuedThreadMessageWaitingOn,
   createUniqueQueuedThreadMessageInTransaction,
+  QueuedMessageThreadUnavailableError,
   getQueuedThreadMessage,
   requeueClaimedQueuedThreadMessages,
   type ClaimedQueuedThreadMessageRow,
@@ -80,7 +81,7 @@ export interface RecordQueuedMessageWaitArgs {
   claimed: readonly ClaimedQueuedThreadMessageRow[] | null;
 }
 
-export function recordQueuedMessageWait(
+function recordQueuedMessageWaitInternal(
   deps: QueueWaitDeps,
   args: RecordQueuedMessageWaitArgs,
 ): ThreadQueuedMessage | null {
@@ -137,6 +138,21 @@ export function recordQueuedMessageWait(
   deps.hub.notifyThread(args.thread.id, ["queue-changed"]);
 
   return entry;
+}
+
+export function recordQueuedMessageWait(
+  deps: QueueWaitDeps,
+  args: RecordQueuedMessageWaitArgs,
+): ThreadQueuedMessage | null {
+  try {
+    return recordQueuedMessageWaitInternal(deps, args);
+  } catch (error) {
+    if (error instanceof QueuedMessageThreadUnavailableError) {
+      throw new ApiError(409, "thread_not_writable", error.message);
+    }
+
+    throw error;
+  }
 }
 
 export function settleQueueRowDispatched(args: SettleQueueRowArgs): void {

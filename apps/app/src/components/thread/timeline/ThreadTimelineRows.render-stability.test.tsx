@@ -127,7 +127,7 @@ describe("ThreadTimelineRows render stability", () => {
       makeThreadListEntry({ id: "thr_sender", title: null }),
     ]);
     const { view } = renderProfiledTimeline(queryClient);
-    expect(view.getByText("Agent")).toBeTruthy();
+    expect(view.getByRole("link", { name: "thr_sender" })).toBeTruthy();
 
     await act(async () => {
       queryClient.setQueryData(threadsQueryKey(), [

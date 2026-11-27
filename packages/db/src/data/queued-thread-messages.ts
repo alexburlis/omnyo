@@ -659,7 +659,47 @@ function applyPreservedLeadGroupAfterReorder(
   }
 }
 
+export type QueuedMessageThreadUnavailableReason = "archived" | "deleted";
+
+export class QueuedMessageThreadUnavailableError extends Error {
+  constructor(
+    readonly threadId: string,
+    readonly reason: QueuedMessageThreadUnavailableReason,
+  ) {
+    super(`Cannot queue a message on ${reason} thread ${threadId}`);
+    this.name = "QueuedMessageThreadUnavailableError";
+  }
+}
+
+function assertThreadAcceptsQueuedMessage(
+  tx: DbTransaction,
+  threadId: string,
+): void {
+  const thread = tx
+    .select({ archivedAt: threads.archivedAt, deletedAt: threads.deletedAt })
+    .from(threads)
+    .where(eq(threads.id, threadId))
+    .get();
+
+  if (!thread || thread.deletedAt !== null) {
+    throw new QueuedMessageThreadUnavailableError(threadId, "deleted");
+  }
+
+  if (thread.archivedAt !== null) {
+    throw new QueuedMessageThreadUnavailableError(threadId, "archived");
+  }
+}
+
 export function createQueuedThreadMessageInTransaction(
+  tx: DbTransaction,
+  input: CreateQueuedThreadMessageInput,
+) {
+  assertThreadAcceptsQueuedMessage(tx, input.threadId);
+
+  return insertQueuedThreadMessageInTransaction(tx, input);
+}
+
+function insertQueuedThreadMessageInTransaction(
   tx: DbTransaction,
   input: CreateQueuedThreadMessageInput,
 ) {
@@ -752,6 +792,7 @@ export function updateCoalescedQueuedThreadMessageInTransaction(
   tx: DbTransaction,
   input: UpdateCoalescedQueuedThreadMessageInput,
 ): QueuedThreadMessageRow | null {
+  assertThreadAcceptsQueuedMessage(tx, input.threadId);
   acquireProjectAttachmentOwnership(
     tx,
     input.threadId,
@@ -806,13 +847,14 @@ export function createUniqueQueuedThreadMessageInTransaction(
   tx: DbTransaction,
   input: CreateQueuedThreadMessageInput,
 ): CreateUniqueQueuedThreadMessageResult {
+  assertThreadAcceptsQueuedMessage(tx, input.threadId);
   const pending = findPendingDuplicateQueuedThreadMessage(tx, input);
 
   if (pending !== null) return { created: false, row: pending };
 
   return {
     created: true,
-    row: createQueuedThreadMessageInTransaction(tx, input),
+    row: insertQueuedThreadMessageInTransaction(tx, input),
   };
 }
 
@@ -1802,6 +1844,7 @@ export function requeueClaimedQueuedThreadMessages(
 
   const queued = db.transaction(
     (tx) => {
+      assertThreadAcceptsQueuedMessage(tx, args.threadId);
       const now = Date.now();
 
       for (const claim of args.claims) {

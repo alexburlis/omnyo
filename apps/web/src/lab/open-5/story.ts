@@ -39,6 +39,8 @@ const DESKTOP_PARTICLES = 12000;
 
 const STREAM_MARGIN = 64;
 
+const IDLE_MARGIN = 0.25;
+
 const TEXT_STEPS = 4;
 
 const SETTLE_MS = 800;
@@ -79,6 +81,14 @@ const STORY_VH = {
   leave: [172, 14],
 } as const;
 
+const MORPH_VH = {
+  leave: [150, 14],
+  morph: [156, 54],
+  wipe: [156, 40],
+  arrive: 10,
+  reveal: 0.35,
+} as const;
+
 const progressVar = (element: HTMLElement) =>
   element.dataset.progress === "local" ? "--sp" : "--p";
 
@@ -116,16 +126,20 @@ export function startStory(
   root: HTMLElement,
   reduced: boolean,
   {
+    previewNav: nav,
     labels = ACTS,
     onProductProgress,
     productStage = false,
+    productMorph = false,
     themed = false,
   }: {
+    previewNav: HTMLElement | null;
     labels?: readonly string[];
     onProductProgress?: (progress: number) => void;
     productStage?: boolean;
+    productMorph?: boolean;
     themed?: boolean;
-  } = {},
+  },
 ) {
   let tones: Tones = themed ? readTones(getComputedStyle(root)) : FIXED_TONES;
 
@@ -191,14 +205,22 @@ export function startStory(
   const winLayer = root.querySelector<HTMLElement>("[data-win-layer]");
   const windows = [...root.querySelectorAll<HTMLElement>("[data-win]")];
   const lines = [...root.querySelectorAll<HTMLElement>("[data-line]")];
-  const navLabel = root.querySelector<HTMLElement>("[data-act-label]");
-  const progressBar = root.querySelector<HTMLElement>("[data-progress]");
-  const nav = root.querySelector<HTMLElement>(".nav");
-  const navShade = root.querySelector<HTMLElement>("[data-nav-shade]");
+  const navLabel = nav?.querySelector<HTMLElement>("[data-act-label]") ?? null;
+
+  const progressBar =
+    nav?.querySelector<HTMLElement>("[data-nav-progress]") ?? null;
+
+  const navShade = nav?.querySelector<HTMLElement>("[data-nav-shade]") ?? null;
   const storyPin = scenes.story?.querySelector<HTMLElement>(".story-pin");
 
   const storyTitle =
     storyPin?.querySelector<HTMLElement>(".story-title") ?? null;
+
+  const productFrame = productMorph ? anchor("product-frame") : null;
+  const productPin = productFrame?.closest<HTMLElement>(".pin") ?? null;
+  const productSurface = productFrame?.firstElementChild ?? null;
+  const frameRect: Vec4 = [0, 0, 0, 0];
+  const frameShape = { width: -1, layoutWidth: -1, radius: 0 };
 
   const veil = root.querySelector<HTMLElement>("[data-veil]");
 
@@ -336,6 +358,12 @@ export function startStory(
     for (const element of toned) {
       if (element) delete element.dataset.tone;
     }
+
+    delete root.dataset.morph;
+
+    for (const element of Object.values(scenes)) {
+      if (element) delete element.dataset.idle;
+    }
   };
 
   if (reduced) {
@@ -426,6 +454,10 @@ export function startStory(
   } catch (error) {
     console.error("Particle field failed to start", error);
   }
+
+  const morphReady = productMorph && particles !== null && productPin !== null;
+
+  if (morphReady) root.dataset.morph = "";
 
   let layoutKey = "";
   let drawn = true;
@@ -562,11 +594,14 @@ export function startStory(
     return Boolean(track && track.top < 0 && track.bottom > height);
   };
 
-  const canvasPlace = () => {
+  const canvasPlace = (morphing: boolean) => {
     const page = layoutRect(root);
 
     return {
-      rides: page.bottom >= view.h && !pins.some(isPinned),
+      rides:
+        page.bottom >= view.h &&
+        !pins.some(isPinned) &&
+        !(morphing && productPin && isPinned(productPin)),
       x: -page.left,
       y: -page.top,
     };
@@ -599,7 +634,8 @@ export function startStory(
     }
 
     const phone = vw <= PHONE_MAX_WIDTH;
-    const place = canvasPlace();
+    const morphing = morphReady && !phone;
+    const place = canvasPlace(morphing);
     const hero = measure(scenes.hero, vh);
     const story = measure(scenes.story, vh);
     const app = measure(scenes.app, vh);
@@ -614,7 +650,15 @@ export function startStory(
     const ctaRect = rectOf(ctaMark);
     const streamRect = rectOf(stream);
     const titleRect = rectOf(storyTitle);
+
+    const surfaceRect = morphing
+      ? productSurface?.getBoundingClientRect()
+      : undefined;
+
+    const productPinRect = morphing ? rectOf(productPin) : undefined;
+    const productPinHeight = morphing ? (productPin?.offsetHeight ?? 0) : 0;
     const layerRect = winLayer?.getBoundingClientRect();
+
     windows.forEach((_, index) => {
       const rect = windowRects[index];
       const layout = windowLayout[index];
@@ -633,10 +677,45 @@ export function startStory(
       ramp(story.e, 0.4, 0.6) * 0.3 + ramp(storyY, 0, STORY_VH.rain) * 0.7;
 
     const s2 = during(STORY_VH.flow);
-    const s3 = ramp(app.e, 0.12, 0.78);
+
+    const arrive =
+      morphing && app.rect
+        ? ramp(
+            (-app.rect.top / (productPinHeight || vh)) * 100,
+            0,
+            MORPH_VH.arrive,
+          )
+        : 1;
+
+    const s3 = morphing
+      ? Math.min(during(MORPH_VH.morph), arrive < 1 ? 0.9999 : 1)
+      : ramp(app.e, 0.12, 0.78);
+
     const s4 = ramp(yours.e, 0.25, 0.6);
     const s5 = ramp(cta.e, 0.2, 0.7);
     const stage = s1 + s2 + s3 + s4 + s5;
+
+    if (surfaceRect && productSurface instanceof HTMLElement) {
+      const layoutWidth = productSurface.offsetWidth;
+
+      if (
+        frameShape.width !== surfaceRect.width ||
+        frameShape.layoutWidth !== layoutWidth
+      ) {
+        frameShape.width = surfaceRect.width;
+        frameShape.layoutWidth = layoutWidth;
+        frameShape.radius =
+          (Number.parseFloat(
+            getComputedStyle(productSurface).borderTopLeftRadius,
+          ) || 0) *
+          (surfaceRect.width / Math.max(1, layoutWidth));
+      }
+
+      frameRect[0] = surfaceRect.left;
+      frameRect[1] = surfaceRect.top - (productPinRect?.top ?? 0);
+      frameRect[2] = surfaceRect.width;
+      frameRect[3] = surfaceRect.height;
+    }
 
     const heroCenter = centerOf(heroRect, vw, vh);
     const storyCenter = centerOf(storyRect, vw, vh);
@@ -674,7 +753,11 @@ export function startStory(
                 stage: 1,
                 disc: discs.app,
               }
-            : { t: ramp(app.e, 0.04, 0.5), ...storyCenter, stage: 1 }
+            : {
+                t: morphing ? during(MORPH_VH.wipe) : ramp(app.e, 0.04, 0.5),
+                ...storyCenter,
+                stage: 1,
+              }
           : { t: 0, x: 0, y: 0, stage: 0 },
       ],
       [
@@ -754,15 +837,16 @@ export function startStory(
       if (entry) sceneProgress.push([element, entry]);
     });
 
-    const navTone = phone
-      ? sceneProgress.find(
-          ([element, entry]) =>
-            element?.dataset.tone !== undefined &&
-            entry.rect !== null &&
-            entry.rect.top <= navHeight &&
-            navHeight < entry.rect.bottom,
-        )?.[0]?.dataset.tone
-      : undefined;
+    const navTone =
+      phone && nav
+        ? sceneProgress.find(
+            ([element, entry]) =>
+              element?.dataset.tone !== undefined &&
+              entry.rect !== null &&
+              entry.rect.top <= navHeight &&
+              navHeight < entry.rect.bottom,
+          )?.[0]?.dataset.tone
+        : undefined;
 
     const navStage = navTone === undefined ? null : navTone === "stage" ? 1 : 0;
 
@@ -984,6 +1068,15 @@ export function startStory(
           progressVar(element),
           entry.rect.top > 0 ? entry.e - 1 : entry.p,
         );
+
+        flag(
+          element,
+          "idle",
+          entry.rect.top > vh * (1 + IDLE_MARGIN) ||
+            entry.rect.bottom < -vh * IDLE_MARGIN
+            ? ""
+            : null,
+        );
       }
 
       if (entry.rect.top < vh && entry.rect.bottom > 0) {
@@ -1032,7 +1125,11 @@ export function startStory(
       setNumber(storyPin, "--orbit", smooth(during(STORY_VH.orbit)));
       setNumber(storyPin, "--rise", during(STORY_VH.rise));
       setNumber(storyPin, "--with", during(STORY_VH.with));
-      setNumber(storyPin, "--leave", during(STORY_VH.leave));
+      setNumber(
+        storyPin,
+        "--leave",
+        during(morphing ? MORPH_VH.leave : STORY_VH.leave),
+      );
 
       const lit = titleRect
         ? smooth(during(STORY_VH.light)) *
@@ -1047,41 +1144,6 @@ export function startStory(
       flag(storyPin, "sub", titled && shown(STORY_VH.sub) ? "" : null);
     }
 
-    const center = vh / 2;
-    let act = 0;
-    let flowLabel: string | undefined;
-
-    const ordered: [number, { rect: DOMRect | null }, HTMLElement | null][] = [
-      [0, hero, scenes.hero],
-      [1, story, scenes.story],
-      [3, app, scenes.app],
-      [4, review, scenes.review],
-      [5, more, scenes.more],
-      [6, yours, scenes.yours],
-      [7, cta, scenes.cta],
-      [7, footer, scenes.footer],
-    ];
-
-    flows.forEach((element, index) => {
-      const entry = flowed[index];
-
-      if (entry) ordered.push([-1, entry, element]);
-    });
-
-    let top = Number.NEGATIVE_INFINITY;
-
-    for (const [index, entry, element] of ordered) {
-      if (!entry.rect || entry.rect.top > center || entry.rect.top < top) {
-        continue;
-      }
-
-      top = entry.rect.top;
-      act = index;
-      flowLabel = index < 0 ? (element?.dataset.act ?? "") : undefined;
-    }
-
-    if (act === 1 && storyY > STORY_VH.act) act = 2;
-
     if (scenes.review) {
       setNumber(
         scenes.review,
@@ -1091,9 +1153,54 @@ export function startStory(
     }
 
     if (navLabel) {
+      const center = vh / 2;
+      let act = 0;
+      let flowLabel: string | undefined;
+
+      const ordered: [number, { rect: DOMRect | null }, HTMLElement | null][] =
+        [
+          [0, hero, scenes.hero],
+          [1, story, scenes.story],
+          [3, app, scenes.app],
+          [4, review, scenes.review],
+          [5, more, scenes.more],
+          [6, yours, scenes.yours],
+          [7, cta, scenes.cta],
+          [7, footer, scenes.footer],
+        ];
+
+      flows.forEach((element, index) => {
+        const entry = flowed[index];
+
+        if (entry) ordered.push([-1, entry, element]);
+      });
+
+      let top = Number.NEGATIVE_INFINITY;
+
+      for (const [index, entry, element] of ordered) {
+        if (!entry.rect || entry.rect.top > center || entry.rect.top < top) {
+          continue;
+        }
+
+        top = entry.rect.top;
+        act = index;
+        flowLabel = index < 0 ? (element?.dataset.act ?? "") : undefined;
+      }
+
+      if (act === 1 && storyY > STORY_VH.act) act = 2;
+
       const label = flowLabel ?? labels[act] ?? "";
 
       if (navLabel.textContent !== label) navLabel.textContent = label;
+    }
+
+    if (productPin) {
+      setNumber(productPin, "--arrive", arrive);
+      flag(
+        productPin,
+        "arriving",
+        morphing && arrive < MORPH_VH.reveal ? "" : null,
+      );
     }
 
     onProductProgress?.(app.rect && app.rect.top <= 0 ? app.p : 0);
@@ -1104,6 +1211,8 @@ export function startStory(
       s2,
       s5,
       ctaHold: cta.p,
+      arrive,
+      morphing,
       footerE: footer.e,
       streamFade: streamRect
         ? clamp01((streamRect.top - NAV_HEIGHT - 24) / (vh * 0.25))
@@ -1166,6 +1275,8 @@ export function startStory(
       s2,
       s5,
       ctaHold,
+      arrive,
+      morphing,
       footerE,
       streamFade,
       toStage,
@@ -1215,8 +1326,10 @@ export function startStory(
 
     let alpha = 1;
 
-    if (stage > 2 && stage <= 3) alpha = 1 - Math.min(1, (stage - 2) * 1.15);
-    else if (stage > 3 && stage <= 4) alpha = Math.max(0, (stage - 3.1) / 0.9);
+    if (stage > 2 && stage <= 3) {
+      alpha = morphing ? 1 - arrive : 1 - Math.min(1, (stage - 2) * 1.15);
+    } else if (stage > 3 && stage <= 4)
+      alpha = Math.max(0, (stage - 3.1) / 0.9);
     else if (stage > 4 && stage < 5) alpha = Math.max(streamFade, stage - 4);
     alpha *= 1 - ramp(footerE, 0, 0.7);
 
@@ -1263,6 +1376,9 @@ export function startStory(
             streamRect.height / 2,
           ]
         : [0, 0, 0, 0],
+      frame: frameRect,
+      frameRadius: frameShape.radius,
+      morph: morphing ? 1 : 0,
       pointer: [pointer.x, pointer.y],
       pointerOn: pointer.on,
     };
@@ -1287,6 +1403,9 @@ export function startStory(
     ...flows,
     ...pins,
     ...windows,
+    productPin,
+    productFrame,
+    productSurface,
   ]);
 
   for (const element of measured) {

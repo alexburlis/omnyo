@@ -550,11 +550,10 @@ the selected provider; optional integrations have their own network behavior.
 No Omnyo account is required to complete setup or use the local server.
 
 The public app bypasses private update configuration and uses only the pinned macOS feed
-`https://github.com/alexburlis/omnyo-releases/releases/download/macos/`
-with `public-beta-mac.yml`. The first public build, 0.46.317, was published on
-11 November 2026 under the `public-beta` tag as `Omnyo Beta`; installs of it follow
-that tag's feed and keep their data in the `Omnyo Beta` profile, which builds from
-this source do not read. The fixed `macos` tag must
+`https://github.com/alexburlis/omnyo/releases/download/macos/`
+with `public-beta-mac.yml`. Apps pinned to the deleted release repository need
+a fresh download to move to the new feed. The first public build, 0.46.317,
+used a separate `Omnyo Beta` profile. The fixed `macos` tag must
 remain mutable; retain uniquely named old ZIPs and upload metadata last. The pin
 covers requested URLs; the existing executor follows CDN redirects. Existing digest,
 signature, team, exact runtime/inventory, idle and ownership checks still admit the
@@ -564,41 +563,57 @@ in `apps/web/src/landing/site.ts`. Each publication replaces that asset with the
 bytes of the current versioned ZIP, so the link never changes and the website needs
 no edit or deployment per release.
 
-Publish a public build with one command, from a clean checkout at the release commit
-(`Release private Omnyo <version>`, or `Release private Omnyo <version> (iOS <build>)`
-when that release also shipped an iOS build, with `apps/desktop` and
-`packages/omnyo-app` versions equal):
+Prepare a public build from a clean public Omnyo checkout at the release commit
+(`Release Omnyo <version>`, with `apps/desktop` and `packages/omnyo-app` versions
+equal). Publication requires that exact commit on public main. Use a notary
+credential overlay stored outside the checkout.
 
-    pnpm public:mac-release --plan
-    pnpm public:mac-release --prepare [--output-dir PATH]
-    pnpm public:mac-release [--output-dir PATH]
+    pnpm public:mac-release --plan --credential-overlay PATH
+    pnpm public:mac-release --prepare --credential-overlay PATH [--output-dir PATH]
+    pnpm public:mac-release --promote [--output-dir PATH]
+    pnpm public:mac-release --credential-overlay PATH [--output-dir PATH]
 
 `--plan` runs the checks and prints every step without running any. `--prepare`
-runs steps 1 to 5 and uploads nothing. With no mode it also publishes. An untagged
-`1.x` version publishes only after the public feed already carries a tagged `1.x`
-bridge build, because installed public apps older than 1.0.0 reject untagged updates
-(`public_feed_not_bridge_capable`; see `docs/private-ship.md`). The steps stop at
-the first failure:
+runs steps 1 to 5 and saves a verified archive, feed and `prepared-release.json`.
+Once the exact build and download channel are approved, `--promote` publishes
+that output directory from the same clean release checkout. It verifies public
+main, the notarization receipt and both file hashes before the first upload.
+With no mode the command prepares and publishes in one run. The first `1.x`
+release can initialize the feed in `alexburlis/omnyo`. An existing feed must
+carry a `1.x` runtime before the publisher serves an untagged update. Apps older
+than 1.0.0 reject untagged updates (`public_feed_not_bridge_capable`). The steps
+stop at the first failure:
 
-1. Build and sign the runtime: `OMNYO_RUNTIME_MAC_SIGNING_TEAM=Z7T4C33A35 pnpm exec turbo run build --filter=omnyo-app`.
+1. Build and sign the runtime. The publisher verifies its source, protocol and
+   file inventory, copies it to `runtime/` and writes `runtime-prepared.json`.
+   The coordinator operator can start the protected staging procedure from
+   that copy while the Mac package is being prepared. Keep a single compiler
+   lane for the public build.
 2. Build the app with `OMNYO_DESKTOP_RELEASE_CHANNEL=public-beta pnpm run desktop:build`
    and require its app and `omnyo-<numeric version>-arm64.zip` to be new.
-3. Notarize and staple with `scripts/private-ship-notary.mjs` under the credential
-   overlay named in `scripts/private-ship.json`, through `redact-stream`. The result
+3. Notarize and staple with `scripts/public-mac-notary.mjs` using the supplied
+   credential overlay. The child process logs pass through `redact-stream`. The result
    must be `complete`, stapled and `Accepted` for this commit and version.
 4. Check `spctl` and `stapler validate` on the app and on an app extracted from the
    final ZIP.
-5. Write `public-beta-mac.yml` with `desktop:private-update-feed`.
-6. Create the `macos` release if it is missing; upload the versioned ZIP (never
-   overwritten), copy it to `Omnyo-macOS.zip` and upload that with `--clobber`;
-   download both and compare their sha256 with the local ZIP; upload the feed last
-   with `--clobber` and compare its download too.
+5. Write `public-beta-mac.yml` with `desktop:public-update-feed`. Save the checked
+   versioned ZIP and the release receipt in the output directory.
+6. Create the `macos` release if it is missing and upload the versioned ZIP.
+   Reconcile an existing ZIP by digest. Compare the published ZIP before
+   replacing `Omnyo-macOS.zip`. Confirm the stable download matches, then
+   upload the feed last and compare its published bytes.
 
-Logs, the notarization job and result, the alias copy, the extracted app and the feed
-go to `--output-dir` (default `~/scratch/omnyo/public-mac-release/<version>`), which
-must be empty or absent. Each step has its own log; the notarization log passes
-through the credential filter, and no step prints credential material. Remove the
-directory after the release is verified.
+The output directory defaults to `~/scratch/omnyo/public-mac-release/<version>`.
+Use an empty directory for preparation and the same directory for promotion.
+If an upload is interrupted, retry promotion with that directory. The publisher
+compares the immutable ZIP before replacing the stable download or feed. Keep
+the output until publication is verified and the coordinator owner finishes
+using the runtime snapshot.
+
+Schedule report-only audits separately from release preparation. Keep any
+audit the operator requires for a specific release in its acceptance criteria.
+See the [release turnaround plan](../../docs/public-release-turnaround.md) for
+phase timing and verification.
 
 The public app uses the exact same internal desktop and bundled runtime version. Runtime inventory/signature checks
 are preserved. Public compilation uses `dist-public-beta`; packaging maps that output to `dist` and

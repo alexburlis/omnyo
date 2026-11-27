@@ -1,0 +1,9 @@
+Inline UI
+
+The HTML and Markdown visualization renderer derives from the inline-vis
+plugin in bb, by Michael Yong and the bb contributors:
+https://github.com/get-bb/bb/tree/main/plugins/inline-vis
+
+The original MIT license and copyright notice are preserved in LICENSE.
+Omnyo changes and native Inline UI blocks are copyright (c) 2026 Omnyo contributors
+and distributed under the same MIT terms.

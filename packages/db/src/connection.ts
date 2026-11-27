@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { resourceUsage, threadCpuUsage } from "node:process";
+import { setTimeout as delay } from "node:timers/promises";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { registerHostPathSqlFunctions } from "./data/host-path-sql.js";
 import { startBackgroundCheckpoint } from "./background-checkpoint.js";
@@ -464,61 +465,57 @@ function readBusyTimeoutMs(sqlite: Database.Database): number {
 
 const BUSY_RETRY_STEP_MS = 10;
 
-const busyRetrySleeper = new Int32Array(new SharedArrayBuffer(4));
-
-function sleepSynchronously(milliseconds: number): void {
-  Atomics.wait(busyRetrySleeper, 0, 0, milliseconds);
-}
-
-export function runImmediateTransactionWithBusyWait<TResult>(
+export async function runImmediateTransactionWithBusyWait<TResult>(
   db: DbConnection,
   waitMs: number,
   work: (tx: DbTransaction) => TResult,
-): TResult {
+  beforeRetry?: () => void,
+): Promise<TResult> {
   if (!Number.isInteger(waitMs) || waitMs < 0) {
     throw new Error("Bounded write admission needs a whole, non-negative wait");
   }
 
   const sqlite = db.$client;
+  const deadline = performance.now() + waitMs;
 
-  if (sqlite.inTransaction) {
-    throw new Error(
-      "Bounded write admission cannot start inside an open transaction",
-    );
-  }
-
-  const previousWaitMs = readBusyTimeoutMs(sqlite);
-  const startedAt = performance.now();
-  let started = false;
-  sqlite.pragma("busy_timeout = 0");
-
-  try {
-    for (;;) {
-      try {
-        return db.transaction(
-          (tx) => {
-            started = true;
-            sqlite.pragma(`busy_timeout = ${previousWaitMs}`);
-
-            return work(tx);
-          },
-          { behavior: "immediate" },
-        );
-      } catch (error) {
-        if (started || !isSqliteBusyError(error)) {
-          throw error;
-        }
-
-        const remainingMs = waitMs - (performance.now() - startedAt);
-
-        if (remainingMs <= 0) {
-          throw new PrimaryWriteBusyError(waitMs, { cause: error });
-        }
-
-        sleepSynchronously(Math.min(BUSY_RETRY_STEP_MS, remainingMs));
-      }
+  for (;;) {
+    if (sqlite.inTransaction) {
+      throw new Error(
+        "Bounded write admission cannot start inside an open transaction",
+      );
     }
-  } finally {
-    sqlite.pragma(`busy_timeout = ${previousWaitMs}`);
+
+    const previousWaitMs = readBusyTimeoutMs(sqlite);
+    let started = false;
+    let busy: unknown;
+    sqlite.pragma("busy_timeout = 0");
+
+    try {
+      return db.transaction(
+        (tx) => {
+          started = true;
+          sqlite.pragma(`busy_timeout = ${previousWaitMs}`);
+
+          return work(tx);
+        },
+        { behavior: "immediate" },
+      );
+    } catch (error) {
+      if (started || !isSqliteBusyError(error)) throw error;
+      busy = error;
+    } finally {
+      sqlite.pragma(`busy_timeout = ${previousWaitMs}`);
+    }
+
+    const remainingMs = deadline - performance.now();
+
+    if (remainingMs > 0) {
+      await delay(Math.min(BUSY_RETRY_STEP_MS, remainingMs));
+      beforeRetry?.();
+
+      if (performance.now() < deadline) continue;
+    }
+
+    throw new PrimaryWriteBusyError(waitMs, { cause: busy });
   }
 }

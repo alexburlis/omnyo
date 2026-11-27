@@ -545,6 +545,7 @@ export {
   clearQueuedThreadMessageWaitingOn,
   createQueuedThreadMessage,
   createQueuedThreadMessageInTransaction,
+  QueuedMessageThreadUnavailableError,
   getPendingCoalescedQueuedThreadMessage,
   updateCoalescedQueuedThreadMessageInTransaction,
   listReadySystemNoticesOnBusyThreads,
@@ -594,6 +595,7 @@ export type {
   QueuedThreadMessageGroupClaimPolicy,
   QueuedThreadMessageGroupEligibility,
   QueuedThreadMessageRow,
+  QueuedMessageThreadUnavailableReason,
   ReorderQueuedThreadMessageResult,
   SetQueuedThreadMessageGroupBoundaryResult,
 } from "./queued-thread-messages.js";
@@ -644,6 +646,8 @@ export * from "./project-attachments.js";
 export * from "./project-attachment-backfill.js";
 
 export * from "./thread-attention.js";
+
+export * from "./thread-failures.js";
 
 export * from "./daemon-event-receipts.js";
 

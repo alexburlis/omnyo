@@ -16,8 +16,13 @@
   initial-value: 0;
 }
 
+@property --stage-mix {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
 .lab-open-5.lab-combined-kinetic {
-  --stage-mix: 0;
   --warm: 255 176 112;
   --pad: max(clamp(20px, 4.6vw, 76px), calc((100vw - 1440px) / 2));
 }
@@ -282,6 +287,17 @@
   :is(.kinetic-product, .kinetic-product-frame, .kinetic-product-light, .am),
 .lab-open-5.lab-combined-kinetic .kinetic-product::after {
   --sweep: inherit;
+}
+
+.lab-open-5.lab-combined-kinetic
+  :is(
+    .kinetic-workspace-pin,
+    .kinetic-stars,
+    .kinetic-product,
+    .kinetic-product-light
+  ),
+.lab-open-5.lab-combined-kinetic .kinetic-product::after {
+  --stage-mix: inherit;
 }
 
 .lab-open-5.lab-combined-kinetic .kinetic-product-light,
@@ -742,5 +758,4 @@ html[data-form="foldable"]
   --fg: var(--stage-fg);
   --muted: color-mix(in oklab, var(--stage-fg) 58%, var(--stage-bg));
   --soft: color-mix(in oklab, var(--stage-fg) 12%, transparent);
-  --stage-mix: 1;
 }

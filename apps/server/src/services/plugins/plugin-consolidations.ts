@@ -50,8 +50,10 @@ export function isOmnyoConsolidationSource(
   return (
     (id === "inline-ui" || id === SKILLS_ID) &&
     source.startsWith("path:") &&
-    repositoryUrl ===
-      `https://github.com/alexburlis/omnyo-plugins/tree/HEAD/${id}`
+    (repositoryUrl ===
+      `https://github.com/alexburlis/omnyo-plugins/tree/HEAD/${id}` ||
+      repositoryUrl ===
+        `https://github.com/alexburlis/omnyo/tree/HEAD/standalone-plugins/${id}`)
   );
 }
 

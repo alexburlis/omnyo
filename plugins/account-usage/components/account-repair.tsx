@@ -379,7 +379,7 @@ export function AccountRepair({
         >
           Sign in again
         </button>
-      ) : (
+      ) : row.nativeProfile ? null : (
         <RetryButton accountId={row.id} onUsageChanged={onUsageChanged} />
       )}
     </div>

@@ -252,7 +252,7 @@ export function FeatureIndex() {
   const active = useIndexMotion(root);
 
   return (
-    <FeatureShell current="features">
+    <FeatureShell current="features" path="/features">
       <div className="fx-index" ref={root}>
         <IndexHero total={featureMetas().length} chapters={groups.length} />
         <nav className="fx-rail" aria-label="Feature chapters">

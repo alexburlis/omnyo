@@ -215,7 +215,7 @@ export function FeaturePage({
   body: FeaturePageBody;
 }) {
   return (
-    <FeatureShell current="features">
+    <FeatureShell current="features" path={`/features/${meta.slug}`}>
       <article className="fx-page">
         <header className="fx-top">
           <div className="fx-top-copy">

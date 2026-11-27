@@ -1,0 +1,265 @@
+.pa-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  max-height: 28px;
+}
+.pa-button,
+.pa-menu summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: inherit;
+  font-size: var(--text-xs, 0.75rem);
+  font-weight: 500;
+  color: var(--muted-foreground);
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  height: 26px;
+  padding: 0 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color var(--motion-duration-fast, 120ms) var(--motion-ease-standard, ease),
+    color var(--motion-duration-fast, 120ms) var(--motion-ease-standard, ease);
+}
+.pa-button:hover,
+.pa-menu summary:hover,
+.pa-menu[open] summary {
+  background: var(--state-hover);
+  color: var(--foreground);
+}
+.pa-button:focus-visible,
+.pa-menu summary:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+.pa-group {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 7px;
+}
+.pa-elapsed {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-foreground);
+}
+.pa-meter {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 1px;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 1px;
+  background: var(--state-hover);
+  pointer-events: none;
+}
+.pa-meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary, var(--foreground));
+  transition: width var(--motion-duration-fast, 120ms) var(--motion-ease-standard, ease);
+}
+.pa-meter-indeterminate .pa-meter-fill {
+  width: 35%;
+  animation: pa-sweep 1.4s var(--motion-ease-standard, ease) infinite;
+}
+@keyframes pa-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(290%);
+  }
+}
+.pa-status {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 100;
+  display: none;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 200px;
+  max-width: 320px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: var(--material-shadow-float, var(--shadow-md));
+  font-size: var(--text-xs, 0.75rem);
+  white-space: normal;
+  pointer-events: none;
+}
+.pa-group:hover .pa-status,
+.pa-group:focus-within .pa-status {
+  display: flex;
+}
+.pa-status-text {
+  color: var(--foreground);
+  overflow-wrap: anywhere;
+}
+.pa-status-meta {
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.pa-running {
+  background: var(--state-active, var(--state-hover));
+}
+.pa-running .pa-button:disabled {
+  color: var(--foreground);
+  cursor: progress;
+}
+.pa-running .pa-stop {
+  padding: 0 6px;
+}
+.pa-stop:hover,
+.pa-danger,
+.pa-danger:hover {
+  color: var(--destructive);
+}
+.pa-confirm {
+  gap: 2px;
+  padding-left: 8px;
+  background: var(--state-active, var(--state-hover));
+}
+.pa-confirm-text {
+  font-size: var(--text-xs, 0.75rem);
+  font-weight: 500;
+  color: var(--foreground);
+  white-space: nowrap;
+}
+.pa-done .pa-glyph {
+  color: var(--success, var(--foreground));
+}
+.pa-failed .pa-glyph,
+.pa-menu summary .pa-glyph-failed {
+  color: var(--destructive);
+}
+.pa-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  box-sizing: border-box;
+  border-radius: 50%;
+}
+.pa-dot-on {
+  background: var(--success, var(--foreground));
+}
+.pa-dot-attention {
+  background: var(--warning, var(--foreground));
+}
+.pa-dot-off {
+  border: 1.5px solid var(--muted-foreground);
+}
+.pa-dot-unknown {
+  border: 1.5px dashed var(--muted-foreground);
+}
+.pa-glyph {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.pa-glyph-command {
+  fill: currentColor;
+  stroke-width: 1;
+}
+.pa-glyph-running {
+  animation: pa-spin 1s linear infinite;
+}
+@keyframes pa-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pa-glyph-running,
+  .pa-meter-indeterminate .pa-meter-fill {
+    animation: none;
+  }
+  .pa-meter-indeterminate .pa-meter-fill {
+    width: 100%;
+    opacity: 0.5;
+  }
+}
+.pa-menu {
+  position: relative;
+}
+.pa-menu summary {
+  list-style: none;
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.pa-menu[open] .pa-chevron {
+  transform: rotate(180deg);
+}
+.pa-menu summary::-webkit-details-marker {
+  display: none;
+}
+.pa-popover {
+  position: absolute;
+  right: 0;
+  top: 32px;
+  z-index: 100;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border-radius: 10px;
+  padding: 4px;
+  min-width: 180px;
+  box-shadow: var(--material-shadow-float, var(--shadow-md));
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pa-popover .pa-group {
+  width: 100%;
+}
+.pa-popover .pa-group:not(.pa-confirm) {
+  flex-wrap: wrap;
+}
+.pa-popover .pa-running {
+  flex-wrap: wrap;
+}
+.pa-popover .pa-running > .pa-button:not(.pa-stop) {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+}
+.pa-popover .pa-meter {
+  position: static;
+  flex: none;
+  width: calc(100% - 16px);
+  margin: 0 8px 2px;
+}
+.pa-popover .pa-status {
+  position: static;
+  display: flex;
+  flex: none;
+  width: 100%;
+  min-width: 0;
+  max-width: 240px;
+  padding: 0 8px 6px;
+  background: none;
+  box-shadow: none;
+}
+.pa-popover .pa-button {
+  justify-content: flex-start;
+  width: 100%;
+}
+.pa-popover .pa-stop,
+.pa-popover .pa-confirm .pa-button {
+  width: auto;
+}
+.pa-popover p {
+  margin: 4px 8px;
+  font-size: var(--text-xs, 0.75rem);
+  white-space: normal;
+  max-width: 240px;
+}

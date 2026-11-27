@@ -3,7 +3,7 @@ import { SITE_USAGE_DICTIONARY } from "@omnyo/domain/site-usage";
 
 import blogCss from "../blog/blog.css?url";
 import { pageMeta, siteHeadLinks } from "../landing/page-head";
-import { ABUSE_EMAIL, OPERATOR } from "../landing/site";
+import { ABUSE_EMAIL, GITHUB_URL, OPERATOR } from "../landing/site";
 import legalCss from "../legal/legal.css?url";
 import { PRODUCT_USAGE_DICTIONARY } from "../legal/product-data-dictionary";
 import {
@@ -28,8 +28,6 @@ const PAGE_DESCRIPTION =
 const LAST_UPDATED = "November 24, 2026";
 
 const LAST_UPDATED_ISO = "2026-11-24";
-
-const RELEASES_URL = "https://github.com/alexburlis/omnyo-releases";
 
 const GITHUB_PRIVACY_URL =
   "https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement";
@@ -134,8 +132,8 @@ function PrivacyRoute() {
         coordinator, browser and enrolled hosts. Downloading source changes does
         not update an already installed app or host. To find and install
         updates, it downloads them from{" "}
-        <a href={RELEASES_URL}>our releases on GitHub</a>, so GitHub receives
-        your IP address with each update check. The rest of this section covers
+        <a href={GITHUB_URL}>our releases on GitHub</a>, so GitHub receives your
+        IP address with each update check. The rest of this section covers
         builds we give out directly.
       </p>
 
@@ -151,13 +149,14 @@ function PrivacyRoute() {
       <h3>Reply suggestions</h3>
 
       <p>
-        Same chat is the default prediction setting in updated builds. The agent
-        can write a suggestion during its normal turn. Omnyo saves that
-        suggestion on your server. Choosing Fixed Codex via Account Pooler sends
+        From Omnyo 1.0.184, Same chat is the default. The agent can write a
+        suggestion during its normal turn, and Omnyo saves it on your server.
+        Earlier versions use Codex for predictions when the plugin is enabled.
+        Choosing Fixed Codex via Account Pooler in 1.0.184 or later also sends
         part of the completed conversation to OpenAI, including prompts and
-        replies from chats with other providers. The request excludes attachment
-        contents and tool output. You can turn Composer predictions off in the
-        plugin’s settings.
+        replies from chats with other providers. The request in 1.0.184 excludes
+        attachment contents and tool output. You can turn Composer predictions
+        off in the plugin’s settings.
       </p>
 
       <h3>Weekly activity count and optional product analytics</h3>

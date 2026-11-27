@@ -38,10 +38,6 @@ const rejectedReasonDataSchema = z.object({
   reason: z.string(),
 });
 
-const systemErrorCodeDataSchema = z.object({
-  code: z.string(),
-});
-
 const PROVIDER_PROCESS_EXITED_CODE = "provider_process_exited";
 
 const PROVIDER_PROCESS_EXITED_ERROR_INFO: ProviderErrorInfo = {
@@ -198,22 +194,29 @@ function doorRejectionErrorInfo(
   }
 }
 
-function providerExitErrorInfo(
+export function loadFailedTurnSystemError(
   db: DbConnection,
   args: { threadId: string; failed: FailedTurnRecord },
-): ProviderErrorInfo | null {
+) {
+  const { request, requestSequence } = args.failed;
+
   const row = getLatestStoredThreadEventOfTypes(db, {
     threadId: args.threadId,
     types: ["system/error"],
-    afterSequence: args.failed.requestSequence,
+    afterSequence: requestSequence,
+    systemErrorRequest: {
+      requestId: request.requestId,
+      targetTurnId:
+        "expectedTurnId" in request.target
+          ? request.target.expectedTurnId
+          : null,
+      legacyCodes: ["thread_command_failed", PROVIDER_PROCESS_EXITED_CODE],
+    },
   });
 
-  if (row === null) return null;
-
-  return systemErrorCodeDataSchema.safeParse(parseRowData(row)).data?.code ===
-    PROVIDER_PROCESS_EXITED_CODE
-    ? PROVIDER_PROCESS_EXITED_ERROR_INFO
-    : null;
+  return row === null
+    ? undefined
+    : systemErrorEventDataSchema.safeParse(parseRowData(row)).data;
 }
 
 function hostInterruptionErrorInfo(
@@ -261,16 +264,10 @@ export function buildTurnFailedEvent(
     afterSequence: failed.requestSequence,
   });
 
-  const commandFailure = getLatestStoredThreadEventOfTypes(db, {
+  const commandFailureData = loadFailedTurnSystemError(db, {
     threadId,
-    types: ["system/error"],
-    afterSequence: failed.requestSequence,
+    failed,
   });
-
-  const commandFailureData =
-    commandFailure === null
-      ? undefined
-      : systemErrorEventDataSchema.safeParse(parseRowData(commandFailure)).data;
 
   const providerErrorInfo: ProviderErrorInfo | null =
     providerError === null
@@ -286,7 +283,9 @@ export function buildTurnFailedEvent(
       providerErrorInfo ??
       commandFailureData?.errorInfo ??
       doorRejectionErrorInfo(db, { threadId, failed }) ??
-      providerExitErrorInfo(db, { threadId, failed }) ??
+      (commandFailureData?.code === PROVIDER_PROCESS_EXITED_CODE
+        ? PROVIDER_PROCESS_EXITED_ERROR_INFO
+        : null) ??
       hostInterruptionErrorInfo(db, { threadId, failed }),
     inputAccepted: wasFailedTurnInputAccepted(db, { threadId, failed }),
     rateLimits: commandFailureData?.rateLimits ?? latestRateLimits(db, thread),

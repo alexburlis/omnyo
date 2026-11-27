@@ -1,0 +1,209 @@
+{
+  "version": 1,
+  "sourceCommit": "a7eabb6",
+  "surface": "Shipped Stats v1 schema and public SDK migration hashes; no usage, transcript or account data",
+  "schema": [
+    {
+      "type": "table",
+      "name": "_bb_migrations",
+      "sql": "CREATE TABLE _bb_migrations (id INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL, statement_hash TEXT)"
+    },
+    {
+      "type": "table",
+      "name": "active",
+      "sql": "CREATE TABLE active(cohortId INTEGER PRIMARY KEY,count INTEGER NOT NULL)"
+    },
+    {
+      "type": "table",
+      "name": "chats",
+      "sql": "CREATE TABLE chats(id TEXT PRIMARY KEY,title TEXT NOT NULL,machineName TEXT NOT NULL,projectName TEXT NOT NULL,deleted INTEGER NOT NULL,archived INTEGER NOT NULL) WITHOUT ROWID"
+    },
+    {
+      "type": "table",
+      "name": "cohorts",
+      "sql": "CREATE TABLE cohorts(id INTEGER PRIMARY KEY,machine TEXT NOT NULL,project TEXT NOT NULL,chat TEXT NOT NULL,provider TEXT NOT NULL,model TEXT NOT NULL,effort TEXT NOT NULL,mode TEXT NOT NULL,account TEXT NOT NULL,UNIQUE(machine,project,chat,provider,model,effort,mode,account))"
+    },
+    {
+      "type": "table",
+      "name": "coverage",
+      "sql": "CREATE TABLE coverage(start INTEGER NOT NULL,end INTEGER NOT NULL,PRIMARY KEY(start,end)) WITHOUT ROWID"
+    },
+    {
+      "type": "table",
+      "name": "cursors",
+      "sql": "CREATE TABLE cursors(threadId TEXT PRIMARY KEY,seq INTEGER NOT NULL DEFAULT 0,state TEXT NOT NULL DEFAULT '',complete INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID"
+    },
+    {
+      "type": "table",
+      "name": "daily_buckets",
+      "sql": "CREATE TABLE daily_buckets(at INTEGER NOT NULL,cohortId INTEGER NOT NULL,input INTEGER NOT NULL DEFAULT 0,output INTEGER NOT NULL DEFAULT 0,total INTEGER NOT NULL DEFAULT 0,cached INTEGER NOT NULL DEFAULT 0,cacheRead INTEGER NOT NULL DEFAULT 0,cacheWrite INTEGER NOT NULL DEFAULT 0,reasoning INTEGER NOT NULL DEFAULT 0,usageEvents INTEGER NOT NULL DEFAULT 0,turns INTEGER NOT NULL DEFAULT 0,failedTurns INTEGER NOT NULL DEFAULT 0,measuredTurns INTEGER NOT NULL DEFAULT 0,modelMs INTEGER NOT NULL DEFAULT 0,speedOutput INTEGER NOT NULL DEFAULT 0,agentMs INTEGER NOT NULL DEFAULT 0,unknownBaselines INTEGER NOT NULL DEFAULT 0,toolCalls INTEGER NOT NULL DEFAULT 0,nativeTokens INTEGER NOT NULL DEFAULT 0,nativeToolUses INTEGER NOT NULL DEFAULT 0,nativeMs INTEGER NOT NULL DEFAULT 0,observedMs INTEGER NOT NULL DEFAULT 0,peak INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(at,cohortId)) WITHOUT ROWID"
+    },
+    {
+      "type": "table",
+      "name": "meta",
+      "sql": "CREATE TABLE meta(key TEXT PRIMARY KEY,value INTEGER NOT NULL) WITHOUT ROWID"
+    },
+    {
+      "type": "table",
+      "name": "minute_buckets",
+      "sql": "CREATE TABLE minute_buckets(at INTEGER NOT NULL,cohortId INTEGER NOT NULL,input INTEGER NOT NULL DEFAULT 0,output INTEGER NOT NULL DEFAULT 0,total INTEGER NOT NULL DEFAULT 0,cached INTEGER NOT NULL DEFAULT 0,cacheRead INTEGER NOT NULL DEFAULT 0,cacheWrite INTEGER NOT NULL DEFAULT 0,reasoning INTEGER NOT NULL DEFAULT 0,usageEvents INTEGER NOT NULL DEFAULT 0,turns INTEGER NOT NULL DEFAULT 0,failedTurns INTEGER NOT NULL DEFAULT 0,measuredTurns INTEGER NOT NULL DEFAULT 0,modelMs INTEGER NOT NULL DEFAULT 0,speedOutput INTEGER NOT NULL DEFAULT 0,agentMs INTEGER NOT NULL DEFAULT 0,unknownBaselines INTEGER NOT NULL DEFAULT 0,toolCalls INTEGER NOT NULL DEFAULT 0,nativeTokens INTEGER NOT NULL DEFAULT 0,nativeToolUses INTEGER NOT NULL DEFAULT 0,nativeMs INTEGER NOT NULL DEFAULT 0,observedMs INTEGER NOT NULL DEFAULT 0,peak INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(at,cohortId)) WITHOUT ROWID"
+    },
+    {
+      "type": "table",
+      "name": "observations",
+      "sql": "CREATE TABLE observations(id INTEGER PRIMARY KEY,at INTEGER NOT NULL,cohortId INTEGER NOT NULL,output INTEGER NOT NULL)"
+    },
+    {
+      "type": "table",
+      "name": "speed_samples",
+      "sql": "CREATE TABLE speed_samples(id TEXT PRIMARY KEY,at INTEGER NOT NULL,cohortId INTEGER NOT NULL,output INTEGER NOT NULL,modelMs INTEGER NOT NULL) WITHOUT ROWID"
+    },
+    {
+      "type": "table",
+      "name": "stream_baselines",
+      "sql": "CREATE TABLE stream_baselines(threadId TEXT NOT NULL,key TEXT NOT NULL,input INTEGER NOT NULL,output INTEGER NOT NULL,total INTEGER NOT NULL,cached INTEGER NOT NULL,cacheRead INTEGER NOT NULL,cacheWrite INTEGER NOT NULL,reasoning INTEGER NOT NULL,PRIMARY KEY(threadId,key)) WITHOUT ROWID"
+    },
+    {
+      "type": "table",
+      "name": "totals",
+      "sql": "CREATE TABLE totals(cohortId INTEGER PRIMARY KEY,input INTEGER NOT NULL DEFAULT 0,output INTEGER NOT NULL DEFAULT 0,total INTEGER NOT NULL DEFAULT 0,cached INTEGER NOT NULL DEFAULT 0,cacheRead INTEGER NOT NULL DEFAULT 0,cacheWrite INTEGER NOT NULL DEFAULT 0,reasoning INTEGER NOT NULL DEFAULT 0,usageEvents INTEGER NOT NULL DEFAULT 0,turns INTEGER NOT NULL DEFAULT 0,failedTurns INTEGER NOT NULL DEFAULT 0,measuredTurns INTEGER NOT NULL DEFAULT 0,modelMs INTEGER NOT NULL DEFAULT 0,speedOutput INTEGER NOT NULL DEFAULT 0,agentMs INTEGER NOT NULL DEFAULT 0,unknownBaselines INTEGER NOT NULL DEFAULT 0,toolCalls INTEGER NOT NULL DEFAULT 0,nativeTokens INTEGER NOT NULL DEFAULT 0,nativeToolUses INTEGER NOT NULL DEFAULT 0,nativeMs INTEGER NOT NULL DEFAULT 0)"
+    },
+    {
+      "type": "table",
+      "name": "turn_scopes",
+      "sql": "CREATE TABLE turn_scopes(threadId TEXT NOT NULL,turnId TEXT NOT NULL,key TEXT NOT NULL,nested INTEGER NOT NULL,at INTEGER NOT NULL,session TEXT NOT NULL,PRIMARY KEY(threadId,turnId)) WITHOUT ROWID"
+    },
+    {
+      "type": "index",
+      "name": "coverage_end",
+      "sql": "CREATE INDEX coverage_end ON coverage(end)"
+    },
+    {
+      "type": "index",
+      "name": "cursors_pending",
+      "sql": "CREATE INDEX cursors_pending ON cursors(complete,threadId)"
+    },
+    {
+      "type": "index",
+      "name": "daily_cohort_time",
+      "sql": "CREATE INDEX daily_cohort_time ON daily_buckets(cohortId,at)"
+    },
+    {
+      "type": "index",
+      "name": "minute_cohort_time",
+      "sql": "CREATE INDEX minute_cohort_time ON minute_buckets(cohortId,at)"
+    },
+    {
+      "type": "index",
+      "name": "observations_time",
+      "sql": "CREATE INDEX observations_time ON observations(at)"
+    },
+    {
+      "type": "index",
+      "name": "speed_samples_time",
+      "sql": "CREATE INDEX speed_samples_time ON speed_samples(at)"
+    }
+  ],
+  "migrations": [
+    {
+      "id": 0,
+      "applied_at": 1791732400151,
+      "statement_hash": "f542907e916eb2065c6e1013b129f7df76899ea327ddd156acc5b7b9047dc97a"
+    },
+    {
+      "id": 1,
+      "applied_at": 1791732400152,
+      "statement_hash": "b292a9172a4a2eba46393e5ddea80dda4fb3f3b8018694ffeff9fdfe45d142d2"
+    },
+    {
+      "id": 2,
+      "applied_at": 1791732400152,
+      "statement_hash": "d827c5c265c4bdbe0348f060cda706bacea13d7385a5f3eda818318998e90c69"
+    },
+    {
+      "id": 3,
+      "applied_at": 1791732400152,
+      "statement_hash": "515ce98123a82f5658ba9fde99f67863ff6204374526fbc663e843561a3d9cc1"
+    },
+    {
+      "id": 4,
+      "applied_at": 1791732400152,
+      "statement_hash": "650882add385115cf245d1c74f42dc0241eeb33e67f00828500e7119be085bb0"
+    },
+    {
+      "id": 5,
+      "applied_at": 1791732400152,
+      "statement_hash": "54a490c0c10f3edb17c72f46abace3e7b675946d176d58f778ae47c388763c94"
+    },
+    {
+      "id": 6,
+      "applied_at": 1791732400152,
+      "statement_hash": "0a3a7ed5261ede7662b7b9ae46fee208a0ca8529995971fccb2e8a4f7521e68a"
+    },
+    {
+      "id": 7,
+      "applied_at": 1791732400152,
+      "statement_hash": "da609f158650082d19cf84e1085e60101d900536b3b401e91aeb8037e03b642f"
+    },
+    {
+      "id": 8,
+      "applied_at": 1791732400152,
+      "statement_hash": "565b4a0f42848d31c5cc8aedec00b6d3fb769fafd862690e052a28b0351fbd83"
+    },
+    {
+      "id": 9,
+      "applied_at": 1791732400152,
+      "statement_hash": "36b46d988eca64e45f84ee78554c78f59a6e97f3ff4429f1d7d02f774b6f1990"
+    },
+    {
+      "id": 10,
+      "applied_at": 1791732400152,
+      "statement_hash": "6ce6729b0815df931d6fd0443990dd1ada022920eb89598ccce162d75bb0bcfb"
+    },
+    {
+      "id": 11,
+      "applied_at": 1791732400152,
+      "statement_hash": "ad9e7ab35b93ed0167206eb629749ee16c86cfc6dd683b6d1e66a943e8bc253b"
+    },
+    {
+      "id": 12,
+      "applied_at": 1791732400152,
+      "statement_hash": "ba96c774a233ddaa72f1f19535f100acc1888415f8b509dfe7f0613d37456771"
+    },
+    {
+      "id": 13,
+      "applied_at": 1791732400152,
+      "statement_hash": "3e21fb69ba68f16097608086e39a38d9432038babe523c21d6b9e4666ffcffa3"
+    },
+    {
+      "id": 14,
+      "applied_at": 1791732400152,
+      "statement_hash": "28ad46b1ad8a9753f4ca52bee91c0f5b226afd46681a6ec1df4168ab17af2007"
+    },
+    {
+      "id": 15,
+      "applied_at": 1791732400152,
+      "statement_hash": "d7c12582cf4402dd2a75f6f93a3f7fd2aae6e27001c56736c0e045db970fec6b"
+    },
+    {
+      "id": 16,
+      "applied_at": 1791732400152,
+      "statement_hash": "cbdb82363de4947e4a3eeba86fa23d53fd7395a1559c90eb7b4d6c6b4ede0d1e"
+    },
+    {
+      "id": 17,
+      "applied_at": 1791732400152,
+      "statement_hash": "ecd454272c5a2feba3ec5e9af2e46e56a4308d7a874d1188143a2d001c1050f1"
+    },
+    {
+      "id": 18,
+      "applied_at": 1791732400153,
+      "statement_hash": "3ab0812b977ebfc9b348b8cfe6d6bfff4baeb19ced504bfd885418d2dc334520"
+    },
+    {
+      "id": 19,
+      "applied_at": 1791732400153,
+      "statement_hash": "101f505d552904bc00d006c0d5229e4817453fd1ae5a25383900ed28e5eab42d"
+    }
+  ]
+}

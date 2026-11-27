@@ -9,6 +9,10 @@ const hosts: ReturnType<typeof createFakePluginHost>[] = [];
 
 function createHost(options: Parameters<typeof createFakePluginHost>[0]) {
   const host = createFakePluginHost(options);
+  host.harness.sdk.stub("system.config", () => ({
+    primaryHostId: null,
+    primaryHostPlatform: null,
+  }));
   hosts.push(host);
 
   return host;
@@ -54,6 +58,89 @@ const status = {
   routing: { claude: true, codex: true },
   accounts: [],
 };
+
+describe("native Claude profile usage", () => {
+  it("includes profile-scoped Claude limits alongside pooled Codex and refreshes them on request", async () => {
+    const profileId = "2c678519-c7a7-4272-8126-3c992678940a";
+    const hostId = "host_primary";
+
+    const { api, harness } = createHost({
+      pluginId: "omnyo--account-usage",
+      sdk: {
+        plugins: {
+          callRpc: ({ method }) =>
+            method === "status.get"
+              ? { ...status, accounts: [{ ...account, provider: "codex" }] }
+              : { switchThreshold: 0.98 },
+        },
+      },
+    });
+
+    harness.sdk.stub("system.config", () => ({
+      primaryHostId: hostId,
+      primaryHostPlatform: "darwin",
+    }));
+    harness.sdk.stub("providers.claudeProfiles.list", () => ({
+      action: "list",
+      supported: true,
+      profiles: [{ id: profileId, label: "Claude account", status: "ready" }],
+    }));
+
+    const usage = vi.fn(
+      ({
+        profileId: requestedId,
+        hostId: requestedHost,
+      }: {
+        profileId: string;
+        hostId: string;
+      }) => {
+        expect(requestedId).toBe(profileId);
+        expect(requestedHost).toBe(hostId);
+
+        return {
+          action: "usage",
+          usage: {
+            status: "ok",
+            accountEmail: "claude@example.test",
+            planLabel: "Max",
+            windows: [{ label: "7D", usedPercent: 34, resetsAt: null }],
+          },
+        };
+      },
+    );
+
+    harness.sdk.stub("providers.claudeProfiles.usage", usage);
+    plugin(api);
+
+    const snapshot = snapshotSchema.parse(
+      await harness.callRpc("snapshot", null),
+    );
+
+    expect(snapshot.groups).toMatchObject([
+      {
+        providerId: "claude-code",
+        weeklyBars: [{ name: "claude@example.test", remainingPercent: 66 }],
+      },
+      { providerId: "codex", totalCount: 1 },
+    ]);
+    await harness.callRpc("snapshot", null);
+    expect(usage).toHaveBeenCalledTimes(1);
+    await harness.callRpc("refresh", null);
+    expect(usage).toHaveBeenCalledTimes(2);
+
+    harness.sdk.stub("providers.claudeProfiles.list", () => {
+      throw new Error("Host went offline");
+    });
+    await expect(harness.callRpc("refresh", null)).resolves.toMatchObject({
+      claudeError: "Claude accounts could not be loaded.",
+      groups: [{ providerId: "codex", totalCount: 1 }],
+    });
+    await expect(harness.callRpc("snapshot", null)).resolves.toMatchObject({
+      claudeError: "Claude accounts could not be loaded.",
+      groups: [{ providerId: "codex", totalCount: 1 }],
+    });
+  });
+});
 
 describe("usage snapshot failure visibility", () => {
   it("surfaces a failed configuration read instead of guessing the routing threshold", async () => {

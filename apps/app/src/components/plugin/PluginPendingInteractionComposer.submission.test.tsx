@@ -56,7 +56,7 @@ vi.mock("@/components/ui/app-route-anchor", () => ({
 
 vi.mock("@/lib/plugin-css", () => ({
   usePluginCss: () => {},
-  usePluginCssReady: () => true,
+  usePluginCssStatus: () => "ready",
 }));
 
 vi.mock("@/lib/plugin-logos", () => ({
@@ -197,7 +197,7 @@ it.each(["click", "shortcut"] as const)(
     const view = render(composer(true));
 
     try {
-      fireEvent.click(screen.getByRole("button", { name: /Other/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /Other/ }));
       const input = screen.getByRole("textbox", { name: "Direction answer" });
       fireEvent.change(input, { target: { value: "Keep my legacy answer" } });
 

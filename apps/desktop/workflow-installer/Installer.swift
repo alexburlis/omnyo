@@ -3,9 +3,6 @@ import CryptoKit
 import SwiftUI
 
 struct WorkflowInstaller {
-  static let feed = URL(
-    string:
-      "https://github.com/alexburlis/omnyo-releases/releases/download/macos/public-beta-mac.yml")!
   static var minimumVersion: String {
     get throws {
       guard let value = Bundle.main.object(forInfoDictionaryKey: "OmnyoMinimumVersion") as? String,
@@ -65,7 +62,7 @@ struct WorkflowInstaller {
     await status("Downloading Omnyo for Mac…")
     let session = URLSession(configuration: .ephemeral)
     defer { session.invalidateAndCancel() }
-    let (metadata, feedResponse) = try await session.data(from: feed)
+    let (metadata, feedResponse) = try await session.data(from: PublicRelease.feed)
     guard (feedResponse as? HTTPURLResponse)?.statusCode == 200,
       feedResponse.url?.scheme == "https"
     else {

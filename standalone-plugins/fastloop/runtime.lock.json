@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "packageVersion": "0.1.0",
+  "protocolVersion": 1,
+  "packageSha256": "003b98988499c84d0a25f56294c609c28ef8ae794354406bb92cf70069a2fbec",
+  "manifestSha256": "5e9d10c7add4afb2be339b5a82d0fa9e0115c3c0111906661febc78aa9919768",
+  "compatibilityLockHash": "e8bac8905a7638faa1fddb4d3ab75e80a1017b22731be063564b0dfbc2b3072b",
+  "nativeArchiveSha256": "93be0d1867ad250e3e2f5fdd140b0bef36b423b9a79e94e132b9c7feaab2e9f0"
+}

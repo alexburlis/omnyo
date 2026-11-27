@@ -1,16 +1,5 @@
 import type { MockView } from "../app-mock/app-mock";
 
-export const ACT_LABELS = [
-  "More agents, less juggling",
-  "The problem",
-  "One window",
-  "What it fixes",
-  "What it fixes",
-  "What it fixes",
-  "Where your code goes",
-  "Get Omnyo",
-] as const;
-
 export const STORY_LINES = [
   "Claude Code in one terminal.",
   "Codex in another.",

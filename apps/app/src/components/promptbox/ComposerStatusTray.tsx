@@ -161,7 +161,7 @@ export function ComposerStatusTrayToggle({
         onMouseDown={(event) => event.preventDefault()}
         onClick={onToggle}
         className={cn(
-          "flex h-6 cursor-pointer items-center gap-1 rounded-full border border-border bg-background px-2.5 text-xs text-muted-foreground hover:bg-state-hover hover:text-foreground aria-expanded:bg-state-active aria-expanded:text-foreground max-md:pointer-coarse:h-8 max-md:pointer-coarse:px-3",
+          "flex h-6 cursor-pointer items-center gap-1 rounded-full border border-border bg-background px-2.5 text-xs text-muted-foreground hover:bg-state-hover hover:text-foreground aria-expanded:bg-state-active aria-expanded:text-foreground max-md:pointer-coarse:h-7",
           CONTROL_PRESS_TRANSITION,
           CONTROL_PRESS_FEEDBACK,
         )}

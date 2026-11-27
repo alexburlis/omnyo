@@ -1,5 +1,6 @@
 import {
   findLastCompletedRootStoredTurn,
+  getLastStoredTurnRequestEvent,
   getThread,
   hasStoredTerminalClientTurnRequestEvent,
   findLatestUnresolvedClientTurnRequestIdAfterSequence,
@@ -16,6 +17,7 @@ import {
   appendThreadEvent,
   appendThreadEventInTransaction,
   getActiveTurnId,
+  parseStoredTurnRequestEvent,
 } from "./thread-events.js";
 
 const UNCONFIRMED_STEER_MESSAGE =
@@ -156,11 +158,23 @@ export function settleUnconfirmedTurnStartInTransaction(
 export function rejectUnstartedTurnRequest(
   deps: Pick<AppDeps, "db" | "hub">,
   threadId: string,
-): void {
+  expectedRequestId?: ClientTurnRequestId,
+): ClientTurnRequestId | null {
   const thread = getThread(deps.db, threadId);
 
   if (!thread) {
-    return;
+    return null;
+  }
+
+  if (expectedRequestId !== undefined) {
+    const latestRequest = getLastStoredTurnRequestEvent(deps.db, threadId);
+
+    if (
+      latestRequest === null ||
+      parseStoredTurnRequestEvent(latestRequest).requestId !== expectedRequestId
+    ) {
+      return null;
+    }
   }
 
   const lastCompletedTurn = findLastCompletedRootStoredTurn(deps.db, {
@@ -175,8 +189,11 @@ export function rejectUnstartedTurnRequest(
     },
   );
 
-  if (requestId === null) {
-    return;
+  if (
+    requestId === null ||
+    (expectedRequestId !== undefined && requestId !== expectedRequestId)
+  ) {
+    return null;
   }
 
   appendThreadEvent(
@@ -188,4 +205,6 @@ export function rejectUnstartedTurnRequest(
       threadId,
     }),
   );
+
+  return requestId;
 }

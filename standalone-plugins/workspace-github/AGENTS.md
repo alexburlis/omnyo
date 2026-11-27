@@ -1,0 +1,5 @@
+# Workspace GitHub
+
+Standalone Omnyo plugin. Use pnpm. Verify with `pnpm verify`; build with `pnpm build`. Keep the SDK pinned to the installed Omnyo version. Do not re-enable or modify the official GitHub plugin.
+
+GitHub operations use the existing gh authentication on the Omnyo server's primary host (`system.config().primaryHostId`) through the host entry; without a primary host, GitHub reports unavailable. Credential presence returns metadata only; credentials never return to the coordinator. Repository discovery runs through the plugin host entry on each source's owning machine. Never expose credentials in logs. GitHub writes and agent launches require the user's action. Source discovery scans at most three levels below a container, skips dependency/build directories and directory symlinks, stops at a Git checkout, skips `.git` files that point to removed worktrees, reports per-folder failures without aborting the source, and deduplicates origin repositories. Each machine's last successful discovery is stored in plugin KV `host-discovery`; an offline machine reuses it with a visible notice.

@@ -32,7 +32,7 @@ describe("pinned public macOS update boundary", () => {
     expect(publicBetaUpdateFeed()).toEqual({
       provider: "generic",
       channel: "public-beta",
-      url: "https://github.com/alexburlis/omnyo-releases/releases/download/macos/",
+      url: "https://github.com/alexburlis/omnyo/releases/download/macos/",
     });
   });
   it("accepts only the exact public request distribution", () => {
@@ -45,9 +45,10 @@ describe("pinned public macOS update boundary", () => {
     ).not.toThrow();
 
     for (const url of [
-      "https://github.com/other/omnyo-releases/releases/download/macos/",
-      "https://github.com/alexburlis/omnyo-releases/releases/download/public-beta/",
-      "https://github.com/alexburlis/omnyo-releases/releases/download/latest/",
+      "https://github.com/other/omnyo/releases/download/macos/",
+      "https://github.com/alexburlis/omnyo/releases/download/public-beta/",
+      "https://github.com/alexburlis/omnyo/releases/download/latest/",
+      "https://github.com/alexburlis/omnyo-releases/releases/download/macos/",
       "https://example.invalid/",
     ])
       expect(() =>

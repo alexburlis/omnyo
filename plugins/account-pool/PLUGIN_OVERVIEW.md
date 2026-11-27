@@ -1,4 +1,4 @@
-**Experimental. We’re unaware of account bans from using this plugin. Provider terms do not clearly address every use of these features. Use at your own risk.**
+**Experimental. We’re unaware of bans from using this plugin. Provider terms are unclear. Use at your own risk.**
 
 Account Pooler routes new Claude chats to signed-in profiles with quota and routes Codex requests through accounts you own.
 

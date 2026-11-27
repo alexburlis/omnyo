@@ -15,6 +15,7 @@ interface PluginCssRecord {
   consumers: number;
   cleanupEpoch: number;
   cleanupTimer: ReturnType<typeof setTimeout> | null;
+  failed: boolean;
   loadedUrl: string | null;
   pendingStylesheet: HTMLLinkElement | null;
   preload: HTMLLinkElement | null;
@@ -54,6 +55,7 @@ function recordFor(pluginId: string): PluginCssRecord {
     consumers: 0,
     cleanupEpoch: 0,
     cleanupTimer: null,
+    failed: false,
     loadedUrl: null,
     pendingStylesheet: null,
     preload: null,
@@ -129,8 +131,9 @@ function activateStylesheet(
   pluginId: string,
   record: PluginCssRecord,
   url: string,
+  retry = true,
 ): void {
-  if (linkUrl(record.pendingStylesheet) === url) return;
+  if (record.failed || linkUrl(record.pendingStylesheet) === url) return;
 
   if (record.stylesheet && linkUrl(record.stylesheet) === url) {
     record.stylesheet.media = "all";
@@ -175,10 +178,17 @@ function activateStylesheet(
   link.onerror = () => {
     link.remove();
 
-    if (record.pendingStylesheet === link) record.pendingStylesheet = null;
-
-    if (record.url !== url) return;
+    if (record.pendingStylesheet !== link || record.url !== url) return;
+    record.pendingStylesheet = null;
     warnLoadFailure(pluginId, url);
+
+    if (retry && record.consumers > 0) {
+      activateStylesheet(pluginId, record, url, false);
+
+      return;
+    }
+
+    record.failed = true;
     settle(url);
   };
 
@@ -236,6 +246,7 @@ export function applyPluginCss(pluginId: string, url: string | null): void {
   if (url === null) {
     cancelDeferredDeactivate(record);
     record.url = null;
+    record.failed = false;
     record.loadedUrl = null;
     removeLink(record.preload);
     record.preload = null;
@@ -256,6 +267,7 @@ export function applyPluginCss(pluginId: string, url: string | null): void {
 
   cancelDeferredDeactivate(record);
   record.url = url;
+  record.failed = false;
   record.loadedUrl = linkUrl(record.stylesheet) === url ? url : null;
   removeLink(record.preload);
   record.preload = null;
@@ -312,16 +324,28 @@ export function usePluginCss(pluginId: string | null): void {
   }, [initialLoad, pluginId]);
 }
 
-function isPluginCssReady(pluginId: string | null): boolean {
-  if (pluginId === null) return true;
+function pluginCssStatus(
+  pluginId: string | null,
+): "ready" | "loading" | "failed" {
+  const record =
+    pluginId === null ? undefined : recordsByPluginId.get(pluginId);
+
+  if (record?.url == null) return "ready";
+
+  if (record.failed) return "failed";
+
+  return record.stylesheet === null ? "loading" : "ready";
+}
+
+export function retryPluginCss(pluginId: string): void {
   const record = recordsByPluginId.get(pluginId);
 
-  return (
-    record === undefined ||
-    record.url === null ||
-    record.stylesheet !== null ||
-    settledUrls.has(record.url)
-  );
+  if (record?.url == null || !record.failed) return;
+  removeLink(record.stylesheet);
+  record.stylesheet = null;
+  record.failed = false;
+  activateStylesheet(pluginId, record, record.url);
+  notify();
 }
 
 function isAllPluginCssSettled(): boolean {
@@ -331,8 +355,8 @@ function isAllPluginCssSettled(): boolean {
   );
 }
 
-export function usePluginCssReady(pluginId: string | null): boolean {
-  return useSyncExternalStore(subscribe, () => isPluginCssReady(pluginId));
+export function usePluginCssStatus(pluginId: string | null) {
+  return useSyncExternalStore(subscribe, () => pluginCssStatus(pluginId));
 }
 
 export function useAllPluginCssSettled(): boolean {

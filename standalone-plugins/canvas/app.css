@@ -1,0 +1,1331 @@
+.cnv-view {
+  container-type: inline-size;
+  container-name: canvas-panel;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  color: var(--foreground);
+  font-size: var(--text-sm);
+  line-height: var(--text-sm--line-height);
+}
+
+.cnv-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.cnv-toolbar[role="group"] {
+  gap: 2px;
+  row-gap: 4px;
+  min-height: 40px;
+  padding: 4px 8px;
+}
+
+.cnv-toolbar[role="group"] .cnv-chip + .cnv-chip {
+  margin-left: 4px;
+}
+
+.cnv-toolbar[role="group"] .cnv-chip ~ .cnv-muted {
+  margin-left: 6px;
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.cnv-toolbar-changes,
+.cnv-toolbar-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  row-gap: 4px;
+  min-width: 0;
+}
+
+.cnv-toolbar-tools {
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
+.cnv-toolbar-changes:empty {
+  display: none;
+}
+
+.cnv-toolbar[data-floating="true"] {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  left: 8px;
+  z-index: 4;
+  min-height: 0;
+  padding: 0;
+  border-bottom: 0;
+  pointer-events: none;
+}
+
+.cnv-toolbar[data-floating="true"] > :where(.cnv-toolbar-changes, .cnv-toolbar-tools) {
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius-md, 8px) + 3px);
+  background: color-mix(in oklab, var(--background) 86%, transparent);
+  box-shadow: 0 1px 3px color-mix(in oklab, var(--foreground) 10%, transparent);
+  backdrop-filter: blur(10px);
+  pointer-events: auto;
+}
+
+.cnv-toolbar[data-floating="true"] > .cnv-toolbar-changes {
+  padding-inline: 4px;
+}
+
+.cnv-toolbar-error {
+  color: var(--destructive-text);
+  font-size: var(--text-xs);
+}
+
+.cnv-tool {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-md, 8px);
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.cnv-tool > [data-icon] {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.cnv-tool[data-labelled="true"] {
+  padding: 0 10px 0 8px;
+}
+
+.cnv-tool:hover:not(:disabled, [aria-disabled="true"]) {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
+.cnv-tool[aria-pressed="true"] {
+  background: var(--surface-selected, var(--secondary));
+  color: var(--foreground);
+}
+
+.cnv-tool:disabled,
+.cnv-tool[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.cnv-tool:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+.cnv-tool-divider {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: var(--border);
+}
+
+@media (pointer: coarse) {
+  .cnv-toolbar[role="group"] .cnv-tool {
+    min-width: 32px;
+    height: 32px;
+  }
+}
+
+@container canvas-panel (max-width: 600px) {
+  .cnv-toolbar[role="group"] .cnv-chip ~ .cnv-muted {
+    display: none;
+  }
+}
+
+@container canvas-panel (max-width: 480px) {
+  .cnv-add-to-project[data-labelled="true"] {
+    padding: 0 6px;
+  }
+
+  .cnv-add-to-project > .cnv-tool-label {
+    display: none;
+  }
+}
+
+.cnv-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 51;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  display: flex;
+  flex-direction: column;
+  background: var(--background);
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+  animation: cnv-fullscreen-in var(--motion-duration-base, 250ms)
+    var(--motion-ease-out, cubic-bezier(0, 0, 0.58, 1));
+}
+
+@keyframes cnv-fullscreen-in {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cnv-fullscreen {
+    animation: none;
+  }
+}
+
+.cnv-toolbar[data-full-screen="true"] {
+  min-height: 44px;
+  padding-left: 84px;
+  app-region: drag;
+  -webkit-app-region: drag;
+}
+
+.cnv-toolbar[data-full-screen="true"] :where(button) {
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+
+.cnv-toolbar-title {
+  font-weight: 600;
+  margin-right: 6px;
+}
+
+.cnv-toolbar-spacer {
+  flex: 1;
+}
+
+.cnv-chip {
+  border: 0;
+  cursor: pointer;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: var(--text-xs);
+}
+
+.cnv-chip[data-tone="new"] {
+  background: color-mix(in oklab, var(--success) 18%, transparent);
+  color: var(--success-foreground);
+}
+
+.cnv-chip[data-tone="attention"] {
+  background: var(--surface-attention);
+  color: var(--warning-text);
+}
+
+.cnv-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--foreground);
+  font: inherit;
+  font-size: var(--text-xs);
+  padding: 3px 9px;
+  border-radius: calc(var(--radius) - 2px);
+  cursor: pointer;
+}
+
+.cnv-button:hover {
+  background: var(--accent);
+}
+
+.cnv-button[aria-pressed="true"] {
+  background: var(--secondary);
+  border-color: var(--ring);
+}
+
+.cnv-button[data-variant="primary"] {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.cnv-button[data-variant="primary"]:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--primary) 88%, var(--foreground));
+}
+
+.cnv-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.cnv-body {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.cnv-board {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  cursor: grab;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
+  background-color: var(--surface-recessed);
+}
+
+.cnv-board .cnv-node[data-selected="true"] :where(.cnv-node-title, .cnv-node-content) {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.cnv-board[data-dragging="true"] {
+  cursor: grabbing;
+}
+
+.cnv-board:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+.cnv-world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+
+.cnv-board[data-animate="true"] {
+  transition:
+    background-position 160ms var(--motion-ease-in-out, cubic-bezier(0.42, 0, 0.58, 1)),
+    background-size 160ms var(--motion-ease-in-out, cubic-bezier(0.42, 0, 0.58, 1));
+}
+
+.cnv-world[data-animate="true"] {
+  transition: transform 160ms var(--motion-ease-in-out, cubic-bezier(0.42, 0, 0.58, 1));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cnv-board[data-animate="true"],
+  .cnv-world[data-animate="true"] {
+    transition: none;
+  }
+}
+
+.cnv-section {
+  position: absolute;
+  border-top: 1px solid color-mix(in oklab, var(--foreground) 12%, transparent);
+  pointer-events: none;
+}
+
+.cnv-section-label {
+  position: absolute;
+  top: -10px;
+  left: 14px;
+  padding: 0 6px;
+  background: var(--surface-recessed);
+  color: var(--muted-foreground);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.cnv-edges {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.cnv-edges path {
+  fill: none;
+  stroke: color-mix(in oklab, var(--foreground) 35%, transparent);
+  stroke-width: 1.5;
+}
+
+.cnv-edges text {
+  fill: var(--muted-foreground);
+  font-size: var(--text-xs);
+}
+
+.cnv-node {
+  position: absolute;
+  background: transparent;
+  color: var(--foreground);
+  border-radius: var(--radius);
+  cursor: default;
+}
+
+.cnv-node[data-change="new"] {
+  outline: 2px solid var(--success);
+  outline-offset: 2px;
+}
+
+.cnv-node[data-change="updated"] {
+  outline: 2px solid var(--attention);
+  outline-offset: 2px;
+}
+
+.cnv-node[data-selected="true"] {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.cnv-node:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.cnv-node-flag {
+  position: absolute;
+  top: -9px;
+  right: 10px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  color: var(--background);
+  background: var(--success);
+}
+
+.cnv-node-flag[data-change="updated"] {
+  background: var(--attention);
+}
+
+.cnv-node-head {
+  display: flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  cursor: grab;
+  user-select: none;
+  opacity: 0;
+  transition: opacity var(--motion-duration-fast, 120ms);
+}
+
+.cnv-node:hover .cnv-node-head,
+.cnv-node:focus-within .cnv-node-head,
+.cnv-node[data-selected="true"] .cnv-node-head {
+  opacity: 1;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .cnv-node-head {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cnv-node-head {
+    transition: none;
+  }
+}
+
+.cnv-kind {
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--subtle-foreground);
+}
+
+.cnv-tone {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.cnv-tone[data-tone="positive"] {
+  background: var(--success);
+}
+
+.cnv-tone[data-tone="warning"] {
+  background: var(--warning);
+}
+
+.cnv-tone[data-tone="negative"] {
+  background: var(--destructive);
+}
+
+.cnv-tone[data-tone="info"] {
+  background: var(--primary);
+}
+
+.cnv-node-title {
+  padding: 0 12px;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+}
+
+.cnv-node[data-emphasis="lead"] .cnv-node-title {
+  font-size: 32px;
+  line-height: 1.15;
+  letter-spacing: -0.035em;
+}
+
+.cnv-node[data-emphasis="quiet"] .cnv-node-title {
+  font-size: 14px;
+  color: var(--muted-foreground);
+}
+
+.cnv-node[data-emphasis="quiet"] .cnv-node-content {
+  color: var(--muted-foreground);
+}
+
+.cnv-node-content {
+  min-width: 0;
+  padding: 8px 12px 12px;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.cnv-node-content table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.cnv-node-content pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.cnv-node-content img,
+.cnv-node-content video {
+  display: block;
+  max-width: 100%;
+  border-radius: 6px;
+}
+
+.cnv-muted {
+  color: var(--muted-foreground);
+}
+
+.cnv-progress {
+  height: 6px;
+  margin: 6px 0 4px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--muted);
+}
+
+.cnv-progress > span {
+  display: block;
+  height: 100%;
+  background: var(--primary);
+}
+
+.cnv-state[data-state="done"] {
+  color: var(--success);
+}
+
+.cnv-state[data-state="failed"],
+.cnv-state[data-state="blocked"] {
+  color: var(--destructive-text);
+}
+
+.cnv-state[data-state="waiting"] {
+  color: var(--warning-text);
+}
+
+.cnv-option {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--surface-raised);
+  color: var(--foreground);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cnv-option:hover:not(:disabled) {
+  background: var(--accent);
+}
+
+.cnv-option:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.cnv-option[data-recommended="true"] {
+  border-color: var(--primary);
+}
+
+.cnv-option-note {
+  flex: none;
+  white-space: nowrap;
+  color: var(--muted-foreground);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+}
+
+.cnv-code {
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  max-height: 320px;
+  border-radius: 6px;
+  background: var(--surface-recessed);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--text-xs--line-height);
+  white-space: pre;
+}
+
+.cnv-diff-add {
+  color: var(--success);
+}
+
+.cnv-diff-remove {
+  color: var(--destructive-text);
+}
+
+.cnv-frame {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+}
+
+.cnv-file {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.cnv-file-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 38px;
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-recessed);
+  color: var(--muted-foreground);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+}
+
+.cnv-hud {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  gap: 6px;
+}
+
+.cnv-hud-zoom {
+  right: 12px;
+  bottom: var(--cnv-hud-bottom, 12px);
+  align-items: center;
+  gap: 0;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--material-raised, var(--popover, var(--card)));
+  box-shadow: var(--shadow-sm);
+}
+
+.cnv-hud-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 26px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.cnv-hud-button > svg {
+  width: 14px;
+  height: 14px;
+}
+
+.cnv-hud-zoom-level {
+  min-width: 46px;
+}
+
+.cnv-hud-button:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
+.cnv-hud-button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+.cnv-minimap {
+  position: absolute;
+  box-sizing: content-box;
+  left: 12px;
+  bottom: var(--cnv-hud-bottom, 12px);
+  z-index: 2;
+  width: 160px;
+  height: 100px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--material-raised, var(--popover, var(--card)));
+  box-shadow: var(--shadow-sm);
+  opacity: 0.86;
+  transition: opacity var(--motion-duration-fast, 150ms) ease;
+  cursor: pointer;
+}
+
+.cnv-minimap:hover {
+  opacity: 1;
+}
+
+.cnv-minimap-scene {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.cnv-minimap-node {
+  position: absolute;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--foreground) 25%, transparent);
+}
+
+.cnv-minimap-node[data-change="new"],
+.cnv-minimap-node[data-change="updated"] {
+  background: var(--success);
+}
+
+.cnv-minimap-view {
+  position: absolute;
+  border: 1.5px solid var(--ring);
+  border-radius: 3px;
+}
+
+.cnv-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--muted-foreground);
+  pointer-events: none;
+}
+
+.cnv-outline {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 12px 12px;
+}
+
+.cnv-outline-section {
+  display: flex;
+  justify-content: space-between;
+  margin: 14px 2px 6px;
+  color: var(--muted-foreground);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.cnv-outline .cnv-node {
+  position: relative;
+  margin-bottom: 8px;
+}
+
+.cnv-header-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: var(--text-xs);
+  line-height: var(--text-xs--line-height);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.cnv-header-button:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
+.cnv-header-button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+.cnv-mode-menu {
+  padding: 4px;
+}
+
+.cnv-switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: calc(var(--radius) - 2px);
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cnv-switch:hover:not(:disabled) {
+  background: var(--accent);
+}
+
+.cnv-switch:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+.cnv-switch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.cnv-switch-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.cnv-switch-label {
+  font-size: var(--text-sm);
+  line-height: var(--text-sm--line-height);
+}
+
+.cnv-switch-caption {
+  color: var(--muted-foreground);
+  font-size: var(--text-xs);
+  line-height: var(--text-xs--line-height);
+}
+
+.cnv-switch[data-state="error"] .cnv-switch-caption {
+  color: var(--destructive-text);
+}
+
+.cnv-switch-track {
+  position: relative;
+  flex: none;
+  width: 28px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--muted);
+  transition: background 120ms;
+}
+
+.cnv-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--background);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+  transition: transform 120ms;
+}
+
+.cnv-switch[aria-checked="true"] .cnv-switch-track {
+  background: var(--primary);
+}
+
+.cnv-switch[aria-checked="true"] .cnv-switch-thumb {
+  transform: translateX(12px);
+}
+
+.cnv-switch[data-state="pending"] .cnv-switch-track {
+  background: color-mix(in oklab, var(--primary) 55%, var(--muted));
+}
+
+.cnv-toggle-icon {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.cnv-dot {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--background);
+  border-radius: 50%;
+  background: var(--attention);
+}
+
+.cnv-notice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 100%;
+  min-height: 0;
+  padding: 24px;
+  color: var(--foreground);
+  font-size: var(--text-sm);
+  line-height: var(--text-sm--line-height);
+  text-align: center;
+}
+
+.cnv-notice h3 {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.cnv-notice p {
+  max-width: 280px;
+  margin: 0;
+}
+
+.cnv-notice p:empty {
+  display: none;
+}
+
+.cnv-notice-icon {
+  width: 28px;
+  height: 28px;
+  color: var(--muted-foreground);
+}
+
+.cnv-outline[data-composed="true"] .cnv-node {
+  margin-bottom: 24px;
+}
+
+:root {
+  --cnv-accent-blue: oklch(0.54 0.13 255);
+  --cnv-accent-teal: oklch(0.55 0.09 192);
+  --cnv-accent-violet: oklch(0.54 0.15 298);
+  --cnv-accent-rose: oklch(0.57 0.15 12);
+  --cnv-accent-amber: oklch(0.62 0.13 68);
+}
+
+:root.dark {
+  --cnv-accent-blue: oklch(0.77 0.11 252);
+  --cnv-accent-teal: oklch(0.8 0.09 190);
+  --cnv-accent-violet: oklch(0.77 0.12 298);
+  --cnv-accent-rose: oklch(0.77 0.12 12);
+  --cnv-accent-amber: oklch(0.84 0.11 78);
+}
+
+.cnv-view [data-accent="blue"] {
+  --cnv-accent: var(--cnv-accent-blue);
+}
+
+.cnv-view [data-accent="teal"] {
+  --cnv-accent: var(--cnv-accent-teal);
+}
+
+.cnv-view [data-accent="violet"] {
+  --cnv-accent: var(--cnv-accent-violet);
+}
+
+.cnv-view [data-accent="rose"] {
+  --cnv-accent: var(--cnv-accent-rose);
+}
+
+.cnv-view [data-accent="amber"] {
+  --cnv-accent: var(--cnv-accent-amber);
+}
+
+.cnv-island {
+  --cnv-island-base: var(--canvas, var(--background));
+  --cnv-island-fill: color-mix(
+    in oklab,
+    var(--cnv-accent, var(--foreground)) 3.5%,
+    var(--cnv-island-base)
+  );
+  position: absolute;
+  box-sizing: border-box;
+  border-radius: 24px;
+  background: var(--cnv-island-fill);
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--foreground) 6%, transparent),
+    0 22px 48px -32px color-mix(in oklab, var(--foreground) 45%, transparent);
+  pointer-events: none;
+}
+
+:where(:root.dark) .cnv-island {
+  --cnv-island-base: color-mix(in oklab, var(--foreground) 7%, var(--canvas, var(--background)));
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--foreground) 7%, transparent);
+}
+
+.cnv-island[data-surface="none"] {
+  background: transparent;
+  box-shadow: none;
+}
+
+.cnv-island[data-selected="true"] {
+  box-shadow:
+    0 0 0 2px var(--ring),
+    0 22px 48px -32px color-mix(in oklab, var(--foreground) 45%, transparent);
+}
+
+.cnv-island-head {
+  position: absolute;
+  top: 24px;
+  left: 36px;
+  right: 36px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 9px;
+  row-gap: 6px;
+  border-radius: 8px;
+  cursor: grab;
+  pointer-events: auto;
+  -webkit-user-select: none;
+  user-select: none;
+  transition: opacity 160ms var(--motion-ease-out, ease-out);
+}
+
+.cnv-board[data-dragging="true"] .cnv-island-head {
+  cursor: grabbing;
+}
+
+.cnv-island-head:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 4px;
+}
+
+.cnv-island-pip {
+  width: 9px;
+  height: 9px;
+  flex: none;
+  border-radius: 3px;
+  background: var(--cnv-accent, var(--muted-foreground));
+}
+
+.cnv-island-title {
+  min-width: 0;
+  color: var(--foreground);
+  font-size: 19px;
+  font-weight: 650;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+
+.cnv-island-head[data-question="true"] .cnv-island-title {
+  color: var(--cnv-accent, var(--muted-foreground));
+  font-size: 11.5px;
+  font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.cnv-island-question {
+  grid-column: 1 / -1;
+  color: var(--foreground);
+  font-size: 20px;
+  font-weight: 620;
+  line-height: 1.28;
+  letter-spacing: -0.022em;
+  text-wrap: balance;
+}
+
+.cnv-island-grip {
+  color: var(--muted-foreground);
+  font-size: 15px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity var(--motion-duration-fast, 120ms);
+}
+
+.cnv-island-head:hover .cnv-island-grip,
+.cnv-island-head:focus-visible .cnv-island-grip,
+.cnv-island[data-selected="true"] .cnv-island-grip {
+  opacity: 0.75;
+}
+
+.cnv-board:is([data-detail="overview"], [data-detail="map"]) .cnv-island-head {
+  opacity: 0;
+}
+
+.cnv-node-tile {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+  background: color-mix(
+    in oklab,
+    var(--cnv-accent, var(--foreground)) 9%,
+    var(--card, var(--background))
+  );
+  box-shadow: inset 0 0 0 calc(1px / var(--cnv-zoom, 1))
+    color-mix(in oklab, var(--cnv-accent, var(--foreground)) 22%, transparent);
+  color: var(--foreground);
+  text-align: center;
+  container-type: size;
+}
+
+.cnv-node-tile span {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: min(calc(13px / var(--cnv-zoom, 1)), 11cqw, 44cqh);
+  padding: 0 min(calc(12px / var(--cnv-zoom, 1)), 6cqw);
+  font-weight: 650;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  overflow-wrap: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.cnv-node[data-emphasis="lead"] .cnv-node-tile span {
+  font-size: min(calc(17px / var(--cnv-zoom, 1)), 13cqw, 48cqh);
+}
+
+.cnv-node[data-emphasis="quiet"] .cnv-node-tile span {
+  color: var(--muted-foreground);
+  font-weight: 600;
+}
+
+.cnv-node[data-tile="true"] .cnv-node-flag {
+  z-index: 3;
+}
+
+.cnv-node[data-island] .cnv-node-title {
+  font-size: 15px;
+  line-height: 1.35;
+  letter-spacing: -0.012em;
+}
+
+.cnv-node[data-island][data-emphasis="lead"] .cnv-node-title {
+  font-size: 23px;
+  line-height: 1.2;
+  letter-spacing: -0.028em;
+}
+
+.cnv-node[data-island][data-emphasis="quiet"] .cnv-node-title {
+  font-size: 13px;
+}
+
+.cnv-island-labels {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.cnv-island-label {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: calc(var(--cnv-label-size, 15px) * 0.4) calc(var(--cnv-label-size, 15px) * 0.8);
+  border: 0;
+  border-radius: calc(var(--cnv-label-size, 15px) * 0.8);
+  background: color-mix(
+    in oklab,
+    var(--cnv-accent, var(--foreground)) 10%,
+    var(--popover, var(--card))
+  );
+  color: var(--foreground);
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--foreground) 9%, transparent),
+    0 14px 30px -18px rgb(0 0 0 / 0.5);
+  font: inherit;
+  text-align: left;
+  cursor: zoom-in;
+  opacity: 0;
+  transform: translateY(6px) scale(0.98);
+  transform-origin: top left;
+  transition:
+    opacity 180ms var(--motion-ease-out, ease-out),
+    transform 180ms var(--motion-ease-out, ease-out),
+    background-color var(--motion-duration-fast, 120ms);
+  pointer-events: none;
+}
+
+.cnv-island-labels[data-visible="true"] .cnv-island-label {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+.cnv-island-labels[data-animate="true"] .cnv-island-label {
+  transition:
+    opacity 180ms var(--motion-ease-out, ease-out),
+    transform 180ms var(--motion-ease-out, ease-out),
+    left 160ms var(--motion-ease-in-out, ease-in-out),
+    top 160ms var(--motion-ease-in-out, ease-in-out);
+}
+
+.cnv-island-label:hover {
+  background: color-mix(
+    in oklab,
+    var(--cnv-accent, var(--foreground)) 17%,
+    var(--popover, var(--card))
+  );
+}
+
+.cnv-island-label:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.cnv-island-label[data-selected="true"] {
+  box-shadow:
+    0 0 0 2px var(--ring),
+    0 14px 30px -18px rgb(0 0 0 / 0.5);
+}
+
+.cnv-island-label-title {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--cnv-label-size, 15px) * 0.5);
+  font-size: var(--cnv-label-size, 15px);
+  font-weight: 650;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+
+.cnv-island-label-question {
+  color: var(--muted-foreground);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cnv-island-head,
+  .cnv-island-label,
+  .cnv-island-labels[data-animate="true"] .cnv-island-label {
+    transition: none;
+  }
+}
+
+.cnv-minimap-island {
+  position: absolute;
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--cnv-accent, var(--foreground)) 14%, transparent);
+}
+
+.cnv-minimap-island[data-surface="none"] {
+  background: transparent;
+}
+
+.cnv-outline-island {
+  margin: 20px 0 28px;
+  padding: 18px 10px 4px;
+  border-radius: 18px;
+  background: color-mix(
+    in oklab,
+    var(--cnv-accent, var(--foreground)) 4%,
+    var(--canvas, var(--background))
+  );
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--foreground) 6%, transparent);
+}
+
+.cnv-outline-island[data-surface="none"] {
+  background: transparent;
+  box-shadow: none;
+}
+
+.cnv-outline-island-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 0 4px 14px;
+}
+
+.cnv-outline-island-head .cnv-island-pip {
+  margin-top: 4px;
+}
+
+.cnv-outline-island-head h3 {
+  margin: 0;
+  color: var(--cnv-accent, var(--muted-foreground));
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: 0.09em;
+  line-height: 1.3;
+  text-transform: uppercase;
+}
+
+.cnv-outline-island-head p {
+  margin: 4px 0 0;
+  color: var(--foreground);
+  font-size: 17px;
+  font-weight: 620;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+}
+
+.cnv-conversation {
+  border: 1px dashed color-mix(in oklab, var(--foreground) 25%, transparent);
+  border-radius: var(--radius);
+  padding: 16px;
+  background: color-mix(in oklab, var(--card) 94%, transparent);
+  min-width: 0;
+}
+
+.cnv-conversation :where(a[href^="#canvas-node-"]) {
+  color: var(--brand);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}

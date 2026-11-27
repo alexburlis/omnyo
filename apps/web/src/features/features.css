@@ -75,49 +75,6 @@ body:has(.fx) {
   color: #fff;
 }
 
-.fx-nav {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  gap: 28px;
-  height: 68px;
-  padding: 0 var(--pad);
-  background: color-mix(in oklab, var(--bg) 86%, transparent);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-}
-
-.fx-brand {
-  margin-right: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  font-family: var(--display);
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  text-decoration: none;
-}
-
-.fx-brand-mark {
-  width: 26px;
-  height: 26px;
-}
-
-.fx-nav .get-set .get-btn {
-  height: 38px;
-  padding: 0 16px 0 14px;
-  font-size: 14px;
-  gap: 8px;
-}
-
-.fx-nav .get-btn .get-glyph {
-  width: 17px;
-  height: 17px;
-}
-
 .fx-article {
   display: flex;
   flex-direction: column;
@@ -233,7 +190,6 @@ body:has(.fx) {
   display: flex;
   flex-direction: column;
   gap: clamp(48px, 7vw, 96px);
-  scroll-margin-top: 90px;
 }
 
 .fx-section {
@@ -672,7 +628,6 @@ body:has(.fx) {
 
 .fx-card:focus-visible,
 .fx-link:focus-visible,
-.fx-brand:focus-visible,
 .fx-gh:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
@@ -770,7 +725,6 @@ body:has(.fx) {
   padding: clamp(56px, 9vw, 128px) var(--pad);
   border-top: 1px solid color-mix(in oklab, var(--fg) 10%, transparent);
   text-align: center;
-  scroll-margin-top: 68px;
 }
 
 .fx-closing-mark {
@@ -976,11 +930,6 @@ body:has(.fx) {
 }
 
 @media (max-width: 860px) {
-  .fx-nav {
-    gap: 16px;
-    height: 60px;
-  }
-
   .fx-points,
   .fx-section.has-visual,
   .fx-section:not(.has-visual) .fx-section-copy,
@@ -1058,37 +1007,7 @@ body:has(.fx) {
 }
 
 @media (max-width: 520px) {
-  html .fx-nav .get-for:not(.get-for--any) {
-    display: none;
-  }
-
-  html .fx-nav .get-for--any {
-    display: inline-flex;
-  }
-
-  .fx-nav .get-set .get-btn {
-    padding: 0 13px 0 11px;
-    font-size: 13px;
-  }
-
   .fx-foot-bottom {
     flex-direction: column;
-  }
-}
-
-@media (max-width: 380px) {
-  .fx-nav .get-set .get-btn {
-    width: 38px;
-    padding: 0;
-    justify-content: center;
-  }
-
-  .fx-nav .get-set .get-btn .get-label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
   }
 }

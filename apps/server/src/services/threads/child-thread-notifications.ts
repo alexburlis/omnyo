@@ -658,7 +658,7 @@ async function queueChildThreadTurnNotificationBatchItem(
     },
   );
 
-  requestQueuedMessageDispatchAt(deps, row.sendAt);
+  if (row !== null) requestQueuedMessageDispatchAt(deps, row.sendAt);
 }
 
 const QUIET_CHILD_OUTCOME_STATE: Record<

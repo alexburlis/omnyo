@@ -14,6 +14,7 @@ import {
   type ThreadDelta,
   type ProviderRateLimitState,
   sanitizeInheritedChildProcessEnv,
+  buildShellEnvOverrides,
   BRIDGE_INBOUND_REQUEST_METHODS,
   BRIDGE_JSON_RPC_ERRORS,
   BRIDGE_NOTIFICATION_METHODS,
@@ -81,6 +82,12 @@ import {
 } from "../schemas.js";
 import {
   codexSupportsAgentsEnabled,
+  codexWorkspaceProfile,
+  codexPermissionProfileListSchema,
+  codexSandboxConfigSchema,
+  codexSandboxRequirementsSchema,
+  resolveCodexSandboxControl,
+  type CodexSandboxControl,
   resolveCodexInstructionOverrides,
   toCodexDynamicTools,
   toCodexPermissionSettings,
@@ -121,7 +128,10 @@ import {
   SubAgentUnloader,
 } from "./subagent-unload.js";
 
-type OmnyoThreadResumeParams = ThreadResumeParams & { excludeTurns: boolean };
+type OmnyoThreadResumeParams = ThreadResumeParams & {
+  excludeTurns: boolean;
+  permissions?: string | null;
+};
 
 const codexBridgeCommandSchema = z.discriminatedUnion("method", [
   z.object({
@@ -328,6 +338,38 @@ const APP_SERVER_LAUNCH_ENV_NAMES = [
   CODEX_HOME_ENV,
 ] as const;
 
+const APP_SERVER_PROCESS_CONTROL_ENV_NAMES = new Set([
+  "PATH",
+  "PATHEXT",
+  "HOME",
+  "USERPROFILE",
+  "HOMEDRIVE",
+  "HOMEPATH",
+  "SYSTEMROOT",
+  "WINDIR",
+  "COMSPEC",
+  "SHELL",
+  "ENV",
+  "BASH_ENV",
+  "ZDOTDIR",
+  "SHELLOPTS",
+  "BASHOPTS",
+  "ELECTRON_RUN_AS_NODE",
+  "PYTHONHOME",
+  "PYTHONPATH",
+  "RUBYOPT",
+  "RUBYLIB",
+  "PERL5OPT",
+  "PERL5LIB",
+  "JAVA_TOOL_OPTIONS",
+  "JDK_JAVA_OPTIONS",
+  "_JAVA_OPTIONS",
+  "SSLKEYLOGFILE",
+  "REQUESTS_CA_BUNDLE",
+  "GRPC_DEFAULT_SSL_ROOTS_FILE_PATH",
+  "AWS_CA_BUNDLE",
+]);
+
 const CODEX_POOL_MODEL_PROVIDER = "omnyo-account-pool";
 
 const LEGACY_POOL_MODEL_PROVIDER_V1 = "bb-account-pool";
@@ -512,11 +554,28 @@ function appServerLaunchEnv(
 function buildAppServerEnv(
   envVars: Readonly<Record<string, string>> | undefined,
 ): NodeJS.ProcessEnv {
-  return withoutBridgeRuntimeEnv(
-    sanitizeInheritedChildProcessEnv({
-      env: appServerLaunchEnv(envVars),
-    }),
-  );
+  const env = appServerLaunchEnv(envVars);
+
+  for (const [name, value] of Object.entries(buildShellEnvOverrides(envVars))) {
+    const normalized = name.toUpperCase();
+
+    if (
+      APP_SERVER_PROCESS_CONTROL_ENV_NAMES.has(normalized) ||
+      normalized.startsWith("LD_") ||
+      normalized.startsWith("DYLD_") ||
+      normalized.startsWith("CODEX_") ||
+      normalized.startsWith("OPENAI_") ||
+      normalized.startsWith("NODE_") ||
+      normalized.startsWith("SSL_") ||
+      normalized.startsWith("OPENSSL_") ||
+      normalized.startsWith("CURL_") ||
+      normalized.endsWith("_PROXY")
+    )
+      continue;
+    env[name] = value;
+  }
+
+  return withoutBridgeRuntimeEnv(sanitizeInheritedChildProcessEnv({ env }));
 }
 
 function isCodexSpawnFailure(error: unknown): boolean {
@@ -583,6 +642,7 @@ interface CodexBridgeSession {
   environmentHash: string;
   legacyPoolProviderAdmissionV1: LegacyPoolProviderAdmissionV1 | null;
   turnPermissionSettings: ReturnType<typeof toCodexPermissionSettings>;
+  sandboxControl: CodexSandboxControl;
   openCodexTurnIds: Set<string>;
   codexThreadIdsByTurnId: Map<string, string>;
   responseOpenedTurns: Map<string, ResponseOpenedTurn>;
@@ -1380,6 +1440,58 @@ async function initializeChild(
   };
 }
 
+const UNREAD_SANDBOX_CONTROL: CodexSandboxControl = {
+  kind: "sandbox",
+  workspaceNetworkAccess: false,
+};
+
+async function readCodexSandboxControl(
+  connection: CodexAppServerConnection,
+  cwd: string,
+): Promise<CodexSandboxControl> {
+  const [config, requirements] = await Promise.all([
+    connection.request({
+      method: "config/read",
+      params: { cwd },
+      resultSchema: codexSandboxConfigSchema,
+      timeoutMs: CHILD_REQUEST_TIMEOUT_MS,
+    }),
+    connection.request({
+      method: "configRequirements/read",
+      resultSchema: codexSandboxRequirementsSchema,
+      timeoutMs: CHILD_REQUEST_TIMEOUT_MS,
+    }),
+  ]);
+
+  let profiles: z.infer<typeof codexPermissionProfileListSchema> | null = null;
+
+  if (codexWorkspaceProfile({ config, requirements }) !== null) {
+    profiles = { data: [] };
+    const cursors = new Set<string>();
+    let cursor: string | undefined;
+
+    for (;;) {
+      const page = await connection.request({
+        method: "permissionProfile/list",
+        params: { cwd, ...(cursor === undefined ? {} : { cursor }) },
+        resultSchema: codexPermissionProfileListSchema,
+        timeoutMs: CHILD_REQUEST_TIMEOUT_MS,
+      });
+
+      profiles.data.push(...page.data);
+
+      if (page.nextCursor == null) break;
+
+      if (cursors.has(page.nextCursor))
+        throw new Error("Codex permission profile pagination did not advance.");
+      cursors.add(page.nextCursor);
+      cursor = page.nextCursor;
+    }
+  }
+
+  return resolveCodexSandboxControl({ config, requirements, profiles });
+}
+
 const codexThreadIdentityResultSchema = z
   .object({
     thread: z
@@ -1753,7 +1865,9 @@ async function constructThreadSession(
       additionalWorkspaceWriteRoots: decoded.additionalWorkspaceWriteRoots,
       gitWritableRoots: [],
       options: decoded.sessionOptions,
+      sandboxControl: UNREAD_SANDBOX_CONTROL,
     }),
+    sandboxControl: UNREAD_SANDBOX_CONTROL,
     openCodexTurnIds: new Set(),
     codexThreadIdsByTurnId: new Map(),
     responseOpenedTurns: new Map(),
@@ -1930,8 +2044,14 @@ async function constructThreadSession(
       );
     }
 
+    session.sandboxControl = await readCodexSandboxControl(
+      connection,
+      args.cwd,
+    );
+
     const preparedGitRoots = translator.prepareWorkspaceWriteGitRoots({
       supportsAgentsEnabled,
+      sandboxControl: session.sandboxControl,
       command: {
         threadId: args.threadId,
         cwd: args.cwd,
@@ -1953,9 +2073,7 @@ async function constructThreadSession(
       );
 
     const sharedConstructionParams = {
-      approvalPolicy: preparedGitRoots.permissionSettings.approvalPolicy,
-      approvalsReviewer: preparedGitRoots.permissionSettings.approvalsReviewer,
-      sandbox: preparedGitRoots.permissionSettings.sandbox,
+      ...preparedGitRoots.permissionSettings,
       cwd: args.cwd,
       ...instructionOverrides,
       model: decoded.sessionOptions.model ?? undefined,
@@ -2055,6 +2173,7 @@ async function constructThreadSession(
       additionalWorkspaceWriteRoots: decoded.additionalWorkspaceWriteRoots,
       gitWritableRoots: translator.getThreadGitWritableRoots(args.threadId),
       options: decoded.sessionOptions,
+      sandboxControl: session.sandboxControl,
     });
     announceSessionIdentity(session, codexThreadId);
     session.daybreakEnabled = result.thread.daybreakEnabled ?? null;
@@ -2125,6 +2244,7 @@ function registerResumableSession(session: CodexBridgeSession): void {
     environmentHash: session.environmentHash,
     legacyPoolProviderAdmissionV1: session.legacyPoolProviderAdmissionV1,
     turnPermissionSettings: session.turnPermissionSettings,
+    sandboxControl: session.sandboxControl,
     openCodexTurnIds: new Set(),
     codexThreadIdsByTurnId: new Map(),
     responseOpenedTurns: new Map(),
@@ -2894,6 +3014,7 @@ async function handleTurnStart(
             params.threadId,
           ),
           options: decoded.sessionOptions,
+          sandboxControl: session.sandboxControl,
         });
 
         const cyberAccessProgram = await resolveTurnCyberAccessProgram(
@@ -2911,9 +3032,7 @@ async function handleTurnStart(
             params: {
               threadId: codexThreadId,
               input: await resolveCodexSkillInput(session, input),
-              approvalPolicy: permissionSettings.approvalPolicy,
-              approvalsReviewer: permissionSettings.approvalsReviewer,
-              sandboxPolicy: permissionSettings.sandboxPolicy,
+              ...permissionSettings,
               model: decoded.sessionOptions.model ?? undefined,
               serviceTier: toCodexServiceTier(
                 decoded.sessionOptions.serviceTier,
@@ -2990,6 +3109,7 @@ async function handleTurnSteer(
         params.threadId,
       ),
       options: decoded.sessionOptions,
+      sandboxControl: session.sandboxControl,
     });
 
     if (

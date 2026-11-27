@@ -378,8 +378,19 @@ export const inboxWaitingGroupSchema = z.enum(["on-you", "comes-back"]);
 
 export type InboxWaitingGroup = z.infer<typeof inboxWaitingGroupSchema>;
 
+export const inboxWaitingKindSchema = z.enum([
+  "check",
+  "scheduled",
+  "retry",
+  "chat",
+  "event",
+]);
+
+export type InboxWaitingKind = z.infer<typeof inboxWaitingKindSchema>;
+
 export const inboxWaitingRowSchema = z.object({
   group: inboxWaitingGroupSchema,
+  kind: inboxWaitingKindSchema,
   reason: z.string(),
   waitId: z.string().nullable(),
   waitThreadId: z.string().optional(),
@@ -1064,6 +1075,16 @@ function runningEntry(
   });
 }
 
+const WAITING_KIND: Readonly<Record<InboxWaitKind, InboxWaitingKind>> = {
+  check: "check",
+  join: "chat",
+  chat: "chat",
+  date: "scheduled",
+  "send-later": "scheduled",
+  event: "event",
+  report: "event",
+};
+
 function scheduledSends(facts: InboxFamilyFacts): InboxWaitFacts[] {
   return facts.waits.filter((wait) => wait.kind === "send-later");
 }
@@ -1129,8 +1150,20 @@ function waitingRow(
           ? snoozed.question.label
           : (workWait?.waitingLabel ?? "Waiting"));
 
+  const kind: InboxWaitingKind =
+    primaryWait !== null
+      ? WAITING_KIND[primaryWait.kind]
+      : held
+        ? "retry"
+        : host?.hostEpisode
+          ? "event"
+          : snoozed
+            ? "scheduled"
+            : "event";
+
   return {
     group: report ? "on-you" : "comes-back",
+    kind,
     reason,
     waitId: primaryWait?.id ?? null,
     ...(primaryWait === null ? {} : { waitThreadId: primaryWait.threadId }),

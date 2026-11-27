@@ -1,0 +1,57 @@
+{
+  "name": "omnyo-plugin-chief",
+  "private": true,
+  "packageManager": "pnpm@10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e",
+  "version": "0.2.5",
+  "author": {
+    "name": "Omnyo",
+    "url": "https://github.com/alexburlis"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alexburlis/omnyo.git",
+    "directory": "standalone-plugins/chief"
+  },
+  "type": "module",
+  "scripts": {
+    "lint:anti-slop": "oxlint --deny-warnings --format=agent",
+    "lint": "npm run lint:anti-slop",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.ts",
+    "build": "omnyo plugin build ."
+  },
+  "dependencies": {
+    "@radix-ui/react-slot": "^1.3.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@omnyo/plugin-sdk": "file:./vendor/omnyo-plugin-sdk-0.6.54-c8c7b96c4da5.tgz",
+    "@oxlint/plugins": "1.85.0",
+    "@radix-ui/react-dropdown-menu": "^2.1.20",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "better-sqlite3": "^12.0.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "hono": "4.13.11",
+    "oxlint": "1.85.0",
+    "sonner": "^1.7.4",
+    "tailwind-merge": "^3.4.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "omnyo": ">=1.0.131",
+    "omnyoPluginSdk": ">=0.6.54"
+  },
+  "omnyo": {
+    "name": "Chief",
+    "description": "What your chats need from you across all projects, in one sidebar row and page, with suggested answers from your own agent when you say yes.",
+    "branding": {
+      "icon": "Layers"
+    },
+    "server": "./server.ts",
+    "app": "./app.tsx"
+  }
+}

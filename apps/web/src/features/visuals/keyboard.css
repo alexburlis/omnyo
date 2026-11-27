@@ -8,6 +8,7 @@
   --k-row: 2.45em;
   --k-side-row: 2.45em;
   --k-list: 13.4em;
+  --k-row-radius: 0.45em;
 
   font-size: max(7px, 3.95cqw);
   background: var(--fv-chrome);
@@ -266,7 +267,7 @@
   gap: 0.9em;
   min-height: var(--k-row);
   padding: 0.35em 0.6em;
-  border-radius: 0.45em;
+  border-radius: var(--k-row-radius);
   white-space: nowrap;
 }
 
@@ -275,7 +276,7 @@
   content: "";
   position: absolute;
   inset: 0;
-  border-radius: inherit;
+  border-radius: var(--k-row-radius);
   background: var(--k-hover);
   opacity: 0;
 }
@@ -318,14 +319,16 @@
 .fv-keyboard .fv-keys-letter,
 .fv-keyboard .fv-keys-placeholder,
 .fv-keyboard .fv-keys-label,
-.fv-keyboard .fv-keys-row,
+.fv-keyboard .fv-keys-list > .fv-keys-row,
+.fv-keyboard .fv-keys-rest,
 .fv-keyboard .fv-keys-row b,
 .fv-keyboard .fv-keys-row.is-on::before,
 .fv-keyboard .fv-keys-row.is-top::before,
 .fv-keyboard .fv-keys-row.is-top::after,
 .fv-keyboard .fv-keys-palette,
 .fv-keyboard .fv-keys-scrim,
-.fv-keyboard .fv-keys-side p:is(.is-gone, .is-next, .is-below),
+.fv-keyboard .fv-keys-side p.is-gone,
+.fv-keyboard .fv-keys-gap,
 .fv-keyboard .fv-keys-side p.is-next::before,
 .fv-keyboard .fv-keys-toast,
 .fv-keyboard .fv-keys-list,
@@ -412,7 +415,8 @@
   animation-name: fv-keys-query;
 }
 
-.fv-keyboard .fv-keys-row.is-ar {
+.fv-keyboard .fv-keys-list > .fv-keys-row.is-ar,
+.fv-keyboard .fv-keys-rest {
   animation-name: fv-keys-drop-ar;
 }
 
@@ -452,7 +456,7 @@
   animation-name: fv-keys-archived;
 }
 
-.fv-keyboard .fv-keys-side p:is(.is-next, .is-below) {
+.fv-keyboard .fv-keys-gap {
   animation-name: fv-keys-close-gap;
 }
 

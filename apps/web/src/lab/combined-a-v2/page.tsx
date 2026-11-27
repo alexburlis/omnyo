@@ -12,12 +12,13 @@ import {
 
 import { DownloadButton, DownloadPanel } from "../../landing/download";
 import { GitHubButton } from "../../landing/github";
-import type { PublicMacDownload } from "../../landing/site";
+import { REPO_URL, type PublicMacDownload } from "../../landing/site";
+import { SiteNav } from "../../landing/site-chrome";
 import { AppMock, PhoneMock } from "../app-mock/app-mock";
 import { PLATFORM_LINE } from "../open-5/content";
 import { KineticShell, Mark, Terminal, at } from "../open-5/page";
 import { type BeatStepper, startBeatStepper } from "./beat-stepper";
-import { ACT_LABELS, BEATS, STORY_LINES, WINDOWS } from "./content";
+import { BEATS, STORY_LINES, WINDOWS } from "./content";
 import { Devices } from "./devices";
 import { Bento, Questions, Speed } from "./sections";
 import { Switch } from "./switch";
@@ -59,7 +60,7 @@ function Hero({ macDownload }: LandingPageProps) {
         </p>
         <div className="hero-actions hero-in" style={order(4)}>
           <DownloadButton macDownload={macDownload} />
-          <GitHubButton label="Star on GitHub" short="GitHub" />
+          <GitHubButton href={REPO_URL} label="Star on GitHub" short="GitHub" />
         </div>
         <p className="hero-meta hero-in" style={order(5)}>
           {macDownload && (
@@ -230,7 +231,7 @@ function Product() {
         </div>
         <div className={`kinetic-product is-${beat.view}`}>
           <div className="kinetic-product-light" aria-hidden="true" />
-          <div className="kinetic-product-frame">
+          <div className="kinetic-product-frame" data-anchor="product-frame">
             <AppMock view={beat.view} />
           </div>
           <div
@@ -295,8 +296,9 @@ export default function Page({ macDownload }: LandingPageProps) {
   return (
     <KineticShell
       className="lab-combined-kinetic lab-combined-a-v2"
-      labels={ACT_LABELS}
+      header={<SiteNav path="/" macDownload={macDownload} />}
       productStage
+      productMorph
       themed
     >
       <Hero macDownload={macDownload} />

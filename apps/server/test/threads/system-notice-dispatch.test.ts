@@ -613,6 +613,11 @@ describe("notices to a parent mid-turn", () => {
       expect(turnSubmitTargets(harness, parent.id)).toEqual([
         { mode: "auto", expectedTurnId: "turn-host-steer-running" },
       ]);
+      expect(
+        listQueuedThreadCommands(harness, "turn.submit", parent.id)[0],
+      ).toMatchObject({
+        steerSource: "non-user",
+      });
       expect(queuedRows(harness, parent.id)).toEqual([]);
     });
   });

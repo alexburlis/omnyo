@@ -1,0 +1,20 @@
+{
+  "ignorePatterns": [
+    "node_modules/**",
+    "dist/**",
+    "tools/oxlint/anti-slop/**",
+    ".agent/**",
+    ".agents/**",
+    ".claude/**",
+    ".codex/**",
+    ".omnyo/**",
+    ".continue/**",
+    ".cursor/**",
+    ".gemini/**",
+    ".opencode/**",
+    ".pi/**",
+    ".roo/**",
+    ".windsurf/**",
+    "generated/**"
+  ]
+}
