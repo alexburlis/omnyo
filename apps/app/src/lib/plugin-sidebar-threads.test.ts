@@ -214,7 +214,7 @@ describe("toPluginSidebarThread", () => {
   });
 
   it.each(["turn", "queue", "workflow", "agent", "command", "plugin"] as const)(
-    "holds unread attention until %s work finishes, including work in launched chats",
+    "keeps unread attention visible during %s work, including work in launched chats",
     (kind) => {
       const thread = makeThread({
         lastReadAt: 1,
@@ -238,7 +238,7 @@ describe("toPluginSidebarThread", () => {
 
       expect(toPluginSidebarThread(thread)).toMatchObject({
         indicator: "runtime",
-        isUnread: false,
+        isUnread: true,
         lastReadAt: 1,
         latestAttentionAt: 9,
       });
@@ -253,6 +253,9 @@ describe("toPluginSidebarThread", () => {
           }),
         }),
       ).toMatchObject({ indicator: "ready-to-archive", isUnread: true });
+      expect(toPluginSidebarThread({ ...thread, lastReadAt: 9 }).isUnread).toBe(
+        false,
+      );
     },
   );
 

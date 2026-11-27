@@ -669,11 +669,6 @@ function ThreadRowComponent({
 
   const rowIsWorking = threadStatus.work?.primary.label === "working";
 
-  const unread =
-    !splitIndicatorIsWorking &&
-    !childActivity.summaries.some((work) => work.activity.length > 0) &&
-    thread.isUnread;
-
   const splitIndicatorLabel = trailingIndicatorResolution.accessibleLabel
     ? `${labelTitle} — open in split; ${trailingIndicatorResolution.accessibleLabel}`
     : `${labelTitle} — open in split`;
@@ -951,7 +946,7 @@ function ThreadRowComponent({
                 "omnyo-thread-title",
                 crossProjectLabel !== null && "min-w-0 truncate",
                 hasChildren && "font-medium",
-                lifecycle !== "shelved" && unread && "font-semibold",
+                lifecycle !== "shelved" && thread.isUnread && "font-semibold",
               )}
               title={labelTitle}
               onDoubleClick={startTitleEditing}
@@ -968,12 +963,12 @@ function ThreadRowComponent({
             </span>
           ) : null}
         </span>
-        {unread ? (
+        {thread.isUnread ? (
           <span
             data-sidebar-thread-unread=""
             role="img"
             aria-label="Unread"
-            className="sr-only"
+            className="pointer-events-none size-1.5 shrink-0 rounded-full bg-attention"
           />
         ) : null}
         {crossProjectLabel !== null ? (

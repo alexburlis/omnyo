@@ -7,10 +7,14 @@ import {
   threadWaits,
   threads,
 } from "@omnyo/db";
-import { threadAttentionResultSchema } from "@omnyo/domain";
+import {
+  changedMessageSchema,
+  threadAttentionResultSchema,
+} from "@omnyo/domain";
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { runInboxSweep } from "../../src/services/inbox/sweep.js";
+import { createMockHubSocket } from "../helpers/mock-hub-socket.js";
 import { withTestHarness } from "../helpers/test-app.js";
 import { seedThread } from "../helpers/seed.js";
 import {
@@ -161,6 +165,44 @@ describe("inbox turns on the real server", () => {
 
       expect(receipts).toHaveLength(1);
       expect(receipts[0]).toMatchObject({ cause: "result", handledAt: null });
+
+      await ownerSend(world, chat.id, "What is the current status?");
+      const followup = await startSubmittedTurn(world, chat.id);
+      const socket = createMockHubSocket();
+      harness.deps.hub.subscribe(socket, { kind: "thread-list" });
+
+      await endTurn(world, followup, "completed");
+
+      const updated = getThread(harness.db, chat.id);
+      expect(updated?.latestAttentionAt).toBeGreaterThan(
+        updated?.lastReadAt ?? 0,
+      );
+
+      const completion = socket.messages
+        .map((message) => changedMessageSchema.safeParse(JSON.parse(message)))
+        .flatMap((message) => (message.success ? [message.data] : []))
+        .reverse()
+        .find(
+          (message) =>
+            message.entity === "thread" &&
+            message.id === chat.id &&
+            message.metadata?.statusChange?.status === "idle",
+        );
+
+      expect(completion).toMatchObject({
+        metadata: {
+          statusChange: { latestAttentionAt: updated?.latestAttentionAt },
+        },
+      });
+      expect(entryOf(await snapshot(world), chat.id)?.view).toBe("waiting");
+
+      const read = await ownerRequest(world, `/threads/${chat.id}/read`, {});
+      expect(read.status).toBe(200);
+      const afterRead = getThread(harness.db, chat.id);
+      expect(afterRead?.lastReadAt).toBeGreaterThanOrEqual(
+        updated?.latestAttentionAt ?? 0,
+      );
+      expect(afterRead?.latestAttentionAt).toBe(updated?.latestAttentionAt);
     });
   });
 

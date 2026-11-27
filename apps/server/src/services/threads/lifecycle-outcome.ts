@@ -153,15 +153,26 @@ function applyClassifiedLifecycleEventInTransaction(
         }).state
       : null;
 
+  const inboxChanged =
+    maintenance === null && options.inbox === "record"
+      ? applyInboxLifecycle(db, { before, event: args, outcome, hint })
+      : [];
+
+  if (outcome.applied && inboxChanged.length > 0) {
+    const thread = getThread(db, args.threadId);
+
+    if (thread === null)
+      throw new Error("Thread disappeared while recording its run outcome");
+
+    outcome.thread = thread;
+  }
+
   return {
     before,
     maintenance,
     maintenanceState,
     outcome,
-    inboxChanged:
-      maintenance === null && options.inbox === "record"
-        ? applyInboxLifecycle(db, { before, event: args, outcome, hint })
-        : [],
+    inboxChanged,
   };
 }
 

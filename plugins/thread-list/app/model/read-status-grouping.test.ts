@@ -27,7 +27,7 @@ function thread(id: string, overrides: SidebarThreadOverrides = {}) {
 
 describe("createThreadUnreadPredicate", () => {
   it.each([false, true])(
-    "keeps working chats out of unread grouping with a held unread state=%s",
+    "keeps working chats in unread grouping with a held unread state=%s",
     (held) => {
       const isUnread = createThreadUnreadPredicate(
         held ? { threadId: "working", isUnread: true } : null,
@@ -38,7 +38,7 @@ describe("createThreadUnreadPredicate", () => {
         experimental_work: makeSidebarWork("working"),
       });
 
-      expect(isUnread(working)).toBe(false);
+      expect(isUnread(working)).toBe(true);
       expect(
         isUnread({ ...working, experimental_work: makeSidebarWork("open") }),
       ).toBe(true);

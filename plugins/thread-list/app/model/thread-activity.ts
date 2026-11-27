@@ -161,10 +161,10 @@ export function getCollapsedChildActivity(
     ),
     summaries,
     unread: threads.some(
-      (thread) => isUnreadThread(thread) && thread.status !== "error",
+      (thread) => thread.isUnread && thread.status !== "error",
     ),
     unreadError: threads.some(
-      (thread) => isUnreadThread(thread) && thread.status === "error",
+      (thread) => thread.isUnread && thread.status === "error",
     ),
   };
 }
@@ -177,15 +177,4 @@ function parentRowChildWork(work: WorkSummary | null): (WorkSummary | null)[] {
   return [
     work.optionalInput.length === 0 ? work : { ...work, optionalInput: [] },
   ];
-}
-
-export function isUnreadThread(
-  thread: Pick<PluginSidebarThread, "isUnread" | "experimental_work">,
-): boolean {
-  return (
-    thread.isUnread &&
-    !hasThreadListWorkingActivity(
-      threadListIndicatorStateForThread(thread, false),
-    )
-  );
 }

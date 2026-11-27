@@ -1,6 +1,5 @@
 import type { SidebarThread } from "./sidebar-thread.js";
 import type { ThreadComparator } from "./project-thread-groups.js";
-import { isUnreadThread } from "./thread-activity.js";
 
 export interface HeldReadStatus {
   threadId: string;
@@ -13,11 +12,9 @@ export function createThreadUnreadPredicate(
   held: HeldReadStatus | null,
 ): ThreadUnreadPredicate {
   return (thread) =>
-    isUnreadThread(
-      held !== null && thread.id === held.threadId
-        ? { ...thread, isUnread: held.isUnread }
-        : thread,
-    );
+    held !== null && thread.id === held.threadId
+      ? held.isUnread
+      : thread.isUnread;
 }
 
 export function groupComparatorByReadStatus(

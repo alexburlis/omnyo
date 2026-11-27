@@ -7,6 +7,7 @@ import {
 } from "react";
 import { PluginSidebarEntry } from "@/components/plugin/PluginSidebarEntry";
 import { cn } from "@omnyo/shared-ui/lib/utils";
+import { isThreadRead } from "@omnyo/client-core";
 import {
   THREAD_JUMP_APP_COMMAND_IDS,
   type ThreadListEntry,
@@ -22,7 +23,6 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar.js";
 import { ThreadActionSurfaceVisibility } from "@/lib/thread-actions/thread-action-registry";
-import { isThreadUnreadForAttention } from "@/lib/thread-unread-attention";
 import { PluginThreadList } from "./PluginThreadList";
 import { SidebarUnreadNavigation } from "./SidebarUnreadNavigation";
 import { useSidebarNavigationThreadSelection } from "@/hooks/queries/sidebar-navigation-query";
@@ -77,7 +77,7 @@ function unreadThreadIds(threads: ThreadListEntry[]): ReadonlySet<string> {
   for (const thread of threads) {
     if (thread.archivedAt !== null || thread.visibility === "hidden") continue;
 
-    if (isThreadUnreadForAttention(thread)) ids.add(thread.id);
+    if (!isThreadRead(thread)) ids.add(thread.id);
   }
 
   return ids;

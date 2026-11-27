@@ -7,6 +7,7 @@ import {
 import type { PluginSidebarThread } from "@omnyo/plugin-sdk";
 import { threadIndicatorLabel } from "./thread-indicator-label";
 import {
+  isThreadRead,
   resolveThreadListIndicator,
   threadListIndicatorStateForThread,
 } from "@omnyo/client-core";
@@ -17,7 +18,6 @@ import {
 } from "@/components/thread/ThreadTitleMentions";
 import { getThreadDisplayTitle } from "./thread-title";
 import { getThreadRoutePath } from "./route-paths";
-import { isThreadUnreadForAttention } from "./thread-unread-attention";
 import {
   pendingChatHeldMessage,
   pendingChatPreview,
@@ -214,7 +214,7 @@ export function toPluginSidebarThread(
     },
     indicator,
     indicatorLabel: threadIndicatorLabel(indicator),
-    isUnread: isThreadUnreadForAttention(entry),
+    isUnread: !isThreadRead(entry),
     isPinned: entry.pinnedAt !== null,
     pinnedAt: entry.pinnedAt,
     pinSortKey: entry.pinSortKey,

@@ -1508,7 +1508,7 @@ describe("ThreadRow", () => {
     },
   );
 
-  it("suppresses unreadness beside Working for an active child", () => {
+  it("shows the yellow unread indicator beside Working for an active child", () => {
     renderThreadRow({
       thread: createThread({
         status: "active",
@@ -1518,10 +1518,12 @@ describe("ThreadRow", () => {
       }),
     });
     expect(renderedIndicators()).toEqual(["runtime"]);
-    expect(screen.queryByLabelText("Unread")).toBeNull();
+    expect(screen.getByRole("img", { name: "Unread" }).classList).toContain(
+      "bg-attention",
+    );
   });
 
-  it("suppresses family unreadness while collapsed descendants work", () => {
+  it("keeps a chat unread while collapsed descendants work", () => {
     renderThreadRow({
       thread: createThread({ isUnread: true }),
       options: {
@@ -1537,10 +1539,10 @@ describe("ThreadRow", () => {
       },
     });
     expect(renderedIndicators()).toEqual(["runtime"]);
-    expect(screen.queryByLabelText("Unread")).toBeNull();
+    expect(screen.getByRole("img", { name: "Unread" })).toBeTruthy();
   });
 
-  it("keeps the parent unread dot hidden while expanded descendants work", () => {
+  it("keeps a chat unread while expanded descendants work", () => {
     renderThreadRow({
       thread: createThread({ isUnread: true }),
       options: {
@@ -1552,7 +1554,7 @@ describe("ThreadRow", () => {
         childActivity: nestedActivity(makeSidebarWork("working")),
       },
     });
-    expect(screen.queryByLabelText("Unread")).toBeNull();
+    expect(screen.getByRole("img", { name: "Unread" })).toBeTruthy();
   });
 
   it("keeps child work visible in the parent spinner when expanded", () => {
@@ -1590,7 +1592,7 @@ describe("ThreadRow", () => {
     expect(renderedIndicators()).toEqual(["open"]);
   });
 
-  it("restores unreadness when working finishes", () => {
+  it("keeps unreadness through working and waiting until the chat is read", () => {
     const thread = createThread({
       status: "active",
       runtimeStatus: "active",
@@ -1600,16 +1602,21 @@ describe("ThreadRow", () => {
 
     const { rerenderThreadRow } = renderThreadRow({ thread });
     expect(renderedIndicators()).toEqual(["runtime"]);
-    expect(screen.queryByLabelText("Unread")).toBeNull();
-    rerenderThreadRow({
+    expect(screen.getByRole("img", { name: "Unread" })).toBeTruthy();
+
+    const waiting = {
       ...thread,
       status: "idle",
       runtimeStatus: "idle",
-      experimental_work: makeSidebarWork("open"),
-      isUnread: true,
-    });
-    expect(renderedIndicators()).toEqual(["open"]);
-    expect(screen.getByLabelText("Unread")).not.toBeNull();
+      experimental_work: makeSidebarWork("waiting"),
+    } satisfies PluginSidebarThread;
+
+    rerenderThreadRow(waiting);
+    expect(renderedIndicators()).toEqual(["callback-waiting"]);
+    expect(screen.getByRole("img", { name: "Unread" })).toBeTruthy();
+    rerenderThreadRow({ ...waiting, isUnread: false });
+    expect(renderedIndicators()).toEqual(["callback-waiting"]);
+    expect(screen.queryByRole("img", { name: "Unread" })).toBeNull();
   });
 
   it.each([
