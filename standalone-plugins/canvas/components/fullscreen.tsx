@@ -1,25 +1,22 @@
-import { useEffect, useRef } from "react";
-import { BoardView } from "./panel";
-import { closeFullScreen, useFullScreenBoard } from "./fullscreen-state";
-import { useIsCompactViewport } from "../ui/components/ui/hooks/use-compact-viewport";
+import { useEffect, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { experimental_usePluginId } from "@omnyo/plugin-sdk/app";
+import { closeFullScreen } from "./fullscreen-state";
 
 const keepsEscape =
   ".cnv-workbench, input, textarea, select, [contenteditable]:not([contenteditable='false'])";
 
-export function CanvasFullScreen() {
-  const board = useFullScreenBoard();
-  const compact = useIsCompactViewport();
+export function CanvasFullScreen({
+  opener,
+  children,
+}: {
+  opener: HTMLElement | null;
+  children: ReactNode;
+}) {
+  const pluginId = experimental_usePluginId();
   const dialog = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (board === null) return;
-
-    if (!compact) {
-      closeFullScreen();
-
-      return;
-    }
-
     dialog.current?.focus({ preventScroll: true });
 
     function key(event: KeyboardEvent) {
@@ -34,32 +31,27 @@ export function CanvasFullScreen() {
     return () => {
       window.removeEventListener("keydown", key);
 
-      const opener = board.opener?.isConnected
-        ? board.opener
+      const target = opener?.isConnected
+        ? opener
         : document.querySelector<HTMLElement>(".cnv-header-button");
 
-      opener?.focus({ preventScroll: true });
+      target?.focus({ preventScroll: true });
     };
-  }, [board, compact]);
+  }, [opener]);
 
-  if (board === null || !compact) return null;
-
-  return (
+  return createPortal(
     <div
       ref={dialog}
+      data-omnyo-plugin-root=""
+      data-omnyo-plugin={pluginId}
       className="cnv-fullscreen"
       role="dialog"
       aria-modal="true"
       aria-label="Canvas"
       tabIndex={-1}
     >
-      <BoardView
-        key={board.threadId}
-        threadId={board.threadId}
-        composer={board.composer}
-        compact={false}
-        fullScreen
-      />
-    </div>
+      {children}
+    </div>,
+    document.body,
   );
 }

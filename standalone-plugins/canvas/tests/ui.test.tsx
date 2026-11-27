@@ -21,7 +21,6 @@ import {
 import { boardAddressKey } from "../board-contract";
 import { CanvasHeaderButton } from "../components/header";
 import { CanvasModeMenu, modeMenuItem } from "../components/mode-toggle";
-import { CanvasFullScreen } from "../components/fullscreen";
 import { closeFullScreen } from "../components/fullscreen-state";
 import { sourceInputSchema } from "../source-contract";
 import { RenderRegistry } from "../lib/inspection";
@@ -430,7 +429,6 @@ describe("side panel", () => {
       composer: threadComposer("thr_full"),
     };
 
-    renderSlot({ component: CanvasFullScreen }, {}, options);
     renderSlot({ component: CanvasPanel }, { threadId: "thr_full", params: null }, options);
 
     await screen.findByRole("region", { name: "Decide" });
@@ -472,7 +470,6 @@ describe("side panel", () => {
       composer: threadComposer("thr_mobile_full"),
     };
 
-    renderSlot({ component: CanvasFullScreen }, {}, options);
     renderSlot({ component: CanvasPanel }, { threadId: "thr_mobile_full", params: null }, options);
 
     expect(await screen.findByRole("region", { name: "Decide" })).toBeTruthy();

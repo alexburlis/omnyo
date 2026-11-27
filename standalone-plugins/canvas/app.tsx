@@ -2,7 +2,6 @@ import { definePluginApp } from "@omnyo/plugin-sdk/app";
 import { panelAction } from "./components/thread-panel-action";
 import { CanvasHeaderButton, compactCanvasAction } from "./components/header";
 import { modeMenuItem, modePopup } from "./components/mode-toggle";
-import { CanvasFullScreen } from "./components/fullscreen";
 import { CanvasPanel } from "./components/panel";
 import { ProjectCanvasPage } from "./components/project";
 import { ProjectCanvasHeader } from "./components/project-header";
@@ -44,7 +43,6 @@ export default definePluginApp((app) => {
     title: panelAction.title,
     component: CanvasHeaderButton,
   });
-  app.slots.experimental_appOverlay({ id: "canvas-full-screen", component: CanvasFullScreen });
   app.composer.customize({
     id: "canvas-mode",
     scopes: ["new-thread", "thread"],

@@ -27,6 +27,7 @@ import { AddBoardToProject } from "./project-adopt";
 import { canvasNavigationTarget } from "../lib/frame-document";
 import { useBoard, useCanvasState, type CanvasState } from "./thread-data";
 import { closeFullScreen, openFullScreen, useFullScreenBoard } from "./fullscreen-state";
+import { CanvasFullScreen } from "./fullscreen";
 import { addModeMention } from "./mode-mention";
 import { useIsCompactViewport } from "../ui/components/ui/hooks/use-compact-viewport";
 import { projectPath } from "./project-route";
@@ -47,15 +48,29 @@ export function CanvasPanel({ threadId }: PluginThreadPanelProps) {
   const compact = useIsCompactViewport();
   const fullScreen = useFullScreenBoard();
 
+  useEffect(() => {
+    if (!compact && fullScreen?.threadId === threadId) closeFullScreen();
+  }, [compact, fullScreen, threadId]);
+
   if (state === "on" && compact && fullScreen?.threadId === threadId)
     return (
-      <div className="cnv-notice">
-        <Icon name="GridView" className="cnv-notice-icon" aria-hidden />
-        <h3>Canvas is open full screen</h3>
-        <button type="button" className="cnv-button" onClick={closeFullScreen}>
-          Back to side panel
-        </button>
-      </div>
+      <>
+        <div className="cnv-notice">
+          <Icon name="GridView" className="cnv-notice-icon" aria-hidden />
+          <h3>Canvas is open full screen</h3>
+          <button type="button" className="cnv-button" onClick={closeFullScreen}>
+            Back to side panel
+          </button>
+        </div>
+        <CanvasFullScreen opener={fullScreen.opener}>
+          <BoardView
+            threadId={threadId}
+            composer={fullScreen.composer}
+            compact={false}
+            fullScreen
+          />
+        </CanvasFullScreen>
+      </>
     );
 
   if (state === "on")
