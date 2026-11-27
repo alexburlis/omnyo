@@ -1,6 +1,6 @@
 {
   "name": "@omnyo/desktop",
-  "version": "1.0.194",
+  "version": "1.0.195",
   "private": true,
   "desktopProfileAdoptionProtocol": 2,
   "description": "macOS, Linux, and Windows Electron shell for Omnyo",
