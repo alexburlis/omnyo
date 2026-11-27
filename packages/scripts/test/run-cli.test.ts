@@ -18,6 +18,8 @@ afterEach(() => {
 describe("run-cli", () => {
   it("runs the source CLI in development mode without a watched build", () => {
     vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("OMNYO_SERVER_URL", undefined);
+    vi.stubEnv("OMNYO_HOST_DAEMON_PORT", undefined);
 
     const execution = resolveCliExecution(["thread", "list"]);
 

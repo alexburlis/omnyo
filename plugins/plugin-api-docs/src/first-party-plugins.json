@@ -6,7 +6,7 @@
   },
   {
     "id": "ask-user-question",
-    "name": "Ask User Question",
+    "name": "Needs You",
     "icon": "MessageQuestion"
   },
   {
@@ -141,7 +141,7 @@
   },
   {
     "id": "workflows",
-    "name": "Workflows",
+    "name": "Workflow scripts",
     "icon": "Workflow"
   },
   {

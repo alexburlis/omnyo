@@ -66,7 +66,9 @@ describe("registry components at fork time", () => {
 
     expect(items.map((item) => item.name)).toEqual([
       "button",
+      "focus-ring",
       "motion",
+      "use-media-query",
       "utils",
     ]);
   });
