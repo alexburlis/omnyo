@@ -16,6 +16,7 @@ import {
 import { GroupedScreen } from "./GroupedScreen";
 import { HapticsSettingsRow } from "./HapticsSettingsRow";
 import { LinkRow } from "./LinkRow";
+import { PrivacyPolicyRow } from "./PrivacyPolicyRow";
 import { settingsSectionHref } from "@/screens/shell/hrefs";
 import { HeaderIconButton, SettingsSection } from "./SettingsRows";
 import { useBadgeColors } from "./settings-badges";
@@ -224,6 +225,7 @@ export function DeviceSettingsScreen() {
             }
             testID="device-version"
           />
+          <PrivacyPolicyRow />
         </SettingsSection>
       </GroupedScreen>
       {servers.sheet}

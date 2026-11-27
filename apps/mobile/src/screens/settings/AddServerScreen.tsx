@@ -22,6 +22,7 @@ import {
 } from "../shell/hrefs";
 import { dismissToShell } from "../shell/dismiss-to-shell";
 import { GroupedScreen } from "./GroupedScreen";
+import { PrivacyPolicyRow } from "./PrivacyPolicyRow";
 import { useBadgeColors } from "./settings-badges";
 import { SettingsSection } from "./SettingsRows";
 
@@ -238,6 +239,9 @@ export function AddServerScreen() {
             </Text>
           ) : null}
         </View>
+        <SettingsSection>
+          <PrivacyPolicyRow />
+        </SettingsSection>
       </GroupedScreen>
     </>
   );
