@@ -30,7 +30,6 @@
     "omnyo-plugin-pdf-preview": "workspace:*",
     "omnyo-plugin-plugin-api-docs": "workspace:*",
     "omnyo-plugin-plugin-api-tester": "workspace:*",
-    "omnyo-plugin-provider-acp": "workspace:*",
     "omnyo-plugin-omnyo--provider-acp-next": "workspace:*",
     "omnyo-plugin-provider-claude-code": "workspace:*",
     "omnyo-plugin-provider-codex": "workspace:*",

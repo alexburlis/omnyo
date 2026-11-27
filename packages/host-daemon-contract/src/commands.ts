@@ -659,6 +659,13 @@ const hostMovePathCommandSchema = z
   })
   .strict();
 
+const hostDeleteThreadStorageCommandSchema = z
+  .object({
+    type: z.literal("host.delete_thread_storage"),
+    threadId: z.string().min(1),
+  })
+  .strict();
+
 const hostRemovePathCommandSchema = z
   .object({
     type: z.literal("host.remove_path"),
@@ -2108,6 +2115,15 @@ export const hostDaemonCommandRegistry = {
   "host.move_path": defineHostDaemonCommandDescriptor({
     type: "host.move_path",
     schema: hostMovePathCommandSchema,
+    resultSchema: hostPathMutationResultSchema,
+    transport: "onlineRpc",
+    retryable: false,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "host.delete_thread_storage": defineHostDaemonCommandDescriptor({
+    type: "host.delete_thread_storage",
+    schema: hostDeleteThreadStorageCommandSchema,
     resultSchema: hostPathMutationResultSchema,
     transport: "onlineRpc",
     retryable: false,

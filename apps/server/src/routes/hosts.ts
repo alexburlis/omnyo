@@ -584,7 +584,7 @@ export function registerHostRoutes(
     assertUsableHostId(deps, { hostId });
 
     const configuration = resolveOnboardingAcpDetection(
-      (["omnyo--provider-acp-next", "provider-acp"] as const).flatMap((id) => {
+      (["omnyo--provider-acp-next"] as const).flatMap((id) => {
         const plugin = getInstalledPlugin(deps.db, id);
 
         return plugin === undefined

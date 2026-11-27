@@ -1,15 +1,6 @@
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   compareParity,
   type ParityAllowlistEntry,
@@ -27,7 +18,6 @@ import {
   recordedCellInputs,
   replayCell,
   type RowCountsEntry,
-  missingBridgeModule,
 } from "./index.js";
 
 const cells = listRecordedCells(RECORDINGS_ROOT);
@@ -249,48 +239,6 @@ describe("allowlist", () => {
     );
 
     expect(stale.staleAllowlist).toEqual([entry]);
-  });
-});
-
-describe("old-leg pre-check", () => {
-  const created: string[] = [];
-  afterEach(() => {
-    for (const dir of created.splice(0))
-      rmSync(dir, { recursive: true, force: true });
-  });
-
-  function fakeCheckout(files: readonly string[]): string {
-    const root = mkdtempSync(join(tmpdir(), "parity-old-leg-"));
-    created.push(root);
-
-    for (const file of files) {
-      mkdirSync(join(root, file, ".."), { recursive: true });
-      writeFileSync(join(root, file), "");
-    }
-
-    return root;
-  }
-
-  it("admits an old checkout that only has the legacy bridge path the launch would resolve", () => {
-    const root = fakeCheckout(["plugins/provider-acp/src/bridge/bridge.ts"]);
-    expect(missingBridgeModule(root, "acp-cursor")).toBeNull();
-  });
-
-  it("reports the current path when neither it nor a legacy path exists", () => {
-    const root = fakeCheckout([]);
-    expect(missingBridgeModule(root, "acp-cursor")).toBe(
-      "plugins/provider-acp/src/host.ts",
-    );
-  });
-
-  it("keeps skipping pi on a checkout whose bridge ran inside the daemon bundle", () => {
-    const root = fakeCheckout([
-      "packages/agent-runtime/src/pi/bridge/bridge.ts",
-    ]);
-
-    expect(missingBridgeModule(root, "pi")).toBe(
-      "plugins/provider-pi/src/host.ts",
-    );
   });
 });
 

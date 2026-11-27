@@ -27,7 +27,10 @@ const PLUGIN_LOAD_INTERVAL_MS = 1_000;
 
 const HOST_PLUGIN_WORKER_TIMEOUT_MS = 60_000;
 
-const EXPECTED_DISABLED_BUILTIN_PLUGINS = ["provider-acp", "resources"];
+const EXPECTED_DISABLED_BUILTIN_PLUGINS = [
+  "omnyo--provider-acp-next",
+  "resources",
+];
 
 const EXPECTED_RUNNING_BUILTIN_PLUGINS = [
   "automations",
@@ -772,12 +775,12 @@ async function smokeProviderBridgeBundles(packageDir) {
       "server",
       "dist",
       "builtin-plugins",
-      "provider-acp",
+      "provider-acp-next",
       "dist",
       "host.js",
     ),
     packageDir,
-    pluginId: "provider-acp",
+    pluginId: "omnyo--provider-acp-next",
     label: "ACP host-artifact bridge model/list",
   });
   await smokeBridgeModelList({

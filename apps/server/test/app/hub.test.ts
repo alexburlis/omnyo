@@ -314,6 +314,28 @@ describe("NotificationHub", () => {
     }
   });
 
+  it("rejects a bound RPC without sending to a replacement session", async () => {
+    const hub = new NotificationHub();
+    const socket = createMockHubSocket();
+    hub.registerDaemon("replacement", "host-bound", socket);
+    await expect(
+      hub.requestHostOnlineRpc({
+        hostId: "host-bound",
+        expectedSessionId: "inventoried",
+        timeoutMs: 100,
+        message: {
+          type: "host-rpc.request",
+          requestId: "bound-delete",
+          command: {
+            type: "host.delete_thread_storage",
+            threadId: "thr_abcdefghij",
+          },
+        },
+      }),
+    ).rejects.toThrow();
+    expect(socket.messages).toEqual([]);
+  });
+
   it("sends host RPC requests to the active daemon and resolves responses", async () => {
     const hub = new NotificationHub();
     const socket = createMockHubSocket();
@@ -321,6 +343,7 @@ describe("NotificationHub", () => {
 
     const wait = hub.requestHostOnlineRpc({
       hostId: "host-1",
+      expectedSessionId: "session-1",
       timeoutMs: 1_000,
       message: {
         type: "host-rpc.request",

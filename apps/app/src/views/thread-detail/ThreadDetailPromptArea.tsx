@@ -60,7 +60,6 @@ import {
 } from "@/components/promptbox/follow-up-placeholder";
 import type {
   PermissionMode,
-  ReasoningLevel,
   ServiceTier,
   PendingInteraction,
   PromptInput,
@@ -84,12 +83,10 @@ import type {
 import type { ChildThreadPendingAttention } from "@/hooks/queries/child-thread-pending-interactions";
 import {
   readExecutionSelection,
-  readExecutionTuple,
-  resolveComposerSelectionDeadline,
+  applyComposerExecutionSelection,
   useCommittedComposerState,
-  waitForSettledComposerState,
-  waitUntilComposerStateSettled,
-  type CommittedComposerState,
+  useQueuedComposerSelection,
+  type CommittedExecutionSelectionState,
 } from "@/components/promptbox/composer-selection-settle";
 import { ThreadPendingInteractionBanners } from "@/components/thread/pending-interactions/ThreadPendingInteractionBanner";
 import { blocksTurn } from "@/components/thread/pending-interactions/interaction-request";
@@ -343,22 +340,9 @@ function buildInlineDraftComposer(options: InlineDraftComposerOptions) {
   );
 }
 
-interface ThreadComposerSelectionState extends CommittedComposerState {
-  selectedProviderId: string;
-  selectedThreadModel: string;
-  reasoningLevel: ReasoningLevel;
-  serviceTier: ServiceTier | undefined;
-  supportsServiceTier: boolean;
-  permissionMode: PermissionMode;
-  providerIds: readonly string[];
+interface ThreadComposerSelectionState extends CommittedExecutionSelectionState {
   isHandoffSelection: boolean;
-  changeProvider: (providerId: string) => void;
-  changeModel: (model: string) => void;
   handoffSelect: (selection: ModelPickerSelection) => void;
-  changeReasoning: (level: ReasoningLevel) => void;
-  changeServiceTier: (tier: ServiceTier | undefined) => void;
-  changeExecution: (selection: ModelPickerSelection) => void;
-  changePermissionMode: (mode: PermissionMode) => void;
 }
 
 type InlineQueuedMessageEditSession = Pick<
@@ -1225,103 +1209,40 @@ export function ThreadDetailPromptArea({
     composerSelection,
   );
 
-  const pendingSelectionRef = useRef<Promise<unknown>>(Promise.resolve());
-
   const applySelection = useCallback(
-    async (
-      selection: ExperimentalComposerSelection,
-    ): Promise<ExperimentalComposerSelection> => {
-      const deadline = resolveComposerSelectionDeadline();
-      const { observer } = selectionState;
-      let state = await observer.waitUntil(() => true, deadline);
+    async (selection: ExperimentalComposerSelection, deadline: number) => {
+      const state = await selectionState.observer.waitUntil(
+        () => true,
+        deadline,
+      );
 
-      const settle = async (requireSettled: boolean) => {
-        state = await waitForSettledComposerState(
-          selectionState,
-          deadline,
-          requireSettled,
-        );
-      };
+      const applied = await applyComposerExecutionSelection(
+        selectionState,
+        state,
+        deadline,
+        selection,
+        {
+          changeModel(current, model) {
+            if (current.isHandoffSelection) {
+              current.handoffSelect({
+                providerId: current.selectedProviderId,
+                model,
+                reasoningLevel:
+                  selection.reasoningLevel ?? current.reasoningLevel,
+              });
+            } else {
+              current.changeModel(model);
+            }
+          },
+        },
+      );
 
-      const ensureSettled = async () => {
-        if (state.isSettled) return;
-        state = await waitUntilComposerStateSettled(selectionState, deadline);
-      };
-
-      if (selection.providerId !== undefined) await ensureSettled();
-
-      const executionTuple = readExecutionTuple(selection, state.providerIds);
-
-      if (executionTuple !== null) {
-        state.changeExecution(executionTuple);
-        await settle(true);
-      } else {
-        if (
-          selection.providerId !== undefined &&
-          selection.providerId !== state.selectedProviderId &&
-          state.providerIds.includes(selection.providerId)
-        ) {
-          state.changeProvider(selection.providerId);
-          await settle(true);
-        }
-
-        const providerMatches =
-          selection.providerId === undefined ||
-          state.selectedProviderId === selection.providerId;
-
-        if (providerMatches && selection.model !== undefined) {
-          await ensureSettled();
-
-          if (state.isHandoffSelection) {
-            state.handoffSelect({
-              providerId: state.selectedProviderId,
-              model: selection.model,
-              reasoningLevel: selection.reasoningLevel ?? state.reasoningLevel,
-            });
-          } else {
-            state.changeModel(selection.model);
-          }
-
-          await settle(false);
-        }
-
-        if (providerMatches && selection.reasoningLevel !== undefined) {
-          await ensureSettled();
-          state.changeReasoning(selection.reasoningLevel);
-          await settle(false);
-        }
-
-        if (selection.serviceTier !== undefined && state.supportsServiceTier) {
-          state.changeServiceTier(selection.serviceTier);
-          await settle(false);
-        }
-      }
-
-      if (selection.permissionMode !== undefined) {
-        state.changePermissionMode(selection.permissionMode);
-        await settle(false);
-      }
-
-      await settle(true);
-
-      return readExecutionSelection(state);
+      return readExecutionSelection(applied);
     },
     [selectionState],
   );
 
-  const setSelection = useCallback(
-    (selection: ExperimentalComposerSelection) => {
-      const run = pendingSelectionRef.current.then(
-        () => applySelection(selection),
-        () => applySelection(selection),
-      );
-
-      pendingSelectionRef.current = run;
-
-      return run;
-    },
-    [applySelection],
-  );
+  const setSelection = useQueuedComposerSelection(applySelection);
 
   const hasPromptDraftInput =
     currentPromptDraftInput.length > 0 || bottomPendingUploads.length > 0;

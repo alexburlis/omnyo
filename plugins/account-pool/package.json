@@ -15,7 +15,7 @@
   },
   "engines": {
     "omnyo": ">=1.0.129",
-    "omnyoPluginSdk": ">=0.4.102 >=0.6.44"
+    "omnyoPluginSdk": ">=0.4.102 >=0.6.59"
   },
   "omnyo": {
     "name": "Account Pooler [EXPERIMENTAL]",

@@ -151,7 +151,7 @@
     },
     {
       "shard": "packages-other",
-      "filter": "--filter=!@omnyo/server --filter=!@omnyo/app --filter=!omnyo-plugin-* --filter=!@omnyo/host-daemon --filter=!@omnyo/cli --filter=!@omnyo/integration-tests --filter=!@omnyo/templates --filter=!omnyo-app --filter=!@omnyo/desktop --filter=!@omnyo/plugin-build --filter=!@omnyo/process-utils --filter=!@omnyo/host-workspace --filter=!@omnyo/host-watcher --filter=!@omnyo/agent-runtime --filter=!@omnyo/provider-bridge-protocol --filter=!@omnyo/provider-bridge-acp --filter=!@omnyo/host-daemon-contract --filter=!@omnyo/config --filter=!@omnyo/db",
+      "filter": "--filter=!@omnyo/server --filter=!@omnyo/app --filter=!omnyo-plugin-* --filter=!@omnyo/host-daemon --filter=!@omnyo/cli --filter=!@omnyo/integration-tests --filter=!@omnyo/templates --filter=!omnyo-app --filter=!@omnyo/desktop --filter=!@omnyo/plugin-build --filter=!@omnyo/process-utils --filter=!@omnyo/host-workspace --filter=!@omnyo/host-watcher --filter=!@omnyo/agent-runtime --filter=!@omnyo/provider-bridge-protocol --filter=!@omnyo/provider-bridge-acp-next --filter=!@omnyo/host-daemon-contract --filter=!@omnyo/config --filter=!@omnyo/db",
       "concurrency": 2,
       "args": ""
     }
@@ -162,7 +162,7 @@
     "@omnyo/host-watcher",
     "@omnyo/agent-runtime",
     "@omnyo/provider-bridge-protocol",
-    "@omnyo/provider-bridge-acp",
+    "@omnyo/provider-bridge-acp-next",
     "@omnyo/host-daemon-contract",
     "@omnyo/config",
     "@omnyo/db"

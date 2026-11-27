@@ -30,7 +30,9 @@ function registerInstallationProviders(
   providerIds: readonly string[],
   visibility: "always" | "installed" = "always",
 ): void {
-  const bridgeArtifact = harness.deps.pluginHostArtifacts.get("provider-acp");
+  const bridgeArtifact = harness.deps.pluginHostArtifacts.get(
+    "omnyo--provider-acp-next",
+  );
 
   if (bridgeArtifact === undefined) {
     throw new Error("Expected the test ACP provider bridge artifact");

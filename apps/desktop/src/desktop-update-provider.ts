@@ -1,36 +1,14 @@
 import type { OmnyoDesktopInfo } from "@omnyo/desktop-contract";
-
-type DesktopReleaseChannel = "latest" | "nightly" | "public-beta";
-
-interface DesktopReleaseInfo {
-  applicationName: "Omnyo" | "Omnyo Nightly";
-  channel: DesktopReleaseChannel;
-  iconFileName: "icon.png" | "icon-nightly.png";
-  profileName: "Omnyo Private" | "Omnyo Private Nightly" | "Omnyo";
-  releaseTag: "desktop-latest" | "desktop-nightly" | "desktop-public-beta";
-}
+import {
+  desktopReleaseIdentity,
+  type DesktopReleaseChannel,
+  type DesktopReleaseIdentity,
+} from "../scripts/desktop-release-channel.mjs";
 
 export function createDesktopReleaseInfo(
   channel: DesktopReleaseChannel,
-): DesktopReleaseInfo {
-  if (channel === "public-beta")
-    return {
-      applicationName: "Omnyo",
-      profileName: "Omnyo",
-      channel,
-      iconFileName: "icon.png",
-      releaseTag: "desktop-public-beta",
-    };
-  const nightly = channel === "nightly";
-  const releaseTag = nightly ? "desktop-nightly" : "desktop-latest";
-
-  return {
-    applicationName: nightly ? "Omnyo Nightly" : "Omnyo",
-    channel,
-    iconFileName: nightly ? "icon-nightly.png" : "icon.png",
-    profileName: nightly ? "Omnyo Private Nightly" : "Omnyo Private",
-    releaseTag,
-  };
+): DesktopReleaseIdentity {
+  return desktopReleaseIdentity(channel);
 }
 
 function resolveBuiltDesktopReleaseChannel(

@@ -68,7 +68,7 @@ it.for(["thread deletion", "orphan removal"] as const)(
 
     const childReady = once(child, "message");
     const siblingReady = once(sibling, "message");
-    const dataDir = path.join(root, "data");
+    const dataDir = root;
     const filesystemMutator = new IsolatedFilesystemMutator({ dataDir });
 
     try {
@@ -93,10 +93,8 @@ it.for(["thread deletion", "orphan removal"] as const)(
       } else {
         await dispatchOnlineRpcCommand(
           {
-            type: "host.remove_path",
-            path: storagePath,
-            rootPath: storageRoot,
-            recursive: true,
+            type: "host.delete_thread_storage",
+            threadId: "thr_busy",
           },
           options,
         );
@@ -125,15 +123,20 @@ it.for(["thread deletion", "orphan removal"] as const)(
   },
 );
 
-it.for(["valid", "malformed", "dangling link"] as const)(
-  "thread deletion preserves a %s retention receipt and its owner",
-  async (receiptKind) => {
+it.for(
+  ["valid", "malformed", "dangling link"].flatMap((receiptKind) =>
+    ["normal", "orphan"].map((adapter) => ({ receiptKind, adapter })),
+  ),
+)(
+  "preserves a $receiptKind retention receipt via $adapter",
+  async ({ receiptKind, adapter }) => {
     const root = await fs.realpath(
       await fs.mkdtemp(path.join(os.tmpdir(), "omnyo-retained-delete-")),
     );
 
-    const owner = path.join(root, "thr_kept");
-    await fs.mkdir(owner);
+    const storageRoot = path.join(root, "thread-storage");
+    const owner = path.join(storageRoot, "thr_kept");
+    await fs.mkdir(owner, { recursive: true });
     const receipt = path.join(owner, "storage-retention.json");
 
     if (receiptKind === "dangling link")
@@ -152,7 +155,7 @@ it.for(["valid", "malformed", "dangling link"] as const)(
       ...makeDispatchOptions({
         dataDir: root,
         runtimeManager: new RuntimeManager(),
-        threadStorageRootPath: root,
+        threadStorageRootPath: storageRoot,
       }),
       eventSink: noopEventSink,
       logger,
@@ -164,11 +167,14 @@ it.for(["valid", "malformed", "dangling link"] as const)(
           router.handleOnlineRpcRequest({
             type: "host-rpc.request",
             requestId,
-            command: {
-              type: "thread.storage.delete",
-              threadId: "thr_kept",
-              environmentId: "env_kept",
-            },
+            command:
+              adapter === "normal"
+                ? {
+                    type: "thread.storage.delete",
+                    threadId: "thr_kept",
+                    environmentId: "env_kept",
+                  }
+                : { type: "host.delete_thread_storage", threadId: "thr_kept" },
           }),
         ).resolves.toMatchObject({
           ok: false,

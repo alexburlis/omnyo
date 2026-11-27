@@ -119,7 +119,7 @@ async function writePackagedBuiltinSource(
   for (const name of names) {
     const sourceRoot = join(sourceModuleDir, "builtin-plugins", name);
     const usesPluginOwnedIcon = name === "automations";
-    const usesDeclaredIcons = name === "provider-acp";
+    const usesDeclaredIcons = name === "provider-fixture";
     await mkdir(join(sourceRoot, "dist"), { recursive: true });
     await mkdir(join(sourceRoot, "skills", name), { recursive: true });
     await mkdir(join(sourceRoot, "src"), { recursive: true });
@@ -433,7 +433,7 @@ describe("builtin plugin reconciliation", () => {
       const databasePath = join(workDir, "app.db");
       const oldRuntime = join(workDir, "old-mac-app");
       const currentRuntime = join(workDir, "current-runtime");
-      const names = ["automations", "provider-acp"];
+      const names = ["automations", "provider-fixture"];
       const old = await copyPackagedBuiltinRuntime(oldRuntime, names);
 
       const current = await copyPackagedBuiltinRuntime(currentRuntime, [
@@ -479,13 +479,13 @@ describe("builtin plugin reconciliation", () => {
           bundledPlugins: registrations(old.targetRoot),
         });
         await service.start();
-        await service.setEnabled("provider-acp", false);
+        await service.setEnabled("provider-fixture", false);
         await service.installPath(
           join(legacy.targetRoot, "composer-predictions"),
         );
         setPluginSettingsValues(db, "automations", { mode: "preserved" });
         setPluginKvValue(db, "automations", "opaque", "opaque\u0000state\n");
-        setPluginKvValue(db, "provider-acp", "opaque", "disabled-state");
+        setPluginKvValue(db, "provider-fixture", "opaque", "disabled-state");
 
         const secret = join(
           dataDir,
@@ -500,7 +500,7 @@ describe("builtin plugin reconciliation", () => {
 
         const before = [
           "automations",
-          "provider-acp",
+          "provider-fixture",
           "composer-predictions",
         ].map((id) => getInstalledPluginRegistration(db, id));
 
@@ -583,7 +583,7 @@ describe("builtin plugin reconciliation", () => {
               status: "running",
             }),
             expect.objectContaining({
-              id: "provider-acp",
+              id: "provider-fixture",
               enabled: false,
               status: "disabled",
             }),
@@ -600,7 +600,7 @@ describe("builtin plugin reconciliation", () => {
 
         for (const [index, id] of [
           "automations",
-          "provider-acp",
+          "provider-fixture",
           "composer-predictions",
         ].entries()) {
           const row = getInstalledPluginRegistration(db, id);
@@ -623,7 +623,7 @@ describe("builtin plugin reconciliation", () => {
         expect(getPluginKvValue(db, "automations", "opaque")).toBe(
           "opaque\u0000state\n",
         );
-        expect(getPluginKvValue(db, "provider-acp", "opaque")).toBe(
+        expect(getPluginKvValue(db, "provider-fixture", "opaque")).toBe(
           "disabled-state",
         );
         expect(await readFile(secret, "utf8")).toBe("fixture-owned-secret");
@@ -964,7 +964,7 @@ describe("builtin plugin reconciliation", () => {
       "agent-annotations": true,
       "storage-retention": true,
       "browser-automation": true,
-      "provider-acp": false,
+      "provider-acp-next": false,
       "provider-pi": false,
       "provider-usage": false,
       "concurrency-limit": true,
@@ -1434,7 +1434,7 @@ describe("builtin plugin packaging", () => {
   it("copies only the runtime layout for packaged builtins", async () => {
     const { targetRoot } = await copyPackagedBuiltinRuntime(workDir, [
       "automations",
-      "provider-acp",
+      "provider-fixture",
       "connect",
     ]);
 
@@ -1470,7 +1470,10 @@ describe("builtin plugin packaging", () => {
     await expect(stat(join(copiedRoot, "node_modules"))).rejects.toThrow();
 
     await expect(
-      readFile(join(targetRoot, "provider-acp", "icons", "cursor.svg"), "utf8"),
+      readFile(
+        join(targetRoot, "provider-fixture", "icons", "cursor.svg"),
+        "utf8",
+      ),
     ).resolves.toBe("<svg/>\n");
 
     const connectRoot = join(targetRoot, "connect");

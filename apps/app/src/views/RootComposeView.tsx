@@ -39,10 +39,7 @@ import { RIGHT_PANEL_TOGGLE_ICON_NAME } from "@/components/secondary-panel/panel
 import { useWindowTitleBarHostsRightPanelToggle } from "@/components/layout/WindowRightPanelToggle";
 import { AppCommandShortcutHint } from "@/components/commands/AppCommandShortcutHint";
 import { appCommandTarget } from "@/lib/app-command-targets";
-import type {
-  SecondaryPanelPaneRenderContext,
-  SecondaryPanelRenderableTab,
-} from "@/components/secondary-panel/ThreadSecondaryPanel";
+import type { SecondaryPanelPaneRenderContext } from "@/components/secondary-panel/secondaryPanelTab";
 import {
   LazyBrowserTabDeck,
   preloadThreadSecondaryPanel,
@@ -53,8 +50,6 @@ import { PageShell } from "@/components/ui/page-shell.js";
 import { Button } from "@omnyo/shared-ui/button";
 import { useIsCompactViewport } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import { usePointerCoarse } from "@omnyo/shared-ui/hooks/use-pointer-coarse";
-import { COARSE_POINTER_COMPACT_ICON_SIZE_CLASS } from "@omnyo/shared-ui/coarse-pointer-sizing";
-import { PluginItemIcon } from "@/components/plugin/PluginIcon";
 import { usePluginNewThreadPanelActions } from "@/components/plugin/PluginPanelActions";
 import { PluginThreadPanelNavigationProvider } from "@/components/plugin/plugin-thread-panel-navigation";
 import { usePluginSlots } from "@/lib/plugin-slots";
@@ -101,7 +96,6 @@ import {
   getProjectComposeRoutePath,
   getRootComposeRoutePath,
 } from "@/lib/route-paths";
-import { getBrowserUrlHost } from "@/lib/browser-url";
 import { isDesktopBrowserAvailable } from "@/lib/omnyo-desktop";
 import {
   useFixedPanelTabsState,
@@ -130,7 +124,7 @@ import {
   type FileSearchSelection,
 } from "@/components/secondary-panel/useThreadFileTabs";
 import { isSecondaryFileTab } from "@omnyo/client-core";
-import { RightPanelFileTabIcon } from "@/components/secondary-panel/RightPanelFileTabIcon";
+import { buildSecondaryPanelRenderableTabs } from "@/components/secondary-panel/buildSecondaryPanelRenderableTabs";
 import {
   buildTerminalSyncedSecondaryFileTabs,
   syncTerminalTabsInFixedPanelState,
@@ -1266,149 +1260,27 @@ function RootComposeSurface({
     ],
   );
 
-  const panelTabs = useMemo<readonly SecondaryPanelRenderableTab[]>(() => {
-    const filenameOf = (path: string) => path.split("/").at(-1) ?? path;
-
-    const tabs = syncedOrderedSecondaryFileTabs.map(
-      (tab): SecondaryPanelRenderableTab => {
-        const pluginAction =
-          tab.kind === "plugin-panel"
-            ? rootPanelNewThreadPanelActions.find(
-                (action) =>
-                  action.pluginId === tab.pluginId &&
-                  action.id === tab.actionId,
-              )
-            : undefined;
-
-        const shared = {
-          contentFillsRegion:
-            tab.kind === "plugin-panel" &&
-            (tab.fileOpenerOwner !== undefined ||
-              pluginAction?.layout === "flush"),
-          onClose: () => closeTab(tab.id),
-          renderContent: (pane: SecondaryPanelPaneRenderContext) =>
-            renderRootPanelTabContent(tab, pane),
-          tab,
-        };
-
-        switch (tab.kind) {
-          case "browser": {
-            const browserLabel =
-              tab.title ??
-              (tab.url.length > 0 ? getBrowserUrlHost(tab.url) : "");
-
-            return {
-              ...shared,
-              label: browserLabel.length > 0 ? browserLabel : "Browser",
-              leadingVisual: (
-                <Icon
-                  name="Globe"
-                  className={COARSE_POINTER_COMPACT_ICON_SIZE_CLASS}
-                  aria-hidden
-                />
-              ),
-              statusLabel: null,
-              onSelect: () => handleActivateFileTab(tab.id),
-            };
-          }
-
-          case "terminal": {
-            const session = terminalsById.get(tab.terminalId);
-
-            return {
-              ...shared,
-              label: session?.title ?? "Terminal",
-              leadingVisual: (
-                <Icon
-                  name="Terminal"
-                  className={COARSE_POINTER_COMPACT_ICON_SIZE_CLASS}
-                  aria-hidden
-                />
-              ),
-              statusLabel:
-                session === undefined || session.status === "running"
-                  ? null
-                  : session.status,
-              onSelect: () => terminals.select(tab.terminalId),
-              onClose: () => terminals.close(tab.terminalId),
-            };
-          }
-
-          case "workspace-file-preview":
-            return {
-              ...shared,
-              label: filenameOf(tab.path),
-              leadingVisual: <RightPanelFileTabIcon path={tab.path} />,
-              statusLabel: tab.statusLabel,
-              onSelect: () => handleActivateFileTab(tab.id),
-            };
-          case "host-file-preview":
-            return {
-              ...shared,
-              label: filenameOf(tab.path),
-              leadingVisual: <RightPanelFileTabIcon path={tab.path} />,
-              statusLabel: null,
-              onSelect: () => handleActivateFileTab(tab.id),
-            };
-          case "thread-storage-file-preview":
-            return {
-              ...shared,
-              label: filenameOf(tab.path),
-              isPinned: tab.isPinned,
-              leadingVisual: <RightPanelFileTabIcon path={tab.path} />,
-              statusLabel: null,
-              onSelect: () => handleActivateFileTab(tab.id),
-            };
-          case "attachment-file-preview":
-            return {
-              ...shared,
-              label: tab.name,
-              leadingVisual: <RightPanelFileTabIcon path={tab.name} />,
-              statusLabel: null,
-              onSelect: () => handleActivateFileTab(tab.id),
-            };
-          case "new-tab":
-            return {
-              ...shared,
-              label: "New tab",
-              leadingVisual: (
-                <Icon
-                  name="NewTab"
-                  className={COARSE_POINTER_COMPACT_ICON_SIZE_CLASS}
-                  aria-hidden
-                />
-              ),
-              statusLabel: null,
-              onSelect: () => handleActivateFileTab(tab.id),
-            };
-          case "plugin-panel":
-            return {
-              ...shared,
-              label: tab.title,
-              leadingVisual: (
-                <PluginItemIcon
-                  pluginId={tab.pluginId}
-                  icon={pluginAction?.icon ?? null}
-                  className={COARSE_POINTER_COMPACT_ICON_SIZE_CLASS}
-                />
-              ),
-              statusLabel: null,
-              onSelect: () => handleActivateFileTab(tab.id),
-            };
-        }
-      },
-    );
-
-    return tabs;
-  }, [
-    closeTab,
-    handleActivateFileTab,
-    renderRootPanelTabContent,
-    rootPanelNewThreadPanelActions,
-    syncedOrderedSecondaryFileTabs,
-    terminals,
-    terminalsById,
-  ]);
+  const panelTabs = useMemo(
+    () =>
+      buildSecondaryPanelRenderableTabs({
+        tabs: syncedOrderedSecondaryFileTabs,
+        pluginActions: rootPanelNewThreadPanelActions,
+        terminalsById,
+        terminals,
+        onActivateTab: handleActivateFileTab,
+        onCloseTab: closeTab,
+        renderTabContent: renderRootPanelTabContent,
+      }),
+    [
+      closeTab,
+      handleActivateFileTab,
+      renderRootPanelTabContent,
+      rootPanelNewThreadPanelActions,
+      syncedOrderedSecondaryFileTabs,
+      terminals,
+      terminalsById,
+    ],
+  );
 
   const rootPanelMetadataContent = useMemo(
     () => (

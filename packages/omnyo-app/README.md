@@ -200,7 +200,7 @@ trust prompt.
 You can still use the Pi CLI and `/login` to create this configuration.
 
 Custom ACP agents are configured through the ACP providers plugin's
-`customAgents` setting: `omnyo plugin config provider-acp set customAgents
+`customAgents` setting: `omnyo plugin config omnyo--provider-acp-next set customAgents
 '[...]'`. See the configuration docs for the optional `modelCli` and
 `reasoningCli` or `nativeReasoning` reasoning settings. The optional
 `nativeSkillRoots` field adds provider-native skills to the composer. Its

@@ -11,6 +11,13 @@ import type {
   SessionOptionSelections,
 } from "@omnyo/domain";
 import type {
+  modelListParamsSchema,
+  ProviderInstallationRunParams,
+  ProviderInstallationStatusParams,
+  threadDiscardParamsSchema,
+} from "@omnyo/provider-bridge-protocol";
+import type { z } from "zod";
+import type {
   AgentRuntimeBridgeLaunch,
   AgentRuntimeSkillRoot,
 } from "./types.js";
@@ -34,25 +41,30 @@ export type ProviderExecutionContext = {
   envVars?: Record<string, string>;
 } & RuntimePermissionPolicy;
 
+type ThreadReferenceFields = Pick<
+  z.infer<typeof threadDiscardParamsSchema>,
+  "threadId" | "providerThreadId"
+>;
+
 export type AdapterCommand =
   | {
       type: "skills/configure";
       skillRoots: readonly AgentRuntimeSkillRoot[];
     }
-  | { type: "model/list"; cwd?: string; envVars?: Record<string, string> }
+  | ({ type: "model/list" } & Pick<
+      z.infer<typeof modelListParamsSchema>,
+      "cwd" | "envVars"
+    >)
   | { type: "provider/health"; cwd?: string }
   | { type: "provider/usage"; cwd?: string; envVars?: Record<string, string> }
-  | {
-      type: "provider/installation/status";
-      cwd?: string;
-      requirement?: "thread_rewind";
-      checkUpdates: boolean;
-    }
-  | {
-      type: "provider/installation/run";
-      action: "install" | "update";
-      cwd?: string;
-    }
+  | ({ type: "provider/installation/status" } & Pick<
+      ProviderInstallationStatusParams,
+      "cwd" | "requirement" | "checkUpdates"
+    >)
+  | ({ type: "provider/installation/run" } & Pick<
+      ProviderInstallationRunParams,
+      "action" | "cwd"
+    >)
   | {
       type: "thread/start";
       threadId: string;
@@ -103,35 +115,15 @@ export type AdapterCommand =
       providerThreadId: string;
       activeTurnId: string | null;
     }
-  | {
-      type: "thread/discard";
-      threadId: string;
-      providerThreadId: string;
-    }
-  | {
+  | ({ type: "thread/discard" } & ThreadReferenceFields)
+  | ({
       type: "thread/speed/set";
-      threadId: string;
-      providerThreadId: string;
       serviceTier: ServiceTier;
-    }
-  | {
-      type: "thread/goal/clear";
-      threadId: string;
-      providerThreadId: string;
-    }
-  | {
+    } & ThreadReferenceFields)
+  | ({ type: "thread/goal/clear" } & ThreadReferenceFields)
+  | ({
       type: "thread/name/set";
-      threadId: string;
-      providerThreadId: string;
       title: string;
-    }
-  | {
-      type: "thread/archive";
-      threadId: string;
-      providerThreadId: string;
-    }
-  | {
-      type: "thread/unarchive";
-      threadId: string;
-      providerThreadId: string;
-    };
+    } & ThreadReferenceFields)
+  | ({ type: "thread/archive" } & ThreadReferenceFields)
+  | ({ type: "thread/unarchive" } & ThreadReferenceFields);

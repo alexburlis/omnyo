@@ -79,12 +79,11 @@ import {
 import type { ExperimentalComposerSubmitOptions } from "@omnyo/plugin-sdk";
 import {
   readExecutionSelection,
-  readExecutionTuple,
-  resolveComposerSelectionDeadline,
+  applyComposerExecutionSelection,
   useCommittedComposerState,
   waitForSettledComposerState,
-  waitUntilComposerStateSettled,
-  type CommittedComposerState,
+  useQueuedComposerSelection,
+  type CommittedExecutionSelectionState,
 } from "@/components/promptbox/composer-selection-settle";
 import type { ModelPickerSelection } from "@/components/pickers/model-picker-selection";
 import type { ModelPickerSelects } from "@/components/pickers/ModelFavoritesBar";
@@ -196,29 +195,16 @@ interface NewThreadComposerLocks {
 
 type ProjectChangeOutcome = "changed" | "unchanged" | "refused";
 
-interface NewThreadComposerSelectionState extends CommittedComposerState {
+interface NewThreadComposerSelectionState extends CommittedExecutionSelectionState {
   requestedProjectId: string;
   projectId: string;
-  selectedProviderId: string;
-  selectedThreadModel: string;
-  reasoningLevel: ReasoningLevel;
-  serviceTier: ServiceTier | undefined;
-  supportsServiceTier: boolean;
-  permissionMode: PermissionMode;
   submissionEnvironment: NewThreadRequest["environment"] | null;
-  providerIds: readonly string[];
   changeProject: (nextProjectId: string) => Promise<ProjectChangeOutcome>;
   changeEnvironment: (
     value: string,
     providerMachine: EnvironmentMachineSelection | null,
     inputs?: JsonValue,
   ) => void;
-  changeProvider: (providerId: string) => void;
-  changeModel: (model: string) => void;
-  changeReasoning: (level: ReasoningLevel) => void;
-  changeServiceTier: (tier: ServiceTier | undefined) => void;
-  changeExecution: (selection: ModelPickerSelection) => void;
-  changePermissionMode: (mode: PermissionMode) => void;
 }
 
 const NO_SESSION_OPTION_CHOICES: SessionOptionChoices = {};
@@ -2298,29 +2284,10 @@ export function NewThreadComposer({
     composerSelection,
   );
 
-  const pendingSelectionRef = useRef<Promise<unknown>>(Promise.resolve());
-
   const applySelection = useCallback(
-    async (
-      selection: ExperimentalComposerSelection,
-    ): Promise<ExperimentalComposerSelection> => {
-      const deadline = resolveComposerSelectionDeadline();
+    async (selection: ExperimentalComposerSelection, deadline: number) => {
       const { observer } = selectionState;
       let state = await observer.waitUntil(() => true, deadline);
-
-      const settle = async (requireSettled: boolean) => {
-        state = await waitForSettledComposerState(
-          selectionState,
-          deadline,
-          requireSettled,
-        );
-      };
-
-      const ensureSettled = async () => {
-        if (state.isSettled) return;
-        state = await waitUntilComposerStateSettled(selectionState, deadline);
-      };
-
       const locks = pickerLocksRef.current;
       let projectRefused = false;
 
@@ -2350,95 +2317,28 @@ export function NewThreadComposer({
             seed.providerMachine,
             seed.appliedInputs,
           );
-          await settle(false);
+          state = await waitForSettledComposerState(
+            selectionState,
+            deadline,
+            false,
+          );
         }
       }
 
-      if (selection.providerId !== undefined) await ensureSettled();
+      const applied = await applyComposerExecutionSelection(
+        selectionState,
+        state,
+        deadline,
+        selection,
+        { locks },
+      );
 
-      const requestedTuple = readExecutionTuple(selection, state.providerIds);
-
-      const executionTuple =
-        requestedTuple !== null &&
-        !locks.execution &&
-        (!locks.provider ||
-          requestedTuple.providerId === state.selectedProviderId)
-          ? requestedTuple
-          : null;
-
-      if (executionTuple !== null) {
-        state.changeExecution(executionTuple);
-        await settle(true);
-      } else {
-        if (
-          selection.providerId !== undefined &&
-          !locks.provider &&
-          selection.providerId !== state.selectedProviderId &&
-          state.providerIds.includes(selection.providerId)
-        ) {
-          state.changeProvider(selection.providerId);
-          await settle(true);
-        }
-
-        const providerMatches =
-          selection.providerId === undefined ||
-          state.selectedProviderId === selection.providerId;
-
-        if (
-          providerMatches &&
-          !locks.execution &&
-          selection.model !== undefined
-        ) {
-          await ensureSettled();
-          state.changeModel(selection.model);
-          await settle(false);
-        }
-
-        if (
-          providerMatches &&
-          !locks.execution &&
-          selection.reasoningLevel !== undefined
-        ) {
-          await ensureSettled();
-          state.changeReasoning(selection.reasoningLevel);
-          await settle(false);
-        }
-
-        if (
-          !locks.execution &&
-          selection.serviceTier !== undefined &&
-          state.supportsServiceTier
-        ) {
-          state.changeServiceTier(selection.serviceTier);
-          await settle(false);
-        }
-      }
-
-      if (!locks.execution && selection.permissionMode !== undefined) {
-        state.changePermissionMode(selection.permissionMode);
-        await settle(false);
-      }
-
-      await settle(true);
-
-      return readNewThreadComposerSelection(state);
+      return readNewThreadComposerSelection(applied);
     },
     [selectionState],
   );
 
-  const setSelection = useCallback(
-    (selection: ExperimentalComposerSelection) => {
-      const run = pendingSelectionRef.current.then(
-        () => applySelection(selection),
-        () => applySelection(selection),
-      );
-
-      pendingSelectionRef.current = run;
-
-      return run;
-    },
-    [applySelection],
-  );
+  const setSelection = useQueuedComposerSelection(applySelection);
 
   const rankedProjectIds = useMemo(
     () =>

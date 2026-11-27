@@ -1,8 +1,7 @@
 /**
- * `@omnyo/plugin-sdk/provider-bridge/acp-next` — a preview of the rebuilt
- * ACP bridge kit, published beside `provider-bridge/acp` until it replaces it
- * (docs/api_to_audit.md). The exports match the original kit, plus
- * `experimental_registerAcpDialect`.
+ * `@omnyo/plugin-sdk/provider-bridge/acp-next` — the current ACP bridge kit.
+ * The original `provider-bridge/acp` import uses the same implementation.
+ * This entry also exposes `experimental_registerAcpDialect`.
  *
  * The Agent Client Protocol (https://agentclientprotocol.com) is one wire
  * protocol spoken by many agents, so Omnyo runs all of them through one generic

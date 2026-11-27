@@ -43,7 +43,7 @@ const FIRST_PARTY_PROVIDER_PLUGIN_IDS = [
   "provider-codex",
   "provider-claude-code",
   "provider-pi",
-  "provider-acp",
+  "omnyo--provider-acp-next",
 ] as const;
 
 export async function loadFirstPartyProviderDeclarations(): Promise<
@@ -361,13 +361,13 @@ export async function acpProviderDeclarationsFromSetting(
   entries: readonly JsonValue[],
 ): Promise<NormalizedPluginProviderDeclaration[]> {
   const shipped = new Set(
-    (await captureFirstPartyProviderDeclarations("provider-acp")).map(
-      (declaration) => declaration.id,
-    ),
+    (
+      await captureFirstPartyProviderDeclarations("omnyo--provider-acp-next")
+    ).map((declaration) => declaration.id),
   );
 
   const withSetting = await captureFirstPartyProviderDeclarations(
-    "provider-acp",
+    "omnyo--provider-acp-next",
     {
       settings: { customAgents: JSON.stringify(entries) },
     },
@@ -395,14 +395,14 @@ export async function configuredAcpProvider(
     throw new Error("the ACP plugin registered no provider for this entry");
   }
 
-  return { declaration, pluginId: "provider-acp" };
+  return { declaration, pluginId: "omnyo--provider-acp-next" };
 }
 
 export async function registerConfiguredAcpProvider(
   registry: ProviderRegistryService,
   entry: Record<string, JsonValue>,
 ): Promise<void> {
-  const pluginId = "provider-acp";
+  const pluginId = "omnyo--provider-acp-next";
 
   for (const declaration of await acpProviderDeclarationsFromSetting([entry])) {
     registry.register({

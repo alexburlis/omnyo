@@ -103,10 +103,6 @@ describe("builtin host artifacts", () => {
 
   it.each([
     {
-      pluginDir: "provider-acp",
-      methods: ["probeAgent", "resolveNativeRoots"],
-    },
-    {
       pluginDir: "provider-acp-next",
       methods: ["probeAgent", "resolveNativeRoots"],
     },

@@ -61,6 +61,27 @@ export function resolveDesktopBuildPlatform(nodePlatform) {
   );
 }
 
+export function desktopReleaseIdentity(channel) {
+  if (channel === "public-beta")
+    return {
+      applicationName: "Omnyo",
+      profileName: "Omnyo",
+      channel,
+      iconFileName: "icon.png",
+      releaseTag: "desktop-public-beta",
+    };
+
+  const nightly = channel === "nightly";
+
+  return {
+    applicationName: nightly ? "Omnyo Nightly" : "Omnyo",
+    channel,
+    iconFileName: nightly ? "icon-nightly.png" : "icon.png",
+    profileName: nightly ? "Omnyo Private Nightly" : "Omnyo Private",
+    releaseTag: nightly ? "desktop-nightly" : "desktop-latest",
+  };
+}
+
 export function createDesktopReleaseConfig(channel, buildPlatform) {
   if (
     !["latest", "nightly", "public-beta"].includes(channel) ||
@@ -68,31 +89,28 @@ export function createDesktopReleaseConfig(channel, buildPlatform) {
   )
     throw new Error("Desktop release requires its exact channel and platform");
 
+  const { channel: _channel, ...identity } = desktopReleaseIdentity(channel);
+
   if (channel === "public-beta") {
     if (buildPlatform !== "macos")
       throw new Error("Public beta preparation is macOS only");
 
     return {
       ...createDesktopReleaseConfig("latest", "macos"),
+      ...identity,
       appId: "dev.omnyo.beta",
-      applicationName: "Omnyo",
-      profileName: "Omnyo",
       artifactName: "omnyo-${version}-${arch}.${ext}",
-      releaseTag: "desktop-public-beta",
     };
   }
 
   if (channel === "nightly") {
     return {
+      ...identity,
       appId: "dev.omnyo.private.nightly",
-      applicationName: "Omnyo Nightly",
-      profileName: "Omnyo Private Nightly",
       artifactName: "omnyo-private-nightly-${version}-${arch}.${ext}",
-      iconFileName: "icon-nightly.png",
 
       linuxExecutableName: "omnyo-private-nightly",
       macIconPath: "assets/icon-nightly.icns",
-      releaseTag: "desktop-nightly",
       windowsInstallGuid: null,
       windowsInstallName: "omnyo-private-nightly",
       updateMetadataFileNames: {
@@ -104,14 +122,11 @@ export function createDesktopReleaseConfig(channel, buildPlatform) {
   }
 
   return {
+    ...identity,
     appId: "dev.omnyo.private",
-    applicationName: "Omnyo",
-    profileName: "Omnyo Private",
     artifactName: "omnyo-private-${version}-${arch}.${ext}",
-    iconFileName: "icon.png",
     linuxExecutableName: "omnyo-private",
     macIconPath: "assets/icon.icns",
-    releaseTag: "desktop-latest",
     windowsInstallGuid: "11c43a4e-5f09-59c3-a447-6f25f5982512",
     windowsInstallName: "omnyo-private",
     updateMetadataFileNames: {

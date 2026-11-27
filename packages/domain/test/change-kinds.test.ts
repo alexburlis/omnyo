@@ -65,6 +65,7 @@ const maximalThreadMetadata: ThreadChangeMetadata = {
     projectId: "proj_1",
     environmentId: "env_1",
     providerId: "provider_1",
+    claudeProfileBinding: null,
     title: "Fixture thread",
     titleFallback: null,
     sectionId: null,

@@ -24,6 +24,7 @@ import {
 import type { AppDeps } from "../../types.js";
 import { readWorkContinuations } from "../threads/thread-completion.js";
 import { toThreadListEntryResponses } from "../threads/thread-runtime-display.js";
+import { ThreadWorkFacts } from "../threads/thread-work-facts.js";
 import { isAdmittingToInbox } from "./admission.js";
 import { listFamilyThreads, type InboxThreadRow } from "./family.js";
 import { readTurnProgress } from "./turn-progress.js";
@@ -202,11 +203,13 @@ export function collectInboxEntries(
     includeHidden: true,
   });
 
+  const workFacts = new ThreadWorkFacts(db);
+  workFacts.ensure(memberIds);
+
   const entries = new Map<string, ThreadListEntry>(
-    toThreadListEntryResponses(deps, { threads: listRows }).map((entry) => [
-      entry.id,
-      entry,
-    ]),
+    toThreadListEntryResponses(deps, { threads: listRows, workFacts }).map(
+      (entry) => [entry.id, entry],
+    ),
   );
 
   const receipts = listOutstandingReceipts(
@@ -256,22 +259,7 @@ export function collectInboxEntries(
           )
           .all();
 
-  const queued =
-    memberIds.length === 0
-      ? []
-      : db
-          .select({
-            threadId: queuedThreadMessages.threadId,
-            sendAt: queuedThreadMessages.sendAt,
-            payloadKind: queuedThreadMessages.payloadKind,
-            senderThreadId: queuedThreadMessages.senderThreadId,
-            requestedByInitiator: queuedThreadMessages.requestedByInitiator,
-            systemNotice: queuedThreadMessages.systemNotice,
-            id: queuedThreadMessages.id,
-          })
-          .from(queuedThreadMessages)
-          .where(inArray(queuedThreadMessages.threadId, memberIds))
-          .all();
+  const queued = memberIds.flatMap((id) => workFacts.queue.get(id) ?? []);
 
   const automationIds = new Map<string, string>();
 

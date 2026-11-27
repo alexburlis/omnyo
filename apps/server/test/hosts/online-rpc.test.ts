@@ -102,6 +102,76 @@ function registerDropThenReplaceSocket(args: DropThenReplaceSocketArgs): void {
 }
 
 describe("host online RPC retry semantics", () => {
+  it("does not wait for a replacement when the inventoried daemon is disconnected", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session } = seedHostSession(harness.deps);
+      harness.hub.unregisterDaemon(session.id);
+      const reconnect = vi.spyOn(harness.hub, "waitForDaemonForHost");
+
+      try {
+        await expect(
+          callHostOnlineRpc(harness.deps, {
+            hostId: host.id,
+            expectedSessionId: session.id,
+            timeoutMs: 100,
+            command: {
+              type: "host.delete_thread_storage",
+              threadId: "thr_abcdefghij",
+            },
+          }),
+        ).rejects.toMatchObject({ body: { code: "host_unavailable" } });
+        expect(reconnect).not.toHaveBeenCalled();
+      } finally {
+        reconnect.mockRestore();
+      }
+    });
+  });
+
+  it("does not replay a bound deletion after disconnect while the RPC is pending", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session } = seedHostSession(harness.deps);
+      const original = createMockHubSocket();
+      const replacement = createMockHubSocket();
+      harness.hub.registerDaemon(session.id, host.id, original);
+      const reconnect = vi.spyOn(harness.hub, "waitForDaemonForHost");
+
+      try {
+        const pending = callHostOnlineRpc(harness.deps, {
+          hostId: host.id,
+          expectedSessionId: session.id,
+          timeoutMs: 100,
+          command: {
+            type: "host.delete_thread_storage",
+            threadId: "thr_abcdefghij",
+          },
+        });
+
+        expect(
+          original.messages.filter((message) =>
+            message.includes('"type":"host-rpc.request"'),
+          ),
+        ).toHaveLength(1);
+
+        const rejected = expect(pending).rejects.toMatchObject({
+          body: { code: "host_unavailable" },
+        });
+
+        harness.hub.unregisterDaemon(session.id);
+        harness.hub.registerDaemon("new-session", host.id, replacement);
+        await rejected;
+        expect(
+          replacement.messages.filter((message) =>
+            message.includes('"type":"host-rpc.request"'),
+          ),
+        ).toEqual([]);
+        expect(reconnect).not.toHaveBeenCalled();
+      } finally {
+        reconnect.mockRestore();
+        harness.hub.unregisterDaemon("new-session");
+      }
+    });
+  });
+
   it("refuses installation on legacy workers before sending any mutation", async () => {
     await withTestHarness(async (harness) => {
       const { host, session } = seedHostSession(harness.deps, {

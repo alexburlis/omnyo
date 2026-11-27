@@ -15,7 +15,7 @@
   },
   "engines": {
     "omnyo": ">=0.0",
-    "omnyoPluginSdk": ">=0.5.23 >=0.6.58"
+    "omnyoPluginSdk": ">=0.5.23 >=0.6.59"
   },
   "omnyo": {
     "name": "Codex Provider",

@@ -8,29 +8,16 @@ const configuredAgentSchema = z.object({
   cwd: z.string().min(1).optional(),
 });
 
-const acpPluginIds = ["omnyo--provider-acp-next", "provider-acp"] as const;
-
-type AcpPluginId = (typeof acpPluginIds)[number];
-
 export function resolveOnboardingAcpDetection(
   plugins: readonly {
-    id: AcpPluginId;
+    id: string;
     enabled: boolean;
     customAgents: unknown;
   }[],
 ) {
-  const ordered = acpPluginIds.flatMap((id) =>
-    plugins.filter((plugin) => plugin.id === id),
+  const selected = plugins.find(
+    (plugin) => plugin.id === "omnyo--provider-acp-next",
   );
-
-  const hasConfiguration = (plugin: (typeof plugins)[number]) =>
-    typeof plugin.customAgents === "string" &&
-    plugin.customAgents.trim().length > 0;
-
-  const selected =
-    ordered.find((plugin) => plugin.enabled) ??
-    ordered.find(hasConfiguration) ??
-    ordered[0];
 
   const customAgents: z.infer<typeof configuredAgentSchema>[] = [];
 
@@ -71,7 +58,8 @@ export function resolveOnboardingAcpDetection(
   }
 
   return {
-    acpPluginId: selected?.id ?? null,
+    acpPluginId:
+      selected === undefined ? null : ("omnyo--provider-acp-next" as const),
     customAgents: customAgents.map((agent) => ({
       ...agent,
       id: `acp-${agent.id}`,

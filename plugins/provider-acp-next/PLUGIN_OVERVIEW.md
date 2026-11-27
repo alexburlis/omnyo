@@ -1,5 +1,3 @@
-This is a preview of Omnyo's rebuilt ACP adapter. Turning it on turns the original "ACP Providers" plugin off; turning it off brings the original back. Both register the same providers, so your threads and your custom agents carry over either way.
-
 Use one Omnyo workspace with the coding agents you already run on your machine. This plugin connects Omnyo to agents that speak the Agent Client Protocol (ACP). Each agent appears as a provider in the thread composer.
 
 ## What you get

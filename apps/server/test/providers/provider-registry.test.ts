@@ -4,7 +4,7 @@ import { createProviderRegistryService } from "../../src/services/providers/prov
 import { minimalProviderRegistration } from "../helpers/provider-registry.js";
 
 const CURSOR_LIKE_INFO = {
-  pluginId: "provider-acp",
+  pluginId: "omnyo--provider-acp-next",
   available: true,
   maintenance: { health: true, usage: true, installation: false },
   capabilities: {
@@ -164,7 +164,7 @@ describe("provider registry ordering", () => {
       installedAt: 0,
     });
 
-    registerProvider(registry, "acp-cursor", "provider-acp", {
+    registerProvider(registry, "acp-cursor", "omnyo--provider-acp-next", {
       bundledIndex: 2,
       installedAt: 0,
     });
@@ -204,7 +204,7 @@ describe("provider registry ordering", () => {
       bundledIndex: 1,
       installedAt: 0,
     });
-    registerProvider(registry, "acp-cursor", "provider-acp", {
+    registerProvider(registry, "acp-cursor", "omnyo--provider-acp-next", {
       bundledIndex: 2,
       installedAt: 0,
     });
@@ -319,11 +319,11 @@ describe("provider registry", () => {
       released = true;
     });
 
-    registerProvider(registry, "acp-cursor", "provider-acp");
+    registerProvider(registry, "acp-cursor", "omnyo--provider-acp-next");
     await Promise.resolve();
     expect(released).toBe(false);
 
-    registerProvider(registry, "acp-opencode", "provider-acp");
+    registerProvider(registry, "acp-opencode", "omnyo--provider-acp-next");
     await ready;
     expect(registry.get("acp-opencode")).not.toBeNull();
   });

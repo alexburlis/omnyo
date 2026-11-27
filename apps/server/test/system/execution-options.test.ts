@@ -46,11 +46,11 @@ const INSTALLED_ONLY_PROVIDER_IDS = [
 ] as const;
 
 function registerInstalledOnlyProviderFixtures(harness: TestAppHarness): void {
-  const pluginId = "provider-acp";
+  const pluginId = "omnyo--provider-acp-next";
   harness.deps.pluginHostArtifacts.set(pluginId, {
     digest: "a".repeat(64),
     byteLength: 1,
-    path: "/unused/provider-acp.mjs",
+    path: "/unused/omnyo--provider-acp-next.mjs",
     generation: "test-provider-discovery",
   });
 
@@ -301,7 +301,7 @@ describe("resolveSystemExecutionOptions", () => {
       { seedFirstPartyProviders: false },
       async (harness) => {
         await registerFirstPartyProviders(harness.deps.providerRegistry, {
-          excludePluginIds: ["provider-acp"],
+          excludePluginIds: ["omnyo--provider-acp-next"],
           unavailablePluginIds: ["provider-codex"],
         });
 
@@ -1323,7 +1323,7 @@ describe("resolveSystemExecutionOptions", () => {
 
         await registerFirstPartyProviders(registry, {
           excludePluginIds: [
-            "provider-acp",
+            "omnyo--provider-acp-next",
             "provider-claude-code",
             "provider-codex",
           ],

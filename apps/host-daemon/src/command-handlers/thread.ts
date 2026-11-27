@@ -1,8 +1,7 @@
+import { removeThreadStorage } from "../thread-storage-removal.js";
 import fs from "node:fs/promises";
-import path from "node:path";
 import type { AgentRuntimeBridgeLaunch } from "@omnyo/agent-runtime";
 import { flattenPromptInputGroups } from "@omnyo/domain";
-import { killProcessesWithCwdUnder } from "@omnyo/process-utils";
 import {
   COMPETING_TURN_ERROR_CODE,
   STEER_UNCONFIRMED_ERROR_CODE,
@@ -64,31 +63,11 @@ export async function deleteThreadStorage(
   command: CommandOf<"thread.storage.delete">,
   options: CommandDispatchOptions,
 ): Promise<void> {
-  const storagePath = requireContainedPath(
-    options.threadStorageRootPath,
-    path.join(options.threadStorageRootPath, command.threadId),
-    "Thread storage path escapes the storage root",
-  );
-
-  async function requireUnretained() {
-    try {
-      await fs.lstat(path.join(storagePath, "storage-retention.json"));
-    } catch (error) {
-      if (error instanceof Error && "code" in error && error.code === "ENOENT")
-        return;
-      throw error;
-    }
-
-    throw new ExpectedCommandDispatchError(
-      "command_failed",
-      "Thread storage has a retention receipt",
-    );
-  }
-
-  await requireUnretained();
-  await killProcessesWithCwdUnder({ directories: [storagePath] });
-  await requireUnretained();
-  await fs.rm(storagePath, { recursive: true, force: true });
+  await removeThreadStorage({
+    rootPath: options.threadStorageRootPath,
+    threadId: command.threadId,
+    missingDirectory: "ignore",
+  });
 }
 
 type ThreadStartRuntimeCommand =

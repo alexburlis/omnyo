@@ -17,7 +17,6 @@ export const Route = createFileRoute("/lab/")({
 const GROUPS = [
   { id: "open", label: "Open concepts" },
   { id: "cinematic-o", label: "Cinematic, built around the 3D O" },
-  { id: "eclipse", label: "Eclipse refinements" },
   { id: "combined", label: "Combined directions" },
   { id: "tools", label: "Working tools" },
 ] as const;

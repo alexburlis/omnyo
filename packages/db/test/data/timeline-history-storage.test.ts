@@ -14,10 +14,6 @@ import { PERSONAL_PROJECT_ID, threadScope } from "@omnyo/domain";
 import { createConnection } from "../../src/connection.js";
 import { insertEvents } from "../../src/data/events.js";
 import { getThreadHistoryEpoch } from "../../src/data/timeline-history-epoch.js";
-import {
-  getThreadTimelineRecord,
-  putThreadTimelineRecord,
-} from "../../src/data/timeline-derived-cache.js";
 import { createThread } from "../../src/data/threads.js";
 import { migrate } from "../../src/migrate.js";
 import { noopNotifier } from "../../src/notifier.js";
@@ -102,7 +98,7 @@ describe("timeline history storage compatibility", () => {
     }
   });
 
-  it("enforces read-only connections and pure expiry reads without migrating, resizing or creating a database", () => {
+  it("enforces read-only history connections without migrating, resizing or creating a database", () => {
     const seeded = createMigratedConnection();
 
     const thread = createThread(seeded, noopNotifier, {
@@ -110,18 +106,6 @@ describe("timeline history storage compatibility", () => {
       providerId: "codex",
     });
 
-    putThreadTimelineRecord(
-      seeded,
-      {
-        key: "retained",
-        threadId: thread.id,
-        body: "opaque redacted body",
-        kind: "root",
-        createdAt: 10,
-        expiresAt: 20,
-      },
-      { maxBytes: 1024, maxEntries: 10, maxEntryBytes: 1024 },
-    );
     const initialEpoch = getThreadHistoryEpoch(seeded, thread.id);
 
     const directory = mkdtempSync(
@@ -145,25 +129,11 @@ describe("timeline history storage compatibility", () => {
       expect(reader.$client.pragma("mmap_size", { simple: true })).toBe(0);
       expect(getThreadHistoryEpoch(reader, thread.id)).toBe(initialEpoch);
       expect(
-        getThreadTimelineRecord(reader, { key: "retained", now: 19 })?.body,
-      ).toBe("opaque redacted body");
-      expect(
-        getThreadTimelineRecord(reader, { key: "retained", now: 20 }),
-      ).toBeNull();
-      expect(
-        getThreadTimelineRecord(reader, { key: "retained", now: 9 }),
-      ).toBeNull();
-      expect(
-        reader.$client
-          .prepare("SELECT count(*) AS count FROM thread_timeline_records")
-          .get(),
-      ).toEqual({ count: 1 });
-      expect(
         reader.$client.prepare("SELECT total_changes() AS count").get(),
       ).toEqual({ count: 0 });
-      expect(() =>
-        reader.$client.prepare("DELETE FROM thread_timeline_records").run(),
-      ).toThrow(/readonly/u);
+      expect(() => reader.$client.prepare("DELETE FROM events").run()).toThrow(
+        /readonly/u,
+      );
       expect(() =>
         reader.$client.exec("CREATE TABLE forbidden (value TEXT)"),
       ).toThrow(/readonly/u);

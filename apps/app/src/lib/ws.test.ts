@@ -201,6 +201,30 @@ describe("WebSocketManager subscriptions", () => {
       },
     ]);
   });
+
+  it("replays only retained targets after offline partial and final releases", () => {
+    const { manager, socket } = createConnectedManager();
+    manager.subscribe(THREAD_TARGET);
+    manager.subscribe({ ...THREAD_TARGET });
+    manager.subscribe(PROJECT_TARGET);
+    socket.sentMessages.length = 0;
+    socket.close();
+    manager.unsubscribe({ ...THREAD_TARGET });
+    manager.unsubscribe(PROJECT_TARGET);
+    manager.unsubscribe(PROJECT_TARGET);
+    expect(readClientMessages(socket)).toEqual([]);
+    socket.open();
+    expect(readClientMessages(socket)).toEqual([
+      { type: "subscribe", target: THREAD_TARGET },
+    ]);
+    manager.unsubscribe({ ...THREAD_TARGET });
+    manager.unsubscribe(THREAD_TARGET);
+    expect(readClientMessages(socket)).toEqual([
+      { type: "subscribe", target: THREAD_TARGET },
+      { type: "unsubscribe", target: THREAD_TARGET },
+    ]);
+    manager.disconnect();
+  });
 });
 
 describe("WebSocketManager thread-open signals", () => {

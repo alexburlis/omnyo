@@ -40,7 +40,7 @@ describe("provider management", () => {
     await withTestHarness(
       { seedFirstPartyProviders: false },
       async (harness) => {
-        await harness.pluginService.install("builtin:provider-acp", {
+        await harness.pluginService.install("builtin:provider-acp-next", {
           kind: "root",
         });
 
@@ -66,7 +66,10 @@ describe("provider management", () => {
         await readCatalog(
           await setProviderEnabled(harness, "acp-opencode", false),
         );
-        await harness.pluginService.setEnabled("provider-acp", false);
+        await harness.pluginService.setEnabled(
+          "omnyo--provider-acp-next",
+          false,
+        );
 
         const catalog = await readCatalog(
           await harness.app.request("/api/v1/system/providers/catalog"),
@@ -95,7 +98,7 @@ describe("provider management", () => {
     await withTestHarness(
       { seedFirstPartyProviders: false },
       async (harness) => {
-        await harness.pluginService.install("builtin:provider-acp", {
+        await harness.pluginService.install("builtin:provider-acp-next", {
           kind: "root",
         });
         await readCatalog(
@@ -114,7 +117,7 @@ describe("provider management", () => {
     await withTestHarness(
       { seedFirstPartyProviders: false },
       async (harness) => {
-        await harness.pluginService.install("builtin:provider-acp", {
+        await harness.pluginService.install("builtin:provider-acp-next", {
           kind: "root",
         });
         await readCatalog(
@@ -145,14 +148,19 @@ describe("provider management", () => {
     await withTestHarness(
       { seedFirstPartyProviders: false },
       async (harness) => {
-        await harness.pluginService.install("builtin:provider-acp", {
+        await harness.pluginService.install("builtin:provider-acp-next", {
           kind: "root",
         });
         await readCatalog(
           await setProviderEnabled(harness, "acp-opencode", false),
         );
-        await harness.pluginService.setEnabled("provider-acp", false);
-        expect(await harness.pluginService.remove("provider-acp")).toBe(true);
+        await harness.pluginService.setEnabled(
+          "omnyo--provider-acp-next",
+          false,
+        );
+        expect(
+          await harness.pluginService.remove("omnyo--provider-acp-next"),
+        ).toBe(true);
         expect(getDisabledProviderIds(harness.db)).toEqual([]);
       },
     );

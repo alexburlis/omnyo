@@ -403,7 +403,7 @@ describe("plugin catalog service", () => {
     const registrations = listBundledPluginRegistrations();
 
     const withSvg = registrations.find(
-      (plugin) => plugin.name === "provider-acp",
+      (plugin) => plugin.name === "provider-acp-next",
     );
 
     const withGlyph = registrations.find(

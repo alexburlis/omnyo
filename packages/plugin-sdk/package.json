@@ -1,7 +1,7 @@
 {
   "name": "@omnyo/plugin-sdk",
   "private": true,
-  "version": "0.6.58",
+  "version": "0.6.59",
   "homepage": "https://github.com/example/omnyo",
   "bugs": {
     "url": "https://github.com/example/omnyo/issues"
@@ -24,6 +24,12 @@
       "types": "./bundled-types/omnyo-plugin-sdk-provider-usage.d.ts",
       "import": "./dist/provider-usage.js",
       "default": "./dist/provider-usage.js"
+    },
+    "./workflow-model": {
+      "source": "./src/workflow-model.ts",
+      "types": "./bundled-types/omnyo-plugin-sdk-workflow-model.d.ts",
+      "import": "./dist/workflow-model.js",
+      "default": "./dist/workflow-model.js"
     },
     "./provider-bridge": {
       "source": "./src/provider-bridge.ts",
@@ -156,7 +162,6 @@
   "devDependencies": {
     "@omnyo/domain": "workspace:*",
     "@omnyo/process-utils": "workspace:*",
-    "@omnyo/provider-bridge-acp": "workspace:*",
     "@omnyo/provider-bridge-acp-next": "workspace:*",
     "@omnyo/provider-bridge-protocol": "workspace:*",
     "@omnyo/sdk": "workspace:*",

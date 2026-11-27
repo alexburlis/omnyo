@@ -1,8 +1,8 @@
+import { RealtimeTargetRetention } from "@omnyo/domain";
 import {
   changedMessageLenientSchema,
   pluginSignalLenientSchema,
   pongMessageLenientSchema,
-  realtimeSubscriptionTargetKey,
   threadOpenSignalLenientSchema,
   threadPaneActionSignalLenientSchema,
   type ChangedMessage,
@@ -81,11 +81,6 @@ export const REALTIME_PING_INTERVAL_MS = 25_000;
 
 export const REALTIME_PONG_TIMEOUT_MS = 5_000;
 
-interface ActiveSubscription {
-  count: number;
-  target: RealtimeSubscriptionTarget;
-}
-
 export function reconnectDelayMs(
   attempt: number,
   options: {
@@ -120,7 +115,7 @@ export function createMobileRealtime(
       console.warn("Ignored invalid realtime message", error);
     });
 
-  const subscriptions = new Map<string, ActiveSubscription>();
+  const subscriptions = new RealtimeTargetRetention();
   const changedCallbacks = new Set<(message: ChangedMessage) => void>();
   const threadOpenCallbacks = new Set<(signal: ThreadOpenSignal) => void>();
 
@@ -350,8 +345,8 @@ export function createMobileRealtime(
       setConnectionState("connected");
       startPingLoop();
 
-      for (const subscription of subscriptions.values()) {
-        send({ type: "subscribe", target: subscription.target });
+      for (const target of subscriptions.values()) {
+        send({ type: "subscribe", target });
       }
 
       const event: MobileRealtimeConnectedEvent = reconnected
@@ -478,31 +473,11 @@ export function createMobileRealtime(
     },
     probeOrReconnect,
     subscribe(target) {
-      const key = realtimeSubscriptionTargetKey(target);
-      const existing = subscriptions.get(key);
-
-      if (existing) {
-        existing.count += 1;
-
-        return;
-      }
-
-      subscriptions.set(key, { count: 1, target });
+      if (!subscriptions.retain(target)) return;
       send({ type: "subscribe", target });
     },
     unsubscribe(target) {
-      const key = realtimeSubscriptionTargetKey(target);
-      const existing = subscriptions.get(key);
-
-      if (!existing) return;
-
-      if (existing.count > 1) {
-        existing.count -= 1;
-
-        return;
-      }
-
-      subscriptions.delete(key);
+      if (!subscriptions.release(target)) return;
       send({ type: "unsubscribe", target });
     },
     onChanged: (callback) => listen(changedCallbacks, callback),

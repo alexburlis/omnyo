@@ -59,6 +59,7 @@ function assertHostRpcAllowedWhileServerMoveFrozen(
 }
 
 interface CallHostOnlineRpcArgs<TCommand extends HostDaemonRpcCommand> {
+  expectedSessionId?: string;
   command: TCommand;
   hostId: string;
   signal?: AbortSignal;
@@ -86,7 +87,9 @@ export async function callHostOnlineRpc(
     assertDirectAccessAdmission(deps, args.hostId);
 
   assertHostRpcAllowedWhileServerMoveFrozen(deps, args.command.type);
-  await waitForReconnectingDaemon(deps, args.hostId);
+
+  if (args.expectedSessionId === undefined)
+    await waitForReconnectingDaemon(deps, args.hostId);
   assertHostActiveForRead(deps, args);
 
   return callHostOnlineRpcWithRetry(deps, args, {
@@ -103,6 +106,9 @@ export async function callHostOnlineRpcForWork(
   deps: WorkSessionDeps,
   args: CallHostOnlineRpcArgs<HostDaemonRpcCommand>,
 ): Promise<HostDaemonRpcResultForCommand> {
+  if (args.expectedSessionId !== undefined)
+    return callHostOnlineRpc(deps, args);
+
   if (!args.command.type.startsWith("server_access."))
     assertDirectAccessAdmission(deps, args.hostId);
 
@@ -443,6 +449,9 @@ function requestHostOnlineRpcResponse(
   return traceTurnRpc(args.command.type, () =>
     deps.hub.requestHostOnlineRpc({
       hostId: args.hostId,
+      ...(args.expectedSessionId === undefined
+        ? {}
+        : { expectedSessionId: args.expectedSessionId }),
       message: {
         type: "host-rpc.request",
         requestId: randomUUID(),

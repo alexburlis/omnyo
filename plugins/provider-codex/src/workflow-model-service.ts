@@ -1,11 +1,15 @@
 import type { PluginApi } from "@omnyo/plugin-sdk";
 import {
-  workflowModelContract,
-  type WorkflowModelCapabilities,
-  type WorkflowModelResult,
-  workflowModelCapabilitiesSchema,
-  workflowModelResultSchema,
-} from "./ai/workflow-contract.js";
+  experimental_workflowModelV1,
+  type ExperimentalWorkflowModelV1Capabilities as WorkflowModelCapabilities,
+  type ExperimentalWorkflowModelV1Result as WorkflowModelResult,
+} from "@omnyo/plugin-sdk/workflow-model";
+
+const {
+  contract: workflowModelContract,
+  capabilitiesSchema: workflowModelCapabilitiesSchema,
+  resultSchema: workflowModelResultSchema,
+} = experimental_workflowModelV1;
 
 export function registerWorkflowModelService(api: PluginApi): void {
   const denied = {

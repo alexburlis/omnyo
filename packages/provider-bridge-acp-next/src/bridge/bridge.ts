@@ -2584,16 +2584,32 @@ async function startAgentSessionWhilePending(
       session.model.beginReplay();
 
       try {
-        const configState = await connection.request({
-          method: restoreMethod,
-          params: {
-            sessionId: request.resumeProviderThreadId,
-            cwd: params.cwd,
-            mcpServers,
+        const restoreSession = (method: "session/resume" | "session/load") =>
+          connection.request({
+            method,
+            params: {
+              sessionId: request.resumeProviderThreadId,
+              cwd: params.cwd,
+              mcpServers,
+            },
+            resultSchema: z.union([acpConfigStateResultSchema, z.null()]),
+            timeoutMs: ACP_SESSION_SETUP_TIMEOUT_MS,
+          });
+
+        const configState = await restoreSession(restoreMethod).catch(
+          (error: unknown) => {
+            if (
+              restoreMethod === "session/resume" &&
+              supportsLoadSession &&
+              error instanceof AcpAgentResponseError &&
+              error.code === BRIDGE_JSON_RPC_ERRORS.METHOD_NOT_FOUND
+            ) {
+              return restoreSession("session/load");
+            }
+
+            throw error;
           },
-          resultSchema: z.union([acpConfigStateResultSchema, z.null()]),
-          timeoutMs: ACP_SESSION_SETUP_TIMEOUT_MS,
-        });
+        );
 
         loadedConfigOptions = configState?.configOptions;
         loadedModels = configState?.models;

@@ -111,7 +111,7 @@ function spawnBridgeLikeTheAgentRuntime(dataDir: string): ChildProcess {
       TSX_LOADER,
       WORKER_ENTRY,
       BRIDGE_MODULE,
-      "provider-acp",
+      "omnyo--provider-acp-next",
       dataDir,
     ],
     { stdio: ["pipe", "pipe", "pipe"] },

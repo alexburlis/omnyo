@@ -12,28 +12,23 @@ import {
 } from "./test/runtime-test-harness.js";
 import type { AgentRuntime } from "./types.js";
 
-function acpBridge(packageName: string, pluginId: string) {
-  return {
-    modulePath: fileURLToPath(
-      new URL(`../../${packageName}/src/bridge/bridge.ts`, import.meta.url),
+const bridge = {
+  modulePath: fileURLToPath(
+    new URL(
+      "../../provider-bridge-acp-next/src/bridge/bridge.ts",
+      import.meta.url,
     ),
-    fakeAgentPath: fileURLToPath(
-      new URL(
-        `../../${packageName}/src/bridge/fake-acp-agent.mjs`,
-        import.meta.url,
-      ),
+  ),
+  fakeAgentPath: fileURLToPath(
+    new URL(
+      "../../provider-bridge-acp-next/src/bridge/fake-acp-agent.mjs",
+      import.meta.url,
     ),
-    pluginId,
-  };
-}
+  ),
+  pluginId: "omnyo--provider-acp-next",
+};
 
-describe.each([
-  { engine: "classic", ...acpBridge("provider-bridge-acp", "provider-acp") },
-  {
-    engine: "next",
-    ...acpBridge("provider-bridge-acp-next", "provider-acp-next"),
-  },
-])("acp process topology ($engine bridge)", (bridge) => {
+describe("acp process topology", () => {
   let workspaceDir: string;
   const runtimes: AgentRuntime[] = [];
 
