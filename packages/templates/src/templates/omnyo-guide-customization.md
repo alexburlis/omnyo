@@ -527,7 +527,7 @@ lists, objects, numbers, and `null`; it reads the current revision, writes with
 it, and retries once on a conflict. `reset` writes the default. The SDK offers
 `sdk.system.uiPreferences.list()`, `.set()`, and `.reset()`.
 
-New installations default to Custom (`chronological`) for `sidebar.organizationMode`.
+New installations default to Custom (`chronological`) for the Thread list plugin's `organizationMode`.
 Migrated installations with existing projects, threads, or UI preferences fall back
 to By project (`project`). Explicit server choices take precedence over legacy
 browser choices, which take precedence over this installation fallback. Reset
@@ -549,15 +549,15 @@ selected.
 Every thread-list header's actions menu offers New project, New section,
 Organize, Sort by, and Filter. Organize selects By project,
 By machine, or Custom and retains Groups → By environment.
-The separate `sidebar.threadGrouping.environment` preference
+The Thread list plugin's `environmentGrouping` preference
 decides whether sibling threads sharing one worktree collapse into a single row.
 It defaults to `auto`, which groups them
-everywhere except Custom: `omnyo settings ui set sidebar.threadGrouping.environment
+everywhere except Custom: `omnyo thread-list prefs set environmentGrouping
 false` keeps every thread on its own row, and `true` groups them in every mode.
 Sort by selects a field, and selecting it again reverses its arrow/direction.
-`sidebar.sortDirection` accepts `ascending`, `descending`, or `default`.
+The plugin's `sortDirection` preference accepts `ascending`, `descending`, or `default`.
 The default preserves each field's original order (newest first for dates,
-A–Z for titles). For example: `omnyo settings ui set sidebar.sortDirection ascending`.
+A–Z for titles). For example: `omnyo thread-list prefs set sortDirection ascending`.
 
 Thread-list visibility
 

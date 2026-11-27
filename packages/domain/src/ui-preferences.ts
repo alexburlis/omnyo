@@ -134,42 +134,42 @@ export const uiPreferenceDefinitions = {
   "sidebar.organizationMode": defineUiPreference(
     sidebarOrganizationModeSchema,
     "chronological",
-    "How the sidebar groups threads: by project, Custom (chronological), or by machine. New installations default to Custom; migrated installations with existing work or preferences fall back to By project.",
+    "Legacy: copied once into the Thread list plugin on its first start and no longer read. Use `omnyo thread-list prefs set organizationMode`.",
   ),
   "sidebar.threadGrouping.environment": defineUiPreference(
     sidebarThreadGroupingSchema,
     "auto",
-    "Whether sibling threads sharing a worktree environment collapse into one row. auto groups them in every organization mode except Custom.",
+    "Legacy: copied once into the Thread list plugin on its first start and no longer read. Use `omnyo thread-list prefs set environmentGrouping`.",
   ),
   "sidebar.chronologicalSort": defineUiPreference(
     sidebarChronologicalSortSchema,
     "updated",
-    "Sort order for the chronological sidebar organization.",
+    "Legacy: copied once into the Thread list plugin on its first start and no longer read. Use `omnyo thread-list prefs set chronologicalSort`.",
   ),
   "sidebar.sortDirection": defineUiPreference(
     z.enum(["default", "ascending", "descending"]),
     "default",
-    "Sidebar thread sort direction; default preserves the selected field's original direction.",
+    "Legacy: copied once into the Thread list plugin on its first start and no longer read. Use `omnyo thread-list prefs set sortDirection`.",
   ),
   "sidebar.sectionOrder": defineUiPreference(
     uiPreferenceStringListSchema,
     ["pinned", "projects", "threads"],
-    "Top-level section order when the sidebar is organized by project.",
+    "Legacy: copied once into the Thread list plugin on its first start and no longer read. Use `omnyo thread-list prefs set sectionOrder`.",
   ),
   "sidebar.manualSectionOrder": defineUiPreference(
     uiPreferenceStringListSchema,
     ["pinned", "sections", "threads"],
-    "Top-level section order when the sidebar is organized chronologically.",
+    "Legacy: copied once into the Thread list plugin on its first start and no longer read. Use `omnyo thread-list prefs set manualSectionOrder`.",
   ),
   "sidebar.machineSectionOrder": defineUiPreference(
     uiPreferenceStringListSchema,
     ["pinned", "machines", "threads"],
-    "Top-level section order when the sidebar is organized by machine.",
+    "Legacy: copied once into the Thread list plugin on its first start and no longer read. Use `omnyo thread-list prefs set machineSectionOrder`.",
   ),
   "sidebar.hiddenGroups": defineUiPreference(
     sidebarHiddenGroupsSchema,
     [],
-    "Project, custom section, and machine groups moved into More, using project:<id>, section:<id>, or machine:<id>. Setting this list replaces the hidden groups across all sidebar organizations; reset shows every group.",
+    "Projects hidden in the project rail, using project:<id>. The thread list's hidden groups are the Thread list plugin's hiddenGroups preference: `omnyo thread-list prefs set hiddenGroups`. Other values are a legacy copy imported once into the plugin.",
   ),
   "sidebar.footerOrder": defineUiPreference(
     uiPreferenceStringListSchema,

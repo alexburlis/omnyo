@@ -38,12 +38,13 @@ another plugin. The SDK exposes the same setting through `uiPreferences`.
 `sidebar.pluginPanelOrder` and `sidebar.visiblePluginPanels` order and show or
 hide the navigation rail's destinations (see Navigation rail below).
 
-- The server keeps a keyed, revisioned registry of sidebar layout preferences
-  (`sidebar.organizationMode`, `sidebar.threadGrouping.environment`,
-  `sidebar.chronologicalSort`, the section
-  orders, the collapsed-id lists, `sidebar.hiddenGroups`,
+- The server keeps a keyed, revisioned registry of sidebar preferences
+  (`sidebar.hiddenGroups`, which hides projects in the project rail,
   `sidebar.pluginPanelOrder`, `sidebar.visiblePluginPanels`,
-  `sidebar.threadListProvider`).
+  `sidebar.threadListProvider`). The thread list's own layout (organization
+  mode, sort, section orders, hidden and collapsed groups) belongs to the Thread
+  list plugin: use `omnyo thread-list prefs`. The older `sidebar.*` layout keys
+  are copied into the plugin once on its first start and no longer read.
 - The same registry stores `infoPanel.collapsedSections`, the thread Info panel
   sections collapsed from their headings (`commits`, `uncommittedChanges`,
   `childThreads`, `forks`, `threadStorage`). Read or change it with
@@ -58,17 +59,16 @@ hide the navigation rail's destinations (see Navigation rail below).
   through SDK/CLI. Active includes threads with saved messages; Search threads
   retains existing title and conversation matching. Archived recents load only while selected and are
   bounded at the server.
-- `sidebar.organizationMode` defaults to Custom (`chronological`) on new installs.
+- The Thread list plugin's `organizationMode` defaults to Custom (`chronological`) on new installs.
   Migrated installs with existing projects, threads, or UI preferences fall back to
   By project (`project`). Saved server choices win over legacy browser choices,
   which win over the installation fallback. Reset saves that fallback explicitly.
-- `sidebar.threadGrouping.environment` decides whether sibling threads sharing
+- The plugin's `environmentGrouping` preference decides whether sibling threads sharing
   one worktree environment collapse into a single worktree row inside their
   section: `true` groups them and `false` keeps every thread on its own row, in
   every organization mode. The default `auto` groups them in By project and By
   machine and leaves them flat in Custom. Set it through Organize → Groups →
-  By environment, settings, or the CLI. Each `sidebar.threadGrouping.*` key
-  toggles one grouping dimension independently.
+  By environment, settings, or `omnyo thread-list prefs set environmentGrouping <value>`.
 - `omnyo settings ui list [--json]` prints every key with its value, revision,
   and description; `omnyo settings ui get <key> [--json]` prints one.
 - `omnyo settings ui set <key> <value> [--json]` takes a plain string for enum

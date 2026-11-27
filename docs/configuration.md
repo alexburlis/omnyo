@@ -401,7 +401,7 @@ normal work.
 ## Common Keys
 
 | Key                               | Command                                               | When to set             | Used for                                                                                                                                                                                                                                    |
-| --------------------------------- | ----------------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| --------------------------------- | ----------------------------------------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `OMNYO_APP_URL`                   | `omnyo-app config`                                    | Optional for remote use | Human-facing app URL used for generated links and allowed browser origins. Leave empty for local-only use.                                                                                                                                  |
 | `OMNYO_APP_ALIAS_URLS`            | `omnyo-app config`                                    | Optional extra hosts    | Comma-separated absolute https origins accepted as additional request hosts and browser origins beside `OMNYO_APP_URL`. No paths, credentials or wildcards. Generated links still use `OMNYO_APP_URL`.                                      |
 | `OMNYO_SERVER_URL`                | `omnyo-app config`                                    | Remote CLI/host use     | Server URL for standalone `omnyo` CLI and `host-daemon` commands on the current machine. A delegated CLI in a managed thread uses its inherited loopback proxy URL and matching headers. Other standalone CLI launches prefer the saved `serverUrl`, then the environment, then `http://127.0.0.1:38886`.                       |
@@ -1568,13 +1568,13 @@ client wrote first, so a stale window cannot silently clobber a newer value.
 
 | Key                                  | Value                                                                                                            |
 | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| `sidebar.organizationMode`           | `project`, `chronological`, or `machine`                                                                         |
-| `sidebar.threadGrouping.environment` | `auto`, `true`, or `false`                                                                                       |
-| `sidebar.chronologicalSort`          | `updated`, `created`, `alpha`, or `none`                                                                         |
-| `sidebar.sectionOrder`               | Section id list for **By project**                                                                               |
-| `sidebar.manualSectionOrder`         | Section id list for **Manually**                                                                                 |
-| `sidebar.machineSectionOrder`        | Section id list for **By machine**                                                                               |
-| `sidebar.hiddenGroups`               | Legacy project, custom section, and machine ids migrated once into the Thread list plugin                        |
+| `sidebar.organizationMode`           | Legacy import source: `project`, `chronological`, or `machine`                                                   |
+| `sidebar.threadGrouping.environment` | Legacy import source: `auto`, `true`, or `false`                                                                 |
+| `sidebar.chronologicalSort`          | Legacy import source: `updated`, `created`, `alpha`, or `none`                                                   |
+| `sidebar.sectionOrder`               | Legacy import source: section id list for **By project**                                                         |
+| `sidebar.manualSectionOrder`         | Legacy import source: section id list for **Custom**                                                             |
+| `sidebar.machineSectionOrder`        | Legacy import source: section id list for **By machine**                                                         |
+| `sidebar.hiddenGroups`               | Projects hidden in the project rail (`project:<id>`); also a legacy import source for the Thread list plugin     |
 | `sidebar.footerOrder`                | Footer action order                                                                                              |
 | `sidebar.hiddenFooterItems`          | Footer actions moved into More, plus `pinned:<key>` built-in actions added to the footer                         |
 | `sidebar.pluginPanelOrder`           | Rail destination order                                                                                           |
@@ -1584,6 +1584,14 @@ client wrote first, so a stale window cannot silently clobber a newer value.
 | `modelPicker.favorites`              | Ordered favorite provider, model, reasoning, and tier objects ([Model picker](#model-picker))                    |
 | `modelPicker.hiddenModels`           | Object of provider id to hidden model id lists                                                                   |
 | `modelPicker.footerFavorites`        | Show favorites as the composer's model switcher, `true` (default) or `false`                                     |
+
+The sidebar thread list's layout (organization mode, grouping, sort, section
+order, hidden groups, and collapsed groups) belongs to the Thread list plugin.
+The rows marked legacy are copied into the plugin once, on its first start,
+and are not read afterward. Change the layout with `omnyo thread-list prefs`,
+for example `omnyo thread-list prefs set organizationMode machine`. The
+thread list's hidden groups are the plugin's `hiddenGroups` preference;
+`sidebar.hiddenGroups` only hides projects in the project rail.
 
 The sidebar thread list defaults to `__automatic__`: the first installed thread list
 plugin other than the bundled Thread list plugin (`thread-list/thread-list`), or the
@@ -1611,7 +1619,7 @@ background, and the sidebar and page sit in a card below it. On narrow windows
 and phones the rail sits inside the drawer: Home, Plugins, Skills, and Settings
 swap the list beside it and leave the drawer open, and a plugin page closes it.
 
-New installations default to Custom (`chronological`) for `sidebar.organizationMode`.
+New installations default to Custom (`chronological`) for the Thread list plugin's `organizationMode`.
 Migrated installations with existing projects, threads, or UI preferences fall back
 to By project (`project`). Explicit server choices take precedence over legacy
 browser choices, which take precedence over this installation fallback. Reset
@@ -1640,18 +1648,15 @@ Search uses the existing
 ranked Active/Archived response and displays the selected groups, with six initial
 rows in one group or three each when both are nonempty, plus Show more.
 
-`sidebar.threadGrouping.environment` decides whether two or more sibling threads
+The Thread list plugin's `environmentGrouping` preference decides whether two or more sibling threads
 that share one worktree environment collapse into a single worktree row inside
 their section. `true` groups them and `false` keeps every thread on its own row,
 in every organization mode. The default, `auto`, groups them in **By project**
 and **By machine** and leaves them flat in **Custom**, which is how each mode
 behaved before the preference existed. Set this preference through Organize →
 Groups → By environment, settings, or
-`omnyo settings ui set sidebar.threadGrouping.environment true`; an explicit
+`omnyo thread-list prefs set environmentGrouping true`; an explicit
 `true` or `false` applies to every mode.
-
-Each `sidebar.threadGrouping.*` key toggles one grouping dimension
-independently, so a future dimension adds a key rather than changing this one.
 
 Read and write them with:
 
@@ -1663,8 +1668,8 @@ omnyo settings ui reset <key> [--json]
 ```
 
 `set` takes a plain string for enum and provider keys and JSON for lists,
-objects, numbers, and `null`, for example `omnyo settings ui set sidebar.organizationMode machine` or
-`omnyo settings ui set sidebar.sectionOrder '["threads","pinned","projects"]'`.
+objects, numbers, and `null`, for example `omnyo settings ui set sidebar.footerOrder '["builtin:report-bug","builtin:mobile"]'`
+or `omnyo settings ui set modelPicker.footerFavorites false`.
 It reads the current revision first and retries once on a conflict. `reset`
 writes the default and advances the revision. The SDK exposes the same
 operations as `sdk.system.uiPreferences.list()`, `.set({ key, value,
