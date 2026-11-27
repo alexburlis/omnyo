@@ -1,6 +1,6 @@
 import { definePluginApp } from "@omnyo/plugin-sdk/app";
 import { panelAction } from "./components/thread-panel-action";
-import { CanvasHeaderButton } from "./components/header";
+import { CanvasHeaderButton, compactCanvasAction } from "./components/header";
 import { modeMenuItem, modePopup } from "./components/mode-toggle";
 import { CanvasFullScreen } from "./components/fullscreen";
 import { CanvasPanel } from "./components/panel";
@@ -22,6 +22,7 @@ export default definePluginApp((app) => {
   app.slots.experimental_projectSidebarItems(projectSidebarItems);
   app.slots.commandPaletteAction(projectPaletteAction);
   app.slots.experimental_threadAction(projectThreadAction);
+  app.slots.experimental_threadAction(compactCanvasAction);
   app.slots.experimental_appOverlay({ id: "project-entry-points", component: ProjectEntryPoints });
   app.slots.navPanel({
     id: "project-canvas",
