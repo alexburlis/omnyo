@@ -414,6 +414,7 @@ export function createPluginCatalogService(deps: {
   }
 
   async function catalogSearchResult(args: {
+    query: string;
     entry: MarketplaceEntry;
     row: PluginMarketplaceRow;
     catalog: MarketplaceManifest;
@@ -431,6 +432,37 @@ export function createPluginCatalogService(deps: {
     if (bundled !== undefined && manifest === null) return null;
     const pluginId = bundled?.pluginId ?? entry.id;
     const entryId = bundled?.name ?? entry.id;
+
+    const displayName = manifest?.name ?? entry.displayName;
+    const description = manifest?.description ?? entry.description;
+
+    const metadata = catalogEntryMetadata({
+      manifest: catalog,
+      entry,
+      base: marketplaceRowIconBase(row),
+    });
+
+    if (
+      args.query.length > 0 &&
+      ![
+        entryId,
+        pluginId,
+        displayName,
+        description,
+        metadata.category ?? "",
+        catalog.displayName,
+        ...(entry.tags ?? []),
+        ...(manifest?.providerCatalog.flatMap(({ id, displayName }) => [
+          id,
+          displayName,
+        ]) ?? []),
+        ...(manifest?.keywords.flatMap((keyword) => [
+          keyword,
+          keyword.replaceAll("-", " "),
+        ]) ?? []),
+      ].some((term) => term.toLowerCase().includes(args.query))
+    )
+      return null;
 
     const bundledIconAsset =
       manifest === null ? null : await bundledIcon(manifest);
@@ -457,12 +489,6 @@ export function createPluginCatalogService(deps: {
             sdkRange: manifest.pluginSdkRange,
           });
 
-    const metadata = catalogEntryMetadata({
-      manifest: catalog,
-      entry,
-      base: marketplaceRowIconBase(row),
-    });
-
     const overview = entryOverview(entry, deps.warn);
 
     const installed =
@@ -475,8 +501,8 @@ export function createPluginCatalogService(deps: {
     return {
       entryId,
       pluginId,
-      displayName: manifest?.name ?? entry.displayName,
-      description: manifest?.description ?? entry.description,
+      displayName,
+      description,
       icon: manifest?.branding.icon ?? entryIconName(entry),
       ...iconAsset,
       ...metadata,
@@ -1174,6 +1200,7 @@ export function createPluginCatalogService(deps: {
               return null;
 
             const result = await catalogSearchResult({
+              query,
               entry,
               row,
               catalog,
@@ -1188,8 +1215,6 @@ export function createPluginCatalogService(deps: {
             return result === null
               ? null
               : {
-                  pluginId,
-                  tags: entry.tags ?? [],
                   marketplaceRank: index,
                   result,
                 };
@@ -1202,22 +1227,6 @@ export function createPluginCatalogService(deps: {
       );
 
       return catalogEntries
-        .filter(
-          (entry) =>
-            query.length === 0 ||
-            [
-              entry.result.entryId,
-              entry.pluginId,
-              entry.result.displayName,
-              entry.result.description,
-              entry.result.category ?? "",
-              entry.result.marketplaceDisplayName,
-              ...entry.tags,
-            ]
-              .join("\n")
-              .toLowerCase()
-              .includes(query),
-        )
         .sort((left, right) => {
           const marketplaceDifference =
             left.marketplaceRank - right.marketplaceRank;

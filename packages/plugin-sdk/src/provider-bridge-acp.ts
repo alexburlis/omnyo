@@ -31,11 +31,10 @@
  * agent from another lives beside the protocol: grok stamps
  * `_meta["x.ai/tool"]` on every tool event, Cursor reports sub-agents
  * through a vendor `cursor/task` request. A dialect is a small module that
- * reads those channels; the bridge ships `generic`, `cursor` and `grok`,
- * named by id in the registration's bridge options (`acpDialect`). The
- * dialect registry itself is not public yet: no plugin has needed to supply
- * one, and its shape (process-global, unversioned hooks) is still open — see
- * docs/api_to_audit.md.
+ * reads those channels. The built-in dialect IDs are `acp` (generic),
+ * `cursor`, `grok`, `omp` and `opencode`. Set `acpDialect` in the
+ * registration's bridge options. To register a custom dialect, import
+ * `experimental_registerAcpDialect` from `provider-bridge/acp-next`.
  *
  * Curated by hand — named exports only, never `export *`. Value exports
  * carry the `experimental_` prefix every new plugin API member ships with

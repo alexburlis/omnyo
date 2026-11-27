@@ -218,6 +218,7 @@ const pluginManifestV1ImportSchema = z
   .object({
     name: requiredManifestString,
     version: requiredManifestString,
+    keywords: z.unknown().optional(),
     author: packageAuthorSchema.optional(),
     repository: z.unknown().optional(),
     engines: z

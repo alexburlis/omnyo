@@ -4369,7 +4369,7 @@ export const POLISH_CHANGES: readonly PolishChange[] = [
     kind: "visual",
     storyId: null,
     beforeStoryId: null,
-    howToSee: "Settings → ACP Providers (New Adapter) → Agent registry.",
+    howToSee: "Settings → ACP Providers → Agent registry.",
     before:
       "Every installable agent had a bright filled 'Add' or 'Update' button, so a long list was a column of competing primary buttons. 'Remove' was an outline button, and every status badge was the same grey block, so 'Update available' looked like 'Added'. Icons were bare 14 px glyphs, a long note broke mid-word ('co mmand'), and the list was a flat box.",
     after:

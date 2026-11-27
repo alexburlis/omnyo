@@ -27,6 +27,7 @@ export interface PluginManifest {
   name: string;
   shortName: string | null;
   description: string;
+  keywords: string[];
   author?: PluginPackageJson["author"] | null;
   repositoryUrl?: string | null;
   branding: {
@@ -280,6 +281,11 @@ export async function readPluginManifest(
     name: omnyo.name,
     shortName: omnyo.shortName ?? null,
     description: omnyo.description,
+    keywords: Array.isArray(parsed.data.keywords)
+      ? parsed.data.keywords.filter(
+          (value): value is string => typeof value === "string",
+        )
+      : [],
     author: author ?? null,
     repositoryUrl: pluginRepositoryUrl(repository),
     branding: {
