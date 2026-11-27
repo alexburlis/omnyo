@@ -256,11 +256,13 @@ push code to Linux clients. Treat the release token accordingly.
 depends on `omnyo-app: workspace:*`, and the displayed release version string must
 match `packages/omnyo-app/package.json`.
 
-This repository releases through `pnpm private:ship --version <version>` (see
-[docs/private-ship.md](../../docs/private-ship.md)); its release commit writes both
-versions, and `--mac` or `--windows` adds the desktop builds. The bump script,
-`sawyer-next` flow and `build-desktop.yml` steps below are upstream get-bb/bb's
-public release process.
+Public macOS releases use `pnpm public:mac-release`, which builds the
+`public-beta` channel (see
+[docs/public-release-turnaround.md](../../docs/public-release-turnaround.md)).
+The `latest` and `nightly` channels build Omnyo Private; its release tooling
+(`pnpm private:ship`) is not part of this repository. The bump script, `sawyer-next` flow and
+`build-desktop.yml` steps below are upstream get-bb/bb's public release
+process.
 
 To bump for a release:
 
