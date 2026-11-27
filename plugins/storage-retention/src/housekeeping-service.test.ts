@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { scratchDirectory } from "./managed-test-fixture.js";
 import { afterEach, expect, it } from "vitest";
 import {
   createFakePluginHost,
@@ -11,8 +12,6 @@ import {
   defaultHousekeepingBudget,
   housekeepingHostContract,
 } from "./housekeeping-contract.js";
-
-const scratch = "/Users/developer/scratch/omnyo/codex-20261113--managed-cleanup";
 
 const directories: string[] = [];
 
@@ -41,9 +40,7 @@ async function fixture(
     lostPruneResponse?: boolean;
   } = {},
 ) {
-  const directory = await fs.mkdtemp(
-    path.join(scratch, "housekeeping-service-fixture-"),
-  );
+  const directory = await scratchDirectory("housekeeping-service-fixture-");
 
   directories.push(directory);
   let clock = 1000;

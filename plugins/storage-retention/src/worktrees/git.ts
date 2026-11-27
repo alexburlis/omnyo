@@ -578,6 +578,7 @@ export async function discover(
         return;
       } catch (error) {
         if (error instanceof DiscoveryLimit) throw error;
+        let message = error instanceof Error ? error.message : String(error);
 
         if (!recognized && gitEntry.isFile()) {
           const contents = await readGitMetadataAt(
@@ -594,19 +595,12 @@ export async function discover(
                 () => false,
                 (cause) => missingFile.safeParse(cause).success,
               )
-            ) {
-              errors.push(
-                `${canonical}: Git metadata directory is missing at ${target}`,
-              );
-
-              return;
-            }
+            )
+              message = `Git metadata directory is missing at ${target}`;
           }
         }
 
-        errors.push(
-          `${canonical}: ${error instanceof Error ? error.message : String(error)}`,
-        );
+        errors.push(`${canonical}: ${message}`);
 
         if (recognized) return;
       }

@@ -47,8 +47,8 @@ it("distinguishes inactive missing workspaces from missing sources and broken Gi
   );
 
   const umbrella = join(root, "project");
-  const child = join(umbrella, "repo");
   const broken = join(umbrella, "broken");
+  const child = join(broken, "repo");
   const missingSource = join(root, "missing-project");
   const inactive = join(root, "inactive");
   const protectedPath = join(root, "protected");

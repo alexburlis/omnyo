@@ -28,12 +28,17 @@ export function managedExact(allocation: ManagedAllocation) {
   };
 }
 
+export async function scratchDirectory(prefix: string) {
+  const scratch = path.join(os.homedir(), "scratch", "omnyo");
+  await fs.mkdir(scratch, { recursive: true });
+
+  return fs.mkdtemp(path.join(scratch, prefix));
+}
+
 export async function managedFixture(
   overrides: Partial<ManagedHostOptions> = {},
 ) {
-  const scratch = path.join(os.homedir(), "scratch", "omnyo");
-  await fs.mkdir(scratch, { recursive: true });
-  const root = await fs.mkdtemp(path.join(scratch, "managed-host-test-"));
+  const root = await scratchDirectory("managed-host-test-");
   const home = path.join(root, "home");
   await fs.mkdir(home);
   let clock = Date.now();

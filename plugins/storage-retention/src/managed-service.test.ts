@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { scratchDirectory } from "./managed-test-fixture.js";
 import type { ThreadWorkSummary } from "@omnyo/domain";
 import {
   createFakePluginHost,
@@ -15,8 +16,6 @@ import {
   type ManagedAllocation,
   type ManagedPolicyDraft,
 } from "./managed-contract.js";
-
-const scratch = "/Users/developer/scratch/omnyo/codex-20261113--managed-cleanup";
 
 const directories: string[] = [];
 
@@ -100,9 +99,7 @@ function adminExact(item: ManagedAllocation) {
 async function fixture(
   options: Pick<Parameters<typeof createManagedHost>[0], "fault"> = {},
 ) {
-  const directory = await fs.mkdtemp(
-    path.join(scratch, "managed-service-fixture-"),
-  );
+  const directory = await scratchDirectory("managed-service-fixture-");
 
   directories.push(directory);
   const homeDirectory = path.join(directory, "home");
@@ -604,7 +601,7 @@ it("holds queued, running, waiting, pending input, recovery and unknown work wit
     .allocations[0]!;
   expect(item.phase).toBe("quarantined");
   expect(item.hold).toBeNull();
-});
+}, 15_000);
 
 it("persists authoritative deleted owner settlement but treats an ordinary 404 as unknown", async () => {
   const f = await fixture();

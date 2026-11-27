@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { scratchDirectory } from "./managed-test-fixture.js";
 import { randomUUID } from "node:crypto";
 import { afterEach, expect, it } from "vitest";
 import {
@@ -16,8 +17,6 @@ import {
   housekeepingHostContract,
   type HousekeepingRun,
 } from "./housekeeping-contract.js";
-
-const scratch = "/Users/developer/scratch/omnyo/codex-20261113--managed-cleanup";
 
 const directories: string[] = [];
 
@@ -53,9 +52,7 @@ function run(overrides: Partial<HousekeepingRun> = {}): HousekeepingRun {
 }
 
 async function directory() {
-  const directory = await fs.mkdtemp(
-    path.join(scratch, "housekeeping-host-fixture-"),
-  );
+  const directory = await scratchDirectory("housekeeping-host-fixture-");
 
   directories.push(directory);
 
