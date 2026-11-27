@@ -747,4 +747,27 @@ describe("Skill detail recipe", () => {
 
     expect(chunks.join("\n")).toBe(fenced);
   });
+
+  it.each([
+    ["a tilde line inside a backtick fence", "```bash", "~~~", "```"],
+    ["a shorter run inside a longer fence", "````md", "```", "````"],
+  ])("keeps %s from closing the fence", (_, opener, inner, closer) => {
+    const fenced = [
+      opener,
+      ...Array.from({ length: 118 }, (_, i) => `command ${i}`),
+      inner,
+      "",
+      "still code",
+      closer,
+      "",
+      "outro",
+    ].join("\n");
+
+    const chunks = splitMarkdownIntoChunks(fenced);
+
+    expect(chunks).toHaveLength(2);
+    expect(chunks[0]).toContain("still code");
+    expect(chunks[1]).toBe("outro");
+    expect(chunks.join("\n")).toBe(fenced);
+  });
 });

@@ -222,17 +222,33 @@ export function splitMarkdownIntoChunks(content: string): string[] {
   const lines = content.split("\n");
   const chunks: string[] = [];
   let current: string[] = [];
-  let inFence = false;
+  let openFence: { char: string; length: number } | null = null;
 
   for (const line of lines) {
     current.push(line);
 
-    if (/^\s*(```|~~~)/u.test(line)) {
-      inFence = !inFence;
+    const fence = /^\s*(`{3,}|~{3,})(.*)$/u.exec(line);
+
+    if (fence) {
+      const run = fence[1] ?? "";
+      const rest = fence[2] ?? "";
+      const char = run.charAt(0);
+
+      if (!openFence) {
+        if (char !== "`" || !rest.includes("`")) {
+          openFence = { char, length: run.length };
+        }
+      } else if (
+        char === openFence.char &&
+        run.length >= openFence.length &&
+        rest.trim() === ""
+      ) {
+        openFence = null;
+      }
     }
 
     if (
-      !inFence &&
+      !openFence &&
       current.length >= SKILL_CONTENT_CHUNK_LINES &&
       line.trim() === ""
     ) {
