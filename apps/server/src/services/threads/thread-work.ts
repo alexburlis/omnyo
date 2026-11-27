@@ -6,7 +6,6 @@ import {
   installedPlugins,
   listRetryingFailures,
   pendingInteractions,
-  queuedThreadMessages,
   readStoredThreadWork,
   readThreadAttentionFacts,
   threadPluginMetadata,
@@ -35,6 +34,7 @@ import {
   type ThreadWorkWait,
 } from "@omnyo/domain";
 import type { NotificationHub } from "../../ws/hub.js";
+import { ThreadWorkFacts } from "./thread-work-facts.js";
 import {
   readBoundCompletionReports,
   readWorkContinuations,
@@ -490,6 +490,7 @@ export function buildThreadWorkSummaries(
   roots: readonly ThreadWorkSource[],
   resolveSources: ResolveThreadWorkSources,
   attentionFacts?: ReadonlyMap<string, ThreadAttentionFacts>,
+  workFacts = new ThreadWorkFacts(db),
 ): Map<string, ThreadWorkSummary> {
   const graph = collectThreadWorkGraph(
     db,
@@ -553,15 +554,8 @@ export function buildThreadWorkSummaries(
     Array<Pick<typeof pendingInteractions.$inferSelect, "id" | "status">>
   >();
 
-  const queue = new Map<
-    string,
-    Array<
-      Pick<
-        typeof queuedThreadMessages.$inferSelect,
-        "id" | "sendAt" | "failureReason" | "waitingOn"
-      >
-    >
-  >();
+  workFacts.ensure(ids);
+  const queue = workFacts.queue;
 
   for (let offset = 0; offset < ids.length; offset += 400) {
     const batch = ids.slice(offset, offset + 400);
@@ -583,22 +577,6 @@ export function buildThreadWorkSummaries(
       const entries = interactions.get(row.threadId) ?? [];
       entries.push(row);
       interactions.set(row.threadId, entries);
-    }
-
-    for (const row of db
-      .select({
-        id: queuedThreadMessages.id,
-        threadId: queuedThreadMessages.threadId,
-        sendAt: queuedThreadMessages.sendAt,
-        failureReason: queuedThreadMessages.failureReason,
-        waitingOn: queuedThreadMessages.waitingOn,
-      })
-      .from(queuedThreadMessages)
-      .where(inArray(queuedThreadMessages.threadId, batch))
-      .all()) {
-      const entries = queue.get(row.threadId) ?? [];
-      entries.push(row);
-      queue.set(row.threadId, entries);
     }
   }
 

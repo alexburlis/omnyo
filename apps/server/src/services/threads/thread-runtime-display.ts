@@ -1,4 +1,5 @@
 import { readThreadServiceTier } from "./thread-session-options.js";
+import type { ThreadWorkFacts } from "./thread-work-facts.js";
 import { getLastExecutionOptions } from "./thread-events.js";
 import {
   buildThreadWorkSummaries,
@@ -81,6 +82,7 @@ interface ToThreadResponseWithHostArgs extends ToThreadResponseFromThreadArgs {
 }
 
 interface ToThreadListEntryResponsesArgs {
+  workFacts?: ThreadWorkFacts;
   now?: number;
   threads: readonly ThreadWithPendingInteractionState[];
 }
@@ -639,6 +641,7 @@ export function toThreadListEntryResponses(
     entries,
     threadWorkSourceResolver(deps),
     attentionFacts,
+    args.workFacts,
   );
 
   return entries.map((entry) => ({

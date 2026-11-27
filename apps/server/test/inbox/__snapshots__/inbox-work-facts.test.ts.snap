@@ -1,0 +1,5 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`pins inbox and public work output with 0 expanded sources 1`] = `"56957e36b92438605cfc5407d73bfb97a8d9c5b4ea3ea271b5fa77f1cd34aeee"`;
+
+exports[`pins inbox and public work output with 3 expanded sources 1`] = `"56957e36b92438605cfc5407d73bfb97a8d9c5b4ea3ea271b5fa77f1cd34aeee"`;
