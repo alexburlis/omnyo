@@ -1,0 +1,1151 @@
+import type { PluginApi, PluginThreadEventPayloads } from "@omnyo/plugin-sdk";
+import { createFakePluginHost, makeThreadResponse } from "@omnyo/plugin-sdk/testing";
+import { EnvHttpProxyAgent } from "undici";
+import { describe, expect, it, vi } from "vitest";
+import { listPushSubscriptionsOutputSchema } from "./contract.js";
+import { createEnrollment } from "./test-support/enrollment.js";
+import { createPushNotificationsPlugin } from "./server.js";
+import type { ExpoPushMessage, PushSenderFetch } from "./sender.js";
+
+type ThreadResponse = PluginThreadEventPayloads["thread.idle"]["thread"];
+
+type ThreadListEntry = Awaited<ReturnType<PluginApi["sdk"]["threads"]["list"]>>[number];
+
+type PendingInteraction = PluginThreadEventPayloads["interaction.pending"]["interaction"];
+
+const COALESCE_MS = 10;
+
+const EXPO_URL = "http://expo.test/push";
+
+interface FakeExpo {
+  fetch: PushSenderFetch;
+  requests: ExpoPushMessage[][];
+  ticketErrors: Map<string, string>;
+  urls: string[];
+}
+
+function createFakeExpo(): FakeExpo {
+  const requests: ExpoPushMessage[][] = [];
+  const ticketErrors = new Map<string, string>();
+  const urls: string[] = [];
+
+  const fetch: PushSenderFetch = async (url, init) => {
+    urls.push(url);
+    expect(init.dispatcher).toBeInstanceOf(EnvHttpProxyAgent);
+    // SAFETY: The sender serializes its typed ExpoPushMessage array into this body.
+    const messages = JSON.parse(init.body) as ExpoPushMessage[];
+    requests.push(messages);
+
+    return {
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          data: messages.map((message) => {
+            const error = ticketErrors.get(message.to);
+
+            return error === undefined
+              ? { status: "ok", id: `ticket-${message.to}` }
+              : { status: "error", details: { error } };
+          }),
+        }),
+    };
+  };
+
+  return { fetch, requests, ticketErrors, urls };
+}
+
+function pendingQuestion(threadId: string, prompt: string): PendingInteraction {
+  return {
+    id: `interaction-${threadId}`,
+    threadId,
+    status: "pending",
+    statusReason: null,
+    createdAt: 1,
+    expiresAt: null,
+    resolvedAt: null,
+    turnId: `turn-${threadId}`,
+    providerId: "codex",
+    providerThreadId: `provider-${threadId}`,
+    providerRequestId: `request-${threadId}`,
+    origin: {
+      kind: "provider",
+      providerId: "codex",
+      providerThreadId: `provider-${threadId}`,
+      providerRequestId: `request-${threadId}`,
+    },
+    payload: {
+      kind: "user_question",
+      questions: [
+        {
+          id: "question-1",
+          prompt,
+          multiSelect: false,
+          allowFreeText: true,
+        },
+      ],
+    },
+    resolution: null,
+  };
+}
+
+interface SetupOptions {
+  appUrl?: string | null;
+  expo?: FakeExpo;
+  fetch?: PushSenderFetch;
+  now?: () => number;
+}
+
+async function setup(options: SetupOptions = {}) {
+  const expo = options.expo ?? createFakeExpo();
+  const threads = new Map<string, ThreadResponse>();
+  const listState = new Map<string, Partial<ThreadListEntry>>();
+  const interactions = new Map<string, PendingInteraction[]>();
+  const enrollment = createEnrollment(EXPO_URL);
+
+  const fake = createFakePluginHost({
+    pluginId: "quiet-notifications",
+    dataDir: enrollment.dataDir,
+    appUrl: options.appUrl,
+    settings: { expoPushUrl: EXPO_URL },
+    sdk: {
+      plugins: enrollment.sdk,
+      threads: {
+        get: async ({ threadId }) => {
+          const thread = threads.get(threadId);
+
+          if (!thread) throw new Error("Thread not found");
+
+          return thread;
+        },
+        list: async (args = {}) =>
+          [...threads.values()]
+            .filter(
+              (thread) =>
+                thread.archivedAt === null &&
+                thread.deletedAt === null &&
+                (args.parentThreadId === undefined ||
+                  thread.parentThreadId === args.parentThreadId) &&
+                (args.projectId === undefined || thread.projectId === args.projectId) &&
+                (args.environmentId === undefined || thread.environmentId === args.environmentId) &&
+                (args.hasParent === undefined ||
+                  (thread.parentThreadId !== null) === args.hasParent),
+            )
+            .slice(args.offset ?? 0, (args.offset ?? 0) + (args.limit ?? 100))
+            .map((thread) => ({
+              ...thread,
+              activity: {
+                activeWorkflowCount: 0,
+                activeSubagentCount: 0,
+                activeBackgroundAgentCount: thread.activeBackgroundAgentCount,
+                activeBackgroundCommandCount: 0,
+                activePlanModeCount: 0,
+                activeGoalCount: 0,
+              },
+              queuedWork: thread.queuedMessageCount > 0 ? "waiting" : "none",
+              hasPendingInteraction: (interactions.get(thread.id) ?? []).some(
+                (interaction) => interaction.status === "pending",
+              ),
+              pinSortKey: null,
+              environmentHostId: null,
+              environmentName: null,
+              environmentBranchName: null,
+              environmentPath: null,
+              environmentProviderId: null,
+              environmentIsWorktree: null,
+              environmentWorkspaceDisplayKind: null,
+              ...listState.get(thread.id),
+            })),
+        interactions: {
+          list: async ({ threadId }) => interactions.get(threadId) ?? [],
+        },
+      },
+    },
+  });
+
+  try {
+    await createPushNotificationsPlugin({
+      coalesceMs: COALESCE_MS,
+      fetch: options.fetch ?? expo.fetch,
+      now: options.now,
+    })(fake.api);
+  } catch (cause) {
+    await fake.harness.lifecycle.dispose();
+    enrollment.close();
+    throw cause;
+  }
+
+  async function addSubscription(
+    expoPushToken = "ExponentPushToken[phone]",
+    deviceLabel = "Phone",
+  ) {
+    return fake.harness.behavior.callRpc("pushSubscriptions.add", {
+      expoPushToken,
+      platform: "ios",
+      deviceLabel,
+    });
+  }
+
+  function setThread(overrides: Partial<ThreadResponse> = {}) {
+    const thread = makeThreadResponse({
+      id: `thread-${threads.size + 1}`,
+      projectId: "project-1",
+      status: "idle",
+      title: "Fix the flaky test",
+      latestAttentionAt: 100,
+      ...overrides,
+    });
+
+    threads.set(thread.id, thread);
+
+    return thread;
+  }
+
+  const service = fake.harness.behavior.runService("push-sender");
+  await waitForCoalesce();
+
+  async function cleanup() {
+    service.controller.abort();
+    await service.done;
+    await fake.harness.lifecycle.dispose();
+    enrollment.close();
+  }
+
+  return {
+    ...fake,
+    addSubscription,
+    cleanup,
+    expo,
+    enrollment,
+    interactions,
+    listState,
+    setThread,
+    threads,
+  };
+}
+
+async function waitForCoalesce(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, COALESCE_MS * 4));
+}
+
+describe("push subscription RPC and CLI", () => {
+  it("upserts by token, redacts lists, and reports stable RPC errors", async () => {
+    const host = await setup();
+
+    try {
+      await expect(host.addSubscription()).resolves.toEqual({
+        id: "subscription-1",
+        created: true,
+      });
+      await expect(
+        host.addSubscription("ExponentPushToken[phone]", "New phone name"),
+      ).resolves.toEqual({ id: "subscription-1", created: false });
+
+      const listed = await host.harness.behavior.callRpc("pushSubscriptions.list", {});
+
+      expect(listed).toEqual({
+        subscriptions: [
+          expect.objectContaining({
+            id: "subscription-1",
+            deviceLabel: "New phone name",
+            tokenSuffix: "phone]",
+          }),
+        ],
+      });
+      expect(JSON.stringify(listed)).not.toContain("ExponentPushToken");
+
+      await expect(
+        host.harness.behavior.callRpc("pushSubscriptions.add", {
+          expoPushToken: "token",
+          platform: "windows",
+          deviceLabel: "PC",
+        }),
+      ).rejects.toMatchObject({ code: "invalid_input" });
+      await expect(
+        host.harness.behavior.callRpc("pushSubscriptions.remove", {
+          id: "missing",
+        }),
+      ).rejects.toMatchObject({
+        code: "handler_error",
+        message: "Push subscription not found: missing",
+      });
+      await expect(
+        host.harness.behavior.callRpc("pushSubscriptions.remove", {
+          id: "subscription-1",
+        }),
+      ).resolves.toEqual({ ok: true });
+    } finally {
+      await host.cleanup();
+    }
+  });
+
+  it("provides list, add, remove, and status commands", async () => {
+    const host = await setup();
+
+    try {
+      await expect(
+        host.harness.behavior.runCli([
+          "add",
+          "--platform",
+          "ios",
+          "--label",
+          "Phone",
+          "--token",
+          "ExponentPushToken[phone]",
+        ]),
+      ).resolves.toMatchObject({
+        exitCode: 0,
+        stdout: "Registered push device subscription-1",
+      });
+      const list = await host.harness.behavior.runCli(["list", "--json"]);
+      expect(JSON.parse(list.stdout)).toEqual({
+        subscriptions: [
+          expect.objectContaining({
+            id: "subscription-1",
+            tokenSuffix: "phone]",
+          }),
+        ],
+      });
+      expect(list.stdout).not.toContain("ExponentPushToken");
+      const status = await host.harness.behavior.runCli(["status", "--json"]);
+      expect(JSON.parse(status.stdout)).toEqual({
+        enabled: true,
+        mobileEnabled: true,
+        webEnabled: true,
+        desktopEnabled: true,
+        subscriptionCount: 1,
+        relayUrl: EXPO_URL,
+        lastSendOutcome: { status: "never" },
+      });
+      await expect(
+        host.harness.behavior.runCli(["remove", "subscription-1"]),
+      ).resolves.toMatchObject({
+        exitCode: 0,
+        stdout: "Removed push device subscription-1",
+      });
+    } finally {
+      await host.cleanup();
+    }
+  });
+
+  it("documents limits in help, validates options, and reports errors as JSON", async () => {
+    const host = await setup();
+
+    try {
+      const help = (await host.harness.behavior.runCli(["add", "--help"])).stdout;
+
+      expect(help).toContain("omnyo quiet-notifications add");
+      expect(help).toContain("at most 512 characters");
+
+      const badPlatform = await host.harness.behavior.runCli([
+        "add",
+        "--token",
+        "ExponentPushToken[watch]",
+        "--platform",
+        "watchos",
+        "--label",
+        "Watch",
+      ]);
+
+      expect(badPlatform.exitCode).toBe(1);
+      expect(badPlatform.stderr).toContain(
+        "invalid value 'watchos' for --platform. Expected one of: ios, android",
+      );
+
+      const guessed = await host.harness.behavior.runCli([
+        "add",
+        "--expo-token",
+        "ExponentPushToken[tablet]",
+        "--os",
+        "android",
+        "--device",
+        "Tablet",
+        "--json",
+      ]);
+
+      expect(guessed.exitCode, guessed.stderr).toBe(0);
+      expect(JSON.parse(guessed.stdout)).toEqual({
+        id: "subscription-1",
+        created: true,
+      });
+
+      const envelope = await host.harness.behavior.runCli(["remove", "missing", "--json"]);
+
+      expect(envelope.exitCode).toBe(1);
+      expect(JSON.parse(envelope.stdout)).toMatchObject({
+        ok: false,
+        error: {
+          code: "subscription_not_found",
+          message: "Push subscription not found: missing",
+        },
+      });
+      expect(envelope.stderr).toContain("Push subscription not found: missing");
+
+      const badChannel = await host.harness.behavior.runCli(["test", "sms"]);
+      expect(badChannel.exitCode).toBe(1);
+      expect(badChannel.stderr).toContain("Use web or desktop");
+    } finally {
+      await host.cleanup();
+    }
+  });
+});
+
+describe("Omnyo 0.46 notification authority", () => {
+  it.each([
+    { level: "all", event: "completion", delivered: true },
+    { level: "input-only", event: "completion", delivered: false },
+    { level: "input-only", event: "question", delivered: true },
+    { level: "input-only", event: "error", delivered: true },
+    { level: "muted", event: "question", delivered: false },
+    { level: "muted", event: "error", delivered: false },
+  ] as const)("applies canonical $level to $event", async ({ level, event, delivered }) => {
+    const host = await setup();
+
+    try {
+      await host.addSubscription();
+
+      const thread = host.setThread({
+        status: event === "error" ? "error" : "idle",
+      });
+
+      host.enrollment.notificationLevels.set(thread.id, level);
+
+      if (event === "question") {
+        const interaction = pendingQuestion(thread.id, "Which option?");
+        host.interactions.set(thread.id, [interaction]);
+        await host.harness.behavior.emitThreadEvent("interaction.pending", {
+          thread,
+          interaction,
+        });
+      } else if (event === "error") {
+        await host.harness.behavior.emitThreadEvent("thread.failed", {
+          thread,
+          error: "Synthetic failure",
+        });
+      } else {
+        await host.harness.behavior.emitThreadEvent("thread.idle", {
+          thread,
+          lastAssistantText: "Finished",
+        });
+      }
+
+      await waitForCoalesce();
+      expect(host.enrollment.notificationRequests).toEqual([thread.id]);
+      expect(host.expo.requests).toHaveLength(delivered ? 1 : 0);
+      expect(host.harness.realtimeSignals).toHaveLength(delivered ? 1 : 0);
+    } finally {
+      await host.cleanup();
+    }
+  });
+
+  it("waits for the canonical callback before delivering completion", async () => {
+    const host = await setup();
+
+    try {
+      await host.addSubscription();
+      const thread = host.setThread();
+      host.listState.set(thread.id, {
+        attention: {
+          kind: "callback-waiting",
+          requiredCount: 0,
+          optionalCount: 0,
+          callback: null,
+        },
+      });
+      await host.harness.behavior.emitThreadEvent("thread.idle", {
+        thread,
+        lastAssistantText: "Waiting",
+      });
+      await waitForCoalesce();
+      expect(host.expo.requests).toHaveLength(0);
+      expect(host.harness.realtimeSignals).toHaveLength(0);
+      host.listState.delete(thread.id);
+      await host.harness.behavior.emitThreadEvent("thread.idle", {
+        thread,
+        lastAssistantText: "Finished",
+      });
+      await vi.waitFor(() => expect(host.expo.requests).toHaveLength(1));
+      expect(host.harness.realtimeSignals).toHaveLength(1);
+    } finally {
+      await host.cleanup();
+    }
+  });
+
+  it.each(["denied", "unavailable", "malformed"] as const)(
+    "refuses delivery when canonical preference authority is %s",
+    async (mode) => {
+      const host = await setup();
+
+      try {
+        await host.addSubscription();
+        const thread = host.setThread();
+        host.enrollment.notificationAuthority.mode = mode;
+        await host.harness.behavior.emitThreadEvent("thread.idle", {
+          thread,
+          lastAssistantText: "Finished",
+        });
+        await waitForCoalesce();
+        expect(host.enrollment.notificationRequests).toEqual([thread.id]);
+        expect(host.expo.requests).toHaveLength(0);
+        expect(host.harness.realtimeSignals).toHaveLength(0);
+        const status = await host.harness.behavior.runCli(["status", "--json"]);
+        expect(JSON.parse(status.stdout).lastSendOutcome).toMatchObject({
+          status: "failed",
+          reason: "Notification preferences are unavailable",
+        });
+        expect(host.harness.logEntries.some((entry) => entry.level === "error")).toBe(true);
+      } finally {
+        await host.cleanup();
+      }
+    },
+  );
+});
+
+describe("push sender", () => {
+  it.each([
+    "activeWorkflowCount",
+    "activeSubagentCount",
+    "activeBackgroundAgentCount",
+    "activeBackgroundCommandCount",
+    "activePlanModeCount",
+    "activeGoalCount",
+  ] as const)("waits for idle work with %s to finish", async (counter) => {
+    const host = await setup();
+
+    try {
+      await host.addSubscription();
+      const thread = host.setThread();
+
+      const activity = {
+        activeWorkflowCount: 0,
+        activeSubagentCount: 0,
+        activeBackgroundAgentCount: 0,
+        activeBackgroundCommandCount: 0,
+        activePlanModeCount: 0,
+        activeGoalCount: 0,
+        [counter]: 1,
+      };
+
+      await host.harness.behavior.emitThreadEvent("thread.idle", {
+        thread,
+        lastAssistantText: "The background work is still running.",
+      });
+      host.listState.set(thread.id, { activity });
+      await waitForCoalesce();
+      expect(host.expo.requests).toEqual([]);
+      expect(host.harness.realtimeSignals).toEqual([]);
+
+      host.listState.delete(thread.id);
+      await host.harness.behavior.emitThreadEvent("thread.idle", {
+        thread,
+        lastAssistantText: "All work is finished.",
+      });
+      await vi.waitFor(() => expect(host.expo.requests).toHaveLength(1));
+      expect(host.harness.realtimeSignals).toHaveLength(1);
+      expect(host.expo.requests[0]?.[0]?.body).toBe("All work is finished.");
+    } finally {
+      await host.cleanup();
+    }
+  });
+
+  it("suppresses completion while a follow-up is queued", async () => {
+    const host = await setup();
+
+    try {
+      await host.addSubscription();
+      const thread = host.setThread();
+      await host.harness.behavior.emitThreadEvent("thread.idle", {
+        thread,
+        lastAssistantText: "An intermediate answer.",
+      });
+      host.threads.set(thread.id, { ...thread, queuedMessageCount: 1 });
+      await waitForCoalesce();
+      expect(host.expo.requests).toEqual([]);
+      expect(host.harness.realtimeSignals).toEqual([]);
+    } finally {
+      await host.cleanup();
+    }
+  });
+
+  it.each(["pending", "starting", "active", "stopping"] as const)(
+    "suppresses completion while a hidden child is %s",
+    async (status) => {
+      const host = await setup();
+
+      try {
+        await host.addSubscription();
+        const thread = host.setThread();
+        host.setThread({
+          parentThreadId: thread.id,
+          visibility: "hidden",
+          status,
+        });
+        await host.harness.behavior.emitThreadEvent("thread.idle", {
+          thread,
+          lastAssistantText: "Waiting for the child.",
+        });
+        await waitForCoalesce();
+        expect(host.expo.requests).toEqual([]);
+        expect(host.harness.realtimeSignals).toEqual([]);
+      } finally {
+        await host.cleanup();
+      }
+    },
+  );
+
+  it("checks child activity and queued work past the first page", async () => {
+    const host = await setup();
+
+    try {
+      await host.addSubscription();
+      const thread = host.setThread();
+
+      for (let index = 0; index < 101; index += 1) {
+        host.setThread({ id: `child-${index}`, parentThreadId: thread.id });
+      }
+
+      host.listState.set("child-100", { queuedWork: "waiting" });
+      await host.harness.behavior.emitThreadEvent("thread.idle", {
+        thread,
+        lastAssistantText: "Waiting for queued child work.",
+      });
+      await waitForCoalesce();
+      expect(host.expo.requests).toEqual([]);
+      expect(host.harness.realtimeSignals).toEqual([]);
+    } finally {
+      await host.cleanup();
+    }
+  });
+
+  it("checks work in nested child chats", async () => {
+    const host = await setup();
+
+    try {
+      await host.addSubscription();
+      const thread = host.setThread();
+      const child = host.setThread({ parentThreadId: thread.id });
+      host.setThread({ parentThreadId: child.id, status: "active" });
+      await host.harness.behavior.emitThreadEvent("thread.idle", {
+        thread,
+        lastAssistantText: "Waiting for the grandchild.",
+      });
+      await waitForCoalesce();
+      expect(host.expo.requests).toEqual([]);
+      expect(host.harness.realtimeSignals).toEqual([]);
+    } finally {
+      await host.cleanup();
+    }
+  });
+
+  it("finds the finishing chat past the first activity page", async () => {
+    const host = await setup();
+
+    try {
+      await host.addSubscription();
+
+      for (let index = 0; index < 101; index += 1) {
+        host.setThread({ id: `older-${index}` });
+      }
+
+      const thread = host.setThread({ id: "finishing-thread" });
+      await host.harness.behavior.emitThreadEvent("thread.idle", {
+        thread,
+        lastAssistantText: "Finished after reading all activity pages.",
+      });
+      await vi.waitFor(() => expect(host.expo.requests).toHaveLength(1));
+      expect(host.expo.requests[0]?.[0]?.data.threadId).toBe(thread.id);
+    } finally {
+      await host.cleanup();
+    }
+  });
+
+  it("withholds completion when its activity cannot be checked", async () => {
+    const host = await setup();
+
+    try {
+      await host.addSubscription();
+      const thread = host.setThread();
+      host.harness.sdk.stub("threads.list", async () => {
+        throw new Error("Activity unavailable");
+      });
+      await host.harness.behavior.emitThreadEvent("thread.idle", {
+        thread,
+        lastAssistantText: "An unverified completion.",
+      });
+      await waitForCoalesce();
+      expect(host.expo.requests).toEqual([]);
+      expect(host.harness.realtimeSignals).toEqual([]);
+      expect(host.harness.logEntries).toEqual(
+        expect.arrayContaining([expect.objectContaining({ level: "error" })]),
+      );
+    } finally {
+      await host.cleanup();
+    }
+  });
+
+  it("still delivers pending input while background work continues", async () => {
+    const host = await setup();
+
+    try {
+      await host.addSubscription();
+      const thread = host.setThread({ queuedMessageCount: 1 });
+      host.listState.set(thread.id, {
+        activity: {
+          activeWorkflowCount: 1,
+          activeSubagentCount: 0,
+          activeBackgroundAgentCount: 0,
+          activeBackgroundCommandCount: 0,
+          activePlanModeCount: 0,
+          activeGoalCount: 0,
+        },
+      });
+
+      const interaction = pendingQuestion(thread.id, "Which result should I use?");
+
+      host.interactions.set(thread.id, [interaction]);
+      await host.harness.behavior.emitThreadEvent("thread.idle", {
+        thread,
+        lastAssistantText: "Waiting for the workflow.",
+      });
+      await host.harness.behavior.emitThreadEvent("interaction.pending", {
+        thread,
+        interaction,
+      });
+      await vi.waitFor(() => expect(host.expo.requests).toHaveLength(1));
+      expect(host.expo.requests[0]?.[0]?.data.kind).toBe("pending-interaction");
+      expect(host.harness.realtimeSignals).toHaveLength(1);
+    } finally {
+      await host.cleanup();
+    }
+  });
+
+  it("sends a root idle preview to each device and reads the relay setting at flush", async () => {
+    const host = await setup();
+
+    try {
+      await host.addSubscription();
+      await host.addSubscription("ExponentPushToken[tablet]", "Tablet");
+      const thread = host.setThread();
+
+      await host.harness.behavior.emitThreadEvent("thread.idle", {
+        thread,
+        lastAssistantText: "Done: the timer race is fixed.\nMore details.",
+      });
+      await host.harness.behavior.setSettings({
+        expoPushUrl: "http://expo.test/changed",
+      });
+
+      await vi.waitFor(() => expect(host.expo.requests).toHaveLength(1));
+      expect(host.expo.urls).toEqual(["http://expo.test/changed"]);
+      expect(host.expo.requests[0]).toHaveLength(2);
+      expect(host.expo.requests[0]?.[0]).toMatchObject({
+        title: "Fix the flaky test",
+        body: "Done: the timer race is fixed.",
+        data: {
+          kind: "turn-finished",
+          projectId: "project-1",
+          threadId: thread.id,
+        },
+        sound: "default",
+        channelId: "threads",
+        priority: "high",
+      });
+      expect(host.expo.requests[0]?.[0]?.data).not.toHaveProperty("serverUrl");
+      await vi.waitFor(async () => {
+        const result = await host.harness.behavior.runCli(["status", "--json"]);
+        expect(JSON.parse(result.stdout).lastSendOutcome).toMatchObject({
+          status: "sent",
+          sentCount: 2,
+        });
+      });
+    } finally {
+      await host.cleanup();
+    }
+  });
+
+  it("includes the configured public server URL", async () => {
+    const host = await setup({ appUrl: "https://omnyo.example.test" });
+
+    try {
+      await host.addSubscription();
+      const thread = host.setThread();
+
+      await host.harness.behavior.emitThreadEvent("thread.idle", {
+        thread,
+        lastAssistantText: "Done",
+      });
+
+      await vi.waitFor(() => expect(host.expo.requests).toHaveLength(1));
+      expect(host.expo.requests[0]?.[0]?.data).toEqual({
+        kind: "turn-finished",
+        projectId: "project-1",
+        serverUrl: "https://omnyo.example.test",
+        threadId: thread.id,
+      });
+    } finally {
+      await host.cleanup();
+    }
+  });
+
+  it("drops child, read, hidden, archived, and stale-status events", async () => {
+    let now = 1_000;
+    const host = await setup({ now: () => now });
+
+    try {
+      await host.addSubscription();
+      const child = host.setThread({ parentThreadId: "parent-1" });
+      await host.harness.behavior.emitThreadEvent("thread.idle", {
+        thread: child,
+        lastAssistantText: "Child done",
+      });
+
+      const read = host.setThread({ id: "thread-read" });
+      await host.harness.behavior.emitThreadEvent("thread.idle", {
+        thread: read,
+        lastAssistantText: "Read done",
+      });
+      host.threads.set(read.id, {
+        ...read,
+        latestAttentionAt: now + 1,
+        lastReadAt: now + 1,
+      });
+
+      const stale = host.setThread({ id: "thread-stale" });
+      await host.harness.behavior.emitThreadEvent("thread.idle", {
+        thread: stale,
+        lastAssistantText: "Stale done",
+      });
+      host.threads.set(stale.id, { ...stale, status: "active" });
+
+      const hidden = host.setThread({ id: "thread-hidden" });
+      await host.harness.behavior.emitThreadEvent("thread.failed", {
+        thread: hidden,
+        error: "Failed",
+      });
+      host.threads.set(hidden.id, {
+        ...hidden,
+        status: "error",
+        visibility: "hidden",
+      });
+
+      const archived = host.setThread({ id: "thread-archived" });
+      await host.harness.behavior.emitThreadEvent("thread.failed", {
+        thread: archived,
+        error: "Failed",
+      });
+      host.threads.set(archived.id, {
+        ...archived,
+        status: "error",
+        archivedAt: now,
+      });
+      now += 2;
+      await waitForCoalesce();
+      expect(host.expo.requests).toEqual([]);
+      expect(host.harness.realtimeSignals).toEqual([]);
+    } finally {
+      await host.cleanup();
+    }
+  });
+
+  it("coalesces interaction and idle events, prefers the interaction, and checks it again", async () => {
+    const host = await setup();
+
+    try {
+      await host.addSubscription();
+      const thread = host.setThread({ status: "active", title: "Release" });
+
+      const interaction = pendingQuestion(thread.id, "Ship to staging or production?");
+
+      host.interactions.set(thread.id, [interaction]);
+
+      await host.harness.behavior.emitThreadEvent("thread.idle", {
+        thread: { ...thread, status: "idle" },
+        lastAssistantText: "Done",
+      });
+      await host.harness.behavior.emitThreadEvent("interaction.pending", {
+        thread,
+        interaction,
+      });
+
+      await vi.waitFor(() => expect(host.expo.requests).toHaveLength(1));
+      expect(host.expo.requests[0]).toEqual([
+        expect.objectContaining({
+          title: "Release",
+          body: "Ship to staging or production?",
+          data: expect.objectContaining({ kind: "pending-interaction" }),
+        }),
+      ]);
+
+      const answered = host.setThread({ id: "thread-answered" });
+      const answeredInteraction = pendingQuestion(answered.id, "Continue?");
+      host.interactions.set(answered.id, [answeredInteraction]);
+      await host.harness.behavior.emitThreadEvent("interaction.pending", {
+        thread: answered,
+        interaction: answeredInteraction,
+      });
+      host.interactions.set(answered.id, []);
+      await waitForCoalesce();
+      expect(host.expo.requests).toHaveLength(1);
+    } finally {
+      await host.cleanup();
+    }
+  });
+
+  it("batches devices and removes rows that Expo rejects as unregistered", async () => {
+    const host = await setup();
+
+    try {
+      for (let index = 0; index < 101; index += 1) {
+        await host.addSubscription(`ExponentPushToken[device-${index}]`, `Device ${index}`);
+      }
+
+      host.expo.ticketErrors.set("ExponentPushToken[device-100]", "DeviceNotRegistered");
+      const thread = host.setThread({ status: "error" });
+      await host.harness.behavior.emitThreadEvent("thread.failed", {
+        thread,
+        error: "Provider exited with code 1\nStack",
+      });
+
+      await vi.waitFor(() => expect(host.expo.requests).toHaveLength(2));
+      expect(host.expo.requests.map((batch) => batch.length)).toEqual([100, 1]);
+      await vi.waitFor(async () => {
+        const listed = listPushSubscriptionsOutputSchema.parse(
+          await host.harness.behavior.callRpc("pushSubscriptions.list", {}),
+        );
+
+        expect(listed.subscriptions).toHaveLength(100);
+      });
+      expect(JSON.stringify(host.harness.logEntries)).not.toContain("ExponentPushToken");
+    } finally {
+      await host.cleanup();
+    }
+  });
+
+  it("warns once per hour for network failures and logs only row ids", async () => {
+    let now = 10_000;
+
+    const host = await setup({
+      now: () => now,
+      fetch: async () => {
+        throw new Error("ECONNREFUSED with ExponentPushToken[secret]");
+      },
+    });
+
+    try {
+      await host.addSubscription();
+
+      const trigger = async (id: string) => {
+        const thread = host.setThread({ id, status: "error" });
+        await host.harness.behavior.emitThreadEvent("thread.failed", {
+          thread,
+          error: "Provider failed",
+        });
+        await waitForCoalesce();
+      };
+
+      await trigger("thread-first");
+      now += 3_599_999;
+      await trigger("thread-second");
+      now += 1;
+      await trigger("thread-third");
+
+      const warnings = host.harness.logEntries.filter(
+        (entry) => entry.level === "warn" && entry.message.startsWith("Expo push request failed"),
+      );
+
+      expect(warnings).toHaveLength(2);
+      expect(warnings[0]?.message).toContain("subscription-1");
+      expect(JSON.stringify(host.harness.logEntries)).not.toContain("ExponentPushToken");
+    } finally {
+      await host.cleanup();
+    }
+  });
+});
+
+describe("web and desktop delivery", () => {
+  it("delivers without mobile subscriptions and applies channel changes immediately", async () => {
+    const host = await setup();
+
+    try {
+      const thread = host.setThread();
+      await host.harness.behavior.emitThreadEvent("thread.idle", {
+        thread,
+        lastAssistantText: "Done",
+      });
+      await waitForCoalesce();
+      expect(host.harness.realtimeSignals).toEqual([
+        {
+          channel: "notification",
+          payload: expect.objectContaining({
+            title: thread.title,
+            body: "Done",
+            threadId: thread.id,
+            channels: ["web", "desktop"],
+          }),
+        },
+      ]);
+      await host.addSubscription();
+      await host.harness.behavior.setSettings({
+        mobileEnabled: false,
+        webEnabled: false,
+      });
+      await host.harness.behavior.emitThreadEvent("thread.idle", {
+        thread,
+        lastAssistantText: "Desktop only",
+      });
+      await waitForCoalesce();
+      expect(host.harness.realtimeSignals.at(-1)?.payload).toMatchObject({
+        channels: ["desktop"],
+      });
+      expect(host.expo.requests).toHaveLength(0);
+      await host.harness.behavior.setSettings({ desktopEnabled: false });
+      await host.harness.behavior.emitThreadEvent("thread.idle", {
+        thread,
+        lastAssistantText: "Disabled",
+      });
+      await waitForCoalesce();
+      expect(host.harness.realtimeSignals).toHaveLength(2);
+    } finally {
+      await host.cleanup();
+    }
+  });
+
+  it("routes CLI and RPC tests only to the selected enabled channel", async () => {
+    const host = await setup();
+
+    try {
+      expect(await host.harness.behavior.runCli(["test", "web"])).toMatchObject({ exitCode: 0 });
+      expect(host.harness.realtimeSignals.at(-1)?.payload).toMatchObject({
+        channels: ["web"],
+        threadId: null,
+      });
+      await host.harness.behavior.callRpc("notifications.test", {
+        channel: "desktop",
+      });
+      expect(host.harness.realtimeSignals.at(-1)?.payload).toMatchObject({
+        channels: ["desktop"],
+      });
+      await host.harness.behavior.setSettings({ desktopEnabled: false });
+      expect(await host.harness.behavior.runCli(["test", "desktop"])).toMatchObject({
+        exitCode: 1,
+      });
+      await expect(
+        host.harness.behavior.callRpc("notifications.test", {
+          channel: "desktop",
+        }),
+      ).rejects.toThrow("disabled");
+      await expect(
+        host.harness.behavior.callRpc("notifications.test", { channel: "ios" }),
+      ).rejects.toMatchObject({ code: "invalid_input" });
+      expect(host.harness.realtimeSignals).toHaveLength(2);
+    } finally {
+      await host.cleanup();
+    }
+  });
+});
+
+describe("persistent enrollment handoff", () => {
+  it("copies settings once and preserves changed settings and devices across reload", async () => {
+    const host = await setup();
+
+    let replacement: Awaited<ReturnType<typeof host.harness.lifecycle.reload>> | null = null;
+
+    let restarted: ReturnType<typeof host.harness.behavior.runService> | null = null;
+
+    try {
+      await host.addSubscription();
+      expect(host.enrollment.values).toMatchObject({
+        mobileEnabled: false,
+        webEnabled: false,
+        desktopEnabled: false,
+      });
+      await host.harness.behavior.setSettings({
+        webEnabled: false,
+        desktopEnabled: false,
+      });
+      replacement = await host.harness.lifecycle.reload(
+        createPushNotificationsPlugin({
+          coalesceMs: COALESCE_MS,
+          fetch: host.expo.fetch,
+        }),
+      );
+      restarted = replacement.harness.behavior.runService("push-sender");
+      await waitForCoalesce();
+
+      const status = await replacement.harness.behavior.runCli(["status", "--json"]);
+
+      expect(JSON.parse(status.stdout)).toMatchObject({
+        mobileEnabled: true,
+        webEnabled: false,
+        desktopEnabled: false,
+        subscriptionCount: 1,
+        relayUrl: EXPO_URL,
+      });
+      const thread = host.setThread();
+      await replacement.harness.behavior.emitThreadEvent("thread.idle", {
+        thread,
+        lastAssistantText: "Done after reload",
+      });
+      await waitForCoalesce();
+      expect(host.expo.requests).toHaveLength(1);
+      expect(host.expo.requests[0]?.[0]?.body).toBe("Done after reload");
+      expect(replacement.harness.realtimeSignals).toHaveLength(0);
+    } finally {
+      restarted?.controller.abort();
+      await restarted?.done;
+      await replacement?.harness.lifecycle.dispose();
+      await host.cleanup();
+    }
+  });
+
+  it("reads native registration refreshes live and makes the attachment read-only", async () => {
+    const host = await setup();
+
+    try {
+      await host.addSubscription();
+      host.enrollment.database.prepare("UPDATE plugin_kv SET value = ? WHERE key = ?").run(
+        JSON.stringify({
+          ...host.enrollment.list()[0],
+          expoPushToken: "ExponentPushToken[refreshed]",
+          lastSeenAt: 3,
+        }),
+        "subscription:subscription-1",
+      );
+      const thread = host.setThread();
+      await host.harness.behavior.emitThreadEvent("thread.idle", {
+        thread,
+        lastAssistantText: "Done",
+      });
+      await waitForCoalesce();
+      expect(host.expo.requests[0]?.[0]?.to).toBe("ExponentPushToken[refreshed]");
+      expect(() => host.api.storage.database().exec("DELETE FROM registrations.plugin_kv")).toThrow(
+        /readonly/i,
+      );
+      expect(host.enrollment.list()).toHaveLength(1);
+      const status = await host.harness.behavior.runCli(["status", "--json"]);
+      expect(status.stdout).not.toContain("ExponentPushToken");
+    } finally {
+      await host.cleanup();
+    }
+  });
+});
+
+it("fails visibly when the canonical registration schema is unavailable", async () => {
+  const enrollment = createEnrollment(EXPO_URL);
+
+  const host = createFakePluginHost({
+    pluginId: "quiet-notifications",
+    dataDir: enrollment.dataDir,
+    sdk: { plugins: enrollment.sdk },
+  });
+
+  enrollment.database.exec("DROP TABLE plugin_kv");
+
+  try {
+    await expect(createPushNotificationsPlugin()(host.api)).rejects.toThrow(/registration/i);
+    expect(enrollment.values.mobileEnabled).toBe(true);
+  } finally {
+    await host.harness.lifecycle.dispose();
+    enrollment.close();
+  }
+});

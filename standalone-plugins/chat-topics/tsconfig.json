@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": false,
+    "paths": {
+      "@omnyo/plugin-sdk": ["./node_modules/@omnyo/plugin-sdk/bundled-types/omnyo-plugin-sdk.d.ts"],
+      "zod": ["./node_modules/zod/index.d.cts"]
+    }
+  },
+  "include": ["*.ts", "*.tsx", "lib/**/*.ts", "components/**/*.tsx", "tests/**/*.ts"]
+}

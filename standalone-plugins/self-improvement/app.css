@@ -1,0 +1,26 @@
+html[data-self-improvement-picking],
+html[data-self-improvement-picking] * {
+  cursor: crosshair !important;
+}
+.self-improvement-picker {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483646;
+  pointer-events: none;
+}
+.self-improvement-floating-hint {
+  position: fixed;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  left: 50%;
+  max-width: calc(100vw - 32px);
+  transform: translateX(-50%);
+  pointer-events: auto;
+}
+.self-improvement-outline {
+  position: fixed;
+  border-radius: 3px;
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+  background: color-mix(in oklab, var(--primary) 10%, transparent);
+  pointer-events: none;
+}

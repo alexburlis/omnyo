@@ -1,0 +1,58 @@
+{
+  "name": "omnyo-plugin-smart-queues",
+  "version": "0.1.0",
+  "private": true,
+  "author": {
+    "name": "alexburlis",
+    "url": "https://github.com/alexburlis"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alexburlis/omnyo.git",
+    "directory": "standalone-plugins/smart-queues"
+  },
+  "type": "module",
+  "scripts": {
+    "test": "node --import tsx --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint --deny-warnings --format=agent",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "build": "omnyo plugin build ."
+  },
+  "dependencies": {
+    "@radix-ui/react-slot": "^1.3.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@omnyo/plugin-sdk": "file:./vendor/omnyo-plugin-sdk-0.6.46-3b89f84383f5.tgz",
+    "@oxlint/plugins": "1.87.0",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "better-sqlite3": "^12.0.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "cron-parser": "^5.10.1",
+    "hono": "^4.13.13",
+    "oxfmt": "0.72.0",
+    "oxlint": "1.87.0",
+    "tailwind-merge": "^3.4.0",
+    "tsx": "4.22.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "omnyo": ">=0.45",
+    "omnyoPluginSdk": ">=0.6.45"
+  },
+  "packageManager": "pnpm@10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e",
+  "omnyo": {
+    "name": "Smart Queues",
+    "description": "Batch queued messages into steering, new chats or ordered groups without rewriting instructions.",
+    "branding": {
+      "icon": "Workflow"
+    },
+    "server": "./server.ts",
+    "app": "./app.tsx"
+  }
+}

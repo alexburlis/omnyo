@@ -1,0 +1,8 @@
+{
+  "ignorePatterns": [
+    "node_modules/**",
+    "dist/**",
+    "tools/oxlint/anti-slop/**",
+    "components/omnyo/**"
+  ]
+}

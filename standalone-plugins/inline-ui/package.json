@@ -1,0 +1,76 @@
+{
+  "name": "omnyo-plugin-inline-ui",
+  "version": "0.4.0",
+  "private": true,
+  "license": "MIT",
+  "author": {
+    "name": "Omnyo",
+    "url": "https://github.com/alexburlis"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alexburlis/omnyo.git",
+    "directory": "standalone-plugins/inline-ui"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "omnyo plugin build",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint --deny-warnings --format=agent",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "test:e2e": "node tests/run.mjs",
+    "test": "vitest run --config vitest.config.ts"
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^3.5.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@omnyo/plugin-sdk": "file:./vendor/omnyo-plugin-sdk-0.6.46-3b89f84383f5.tgz",
+    "@oxlint/plugins": "1.86.0",
+    "@playwright/test": "1.63.0",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "better-sqlite3": "12.10.0",
+    "cron-parser": "^5.5.0",
+    "hono": "4.13.11",
+    "jsdom": "^29.0.1",
+    "oxfmt": "0.71.0",
+    "oxlint": "1.86.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "typescript": "^5.7.0",
+    "vite": "8.3.3",
+    "vitest": "4.1.11"
+  },
+  "engines": {
+    "omnyo": ">=0.46",
+    "omnyoPluginSdk": ">=0.6.45"
+  },
+  "packageManager": "pnpm@10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e",
+  "pnpm": {
+    "overrides": {
+      "hono@4.11.9": "4.13.7",
+      "vite@8.3.2": "8.3.3",
+      "hono": "4.13.11"
+    }
+  },
+  "omnyo": {
+    "name": "Inline UI",
+    "description": "Native visual blocks, HTML visualizations and Markdown documents inside Omnyo chat.",
+    "branding": {
+      "icon": "ChartNoAxesCombined"
+    },
+    "server": "./server.ts",
+    "app": "./app.tsx",
+    "skills": [
+      "skills"
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "ignorePatterns": [
+    "node_modules/**",
+    "dist/**",
+    "helper/bin/**",
+    "artifacts/**",
+    "test-results/**",
+    "tools/oxlint/anti-slop/**"
+  ]
+}

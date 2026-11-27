@@ -1,0 +1,14 @@
+{
+  "originHash" : "6915d65f1baef2ca414b3f7256693b9ce9e44d600c1c7443b15dc5fbcb118aa8",
+  "pins" : [
+    {
+      "identity" : "fluidaudio",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/alexburlis/FluidAudio.git",
+      "state" : {
+        "revision" : "93468021dcad336a8fda232e91dd61f616a20afd"
+      }
+    }
+  ],
+  "version" : 3
+}

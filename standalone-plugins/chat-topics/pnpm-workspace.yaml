@@ -1,0 +1,5 @@
+allowBuilds:
+  better-sqlite3: true
+overrides:
+  "hono@4.11.9": "4.13.7"
+  "hono": "4.13.11"

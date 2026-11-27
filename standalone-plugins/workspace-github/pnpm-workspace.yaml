@@ -1,0 +1,5 @@
+allowBuilds:
+  better-sqlite3: true
+
+overrides:
+  "@vitest/mocker@4.1.11": "4.1.12"

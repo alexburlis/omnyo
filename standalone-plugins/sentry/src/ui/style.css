@@ -1,0 +1,911 @@
+:where(.sentry-panel) {
+  --sentry-accent: color-mix(in oklch, var(--ink) 28%, #8c78d8);
+  --sentry-line: color-mix(in oklab, var(--ink) 12%, transparent);
+  --sentry-soft: color-mix(in oklch, var(--ink) 3%, var(--canvas));
+  --sentry-hover: color-mix(in oklch, var(--ink) 6%, var(--canvas));
+  --sentry-muted: color-mix(in oklch, var(--ink) 64%, var(--canvas));
+  --sentry-error: color-mix(in oklch, var(--ink) 28%, #de697a);
+  --sentry-success: color-mix(in oklch, var(--ink) 28%, #58aa89);
+  --sentry-warning: var(--warning-text);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-sm, 0.8125rem);
+  line-height: 1.5;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding: 24px clamp(16px, 3vw, 40px);
+  box-sizing: border-box;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+:where(.sentry-panel) *,
+:where(.sentry-panel) *::before,
+:where(.sentry-panel) *::after {
+  box-sizing: border-box;
+}
+:where(.sentry-panel) :is(h1, h2, h3, p) {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+:where(.sentry-panel) h1 {
+  font-size: var(--text-xl, 1.25rem);
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+  font-weight: 650;
+  margin-block: 3px 5px;
+  text-wrap: balance;
+}
+:where(.sentry-panel) h2 {
+  font-size: var(--text-lg, 1.125rem);
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+:where(.sentry-panel) h3 {
+  font-size: var(--text-base, 0.9375rem);
+  line-height: 1.4;
+  font-weight: 600;
+}
+:where(.sentry-panel) p {
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+:where(.sentry-panel) a {
+  color: var(--sentry-accent);
+  text-underline-offset: 3px;
+  text-decoration-thickness: from-font;
+  text-decoration-skip-ink: auto;
+}
+:where(.sentry-panel) .sentry-muted {
+  color: var(--sentry-muted);
+}
+:where(.sentry-panel) .sentry-eyebrow {
+  display: block;
+  color: var(--sentry-muted);
+  font-size: var(--text-xs, 0.75rem);
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+:where(.sentry-panel) .sentry-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+:where(.sentry-panel) .sentry-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+:where(.sentry-panel) button:where(:not(.sentry-model *)) {
+  font: inherit;
+  font-weight: 500;
+  padding: 7px 11px;
+  min-height: 34px;
+  border: 1px solid var(--sentry-line);
+  border-radius: 7px;
+  background: var(--sentry-soft);
+  color: inherit;
+  cursor: pointer;
+  transition: background var(--motion-duration-fast, 150ms)
+    var(--motion-ease-standard, cubic-bezier(0.25, 0.1, 0.25, 1));
+}
+:where(.sentry-panel) button:where(:not(.sentry-model *)):hover {
+  background: var(--sentry-hover);
+}
+:where(.sentry-panel) button:where(:not(.sentry-model *)):disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+:where(.sentry-panel) .sentry-primary {
+  color: var(--canvas);
+  background: var(--ink);
+  border-color: transparent;
+}
+:where(.sentry-panel) .sentry-primary:hover {
+  background: color-mix(in oklch, var(--ink) 86%, var(--canvas));
+}
+:where(.sentry-panel) .sentry-solve {
+  color: var(--sentry-accent);
+  border-color: color-mix(in oklab, var(--sentry-accent) 30%, transparent);
+  background: color-mix(in oklch, var(--sentry-accent) 7%, var(--canvas));
+  white-space: nowrap;
+}
+:where(.sentry-panel) :is(button, input, select, textarea, summary, a):focus-visible {
+  outline: 2px solid var(--sentry-accent);
+  outline-offset: 3px;
+}
+:where(.sentry-panel) :is(input, select, textarea) {
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  padding: 8px 10px;
+  min-height: 36px;
+  color: inherit;
+  background: var(--canvas);
+  border: 1px solid var(--sentry-line);
+  border-radius: 7px;
+}
+:where(.sentry-panel) label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--text-xs, 0.75rem);
+}
+:where(.sentry-panel) .sentry-health {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--sentry-muted);
+  font-size: var(--text-xs, 0.75rem);
+  white-space: nowrap;
+}
+:where(.sentry-panel) .sentry-health::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+:where(.sentry-panel) .sentry-health-live {
+  color: var(--sentry-success);
+}
+:where(.sentry-panel) .sentry-health-stale {
+  color: var(--sentry-warning);
+}
+:where(.sentry-panel) .sentry-health-partial {
+  color: var(--sentry-muted);
+}
+:where(.sentry-panel) .sentry-sync-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+:where(.sentry-panel) .sentry-refresh-status {
+  font-size: var(--text-xs, 0.75rem);
+  color: var(--sentry-muted);
+}
+
+:where(.sentry-panel) .sentry-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-block-end: 22px;
+}
+:where(.sentry-panel) .sentry-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--sentry-muted);
+}
+:where(.sentry-panel) .sentry-tabs button[aria-pressed="true"] {
+  color: var(--ink);
+  background: var(--sentry-hover);
+  border-color: var(--sentry-line);
+}
+:where(.sentry-panel) :is(.sentry-tabs button > span, .sentry-count) {
+  padding: 0 5px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--ink) 7%, transparent);
+  font-size: var(--text-xs, 0.75rem);
+  font-weight: 500;
+}
+:where(.sentry-panel) .sentry-workspace {
+  min-width: 0;
+}
+:where(.sentry-panel) .sentry-workspace:has(.sentry-project-nav) {
+  display: grid;
+  grid-template-columns: minmax(155px, 190px) minmax(0, 1fr);
+  gap: 28px;
+}
+:where(.sentry-panel) .sentry-project-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-self: start;
+}
+:where(.sentry-panel) .sentry-project-nav > .sentry-eyebrow {
+  margin-block: 3px 9px;
+  padding-inline: 9px;
+}
+:where(.sentry-panel) .sentry-project-nav button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  text-align: start;
+  border-color: transparent;
+  background: transparent;
+  width: 100%;
+  padding-inline: 8px;
+}
+:where(.sentry-panel) .sentry-project-nav button:hover {
+  background: var(--sentry-soft);
+}
+:where(.sentry-panel) .sentry-project-nav button[aria-pressed="true"] {
+  background: color-mix(in oklch, var(--sentry-accent) 9%, var(--canvas));
+  border-color: color-mix(in oklab, var(--sentry-accent) 18%, transparent);
+}
+:where(.sentry-panel) .sentry-project-icon {
+  display: grid;
+  place-items: center;
+  height: 23px;
+  width: 23px;
+  flex-shrink: 0;
+  font-size: var(--text-xs, 0.75rem);
+  color: var(--sentry-muted);
+  background: var(--sentry-hover);
+  border-radius: 5px;
+}
+:where(.sentry-panel) .sentry-nav-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+:where(.sentry-panel) .sentry-project-nav .sentry-count {
+  margin-inline-start: auto;
+  flex-shrink: 0;
+}
+:where(.sentry-panel) .sentry-nav-label {
+  display: flex;
+  justify-content: space-between;
+  margin-block: 20px 5px;
+  padding-inline: 9px;
+  color: var(--sentry-muted);
+  font-size: var(--text-xs, 0.75rem);
+}
+:where(.sentry-panel) .sentry-content {
+  min-width: 0;
+}
+:where(.sentry-panel) .sentry-scope-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-block-end: 18px;
+}
+:where(.sentry-panel) .sentry-scope-heading p {
+  font-size: var(--text-xs, 0.75rem);
+  margin-block-start: 3px;
+}
+:where(.sentry-panel) .sentry-scope-hint {
+  font-size: var(--text-xs, 0.75rem);
+  color: var(--sentry-muted);
+  text-align: end;
+  max-width: 24ch;
+}
+:where(.sentry-panel) .sentry-filterbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-block-end: 16px;
+}
+:where(.sentry-panel) .sentry-filterbar > label {
+  flex: 0 1 150px;
+}
+:where(.sentry-panel) .sentry-filterbar > .sentry-grow {
+  flex: 1 1 240px;
+}
+:where(.sentry-panel) .sentry-filterbar .sentry-mobile-project {
+  display: none;
+}
+:where(.sentry-panel) .sentry-filterbar .sentry-clear {
+  background: transparent;
+  color: var(--sentry-muted);
+}
+:where(.sentry-panel) .sentry-issue-list {
+  display: grid;
+  border: 1px solid var(--sentry-line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+:where(.sentry-panel) .sentry-issue-list:empty {
+  display: none;
+}
+:where(.sentry-panel) .sentry-issue {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  padding: 16px;
+  background: var(--sentry-soft);
+}
+:where(.sentry-panel) .sentry-issue + .sentry-issue {
+  border-block-start: 1px solid var(--sentry-line);
+}
+:where(.sentry-panel) .sentry-issue:has(details[open]) {
+  background: var(--sentry-hover);
+}
+:where(.sentry-panel) .sentry-severity {
+  display: grid;
+  place-items: center;
+  width: 23px;
+  height: 23px;
+  font-weight: 650;
+  border: 1px solid color-mix(in oklab, var(--sentry-error) 30%, transparent);
+  color: var(--sentry-error);
+  background: color-mix(in oklch, var(--sentry-error) 8%, var(--canvas));
+  border-radius: 6px;
+  margin-block-start: 1px;
+}
+:where(.sentry-panel) .sentry-severity-fatal {
+  background: color-mix(in oklch, var(--sentry-error) 20%, var(--canvas));
+}
+:where(.sentry-panel) .sentry-issue-body {
+  min-width: 0;
+}
+:where(.sentry-panel) .sentry-issue-body > summary {
+  display: block;
+  list-style: none;
+  cursor: pointer;
+}
+:where(.sentry-panel) .sentry-issue-body > summary::-webkit-details-marker {
+  display: none;
+}
+:where(.sentry-panel) .sentry-issue-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-height: 23px;
+  line-height: 1.45;
+}
+:where(.sentry-panel) .sentry-issue-title strong {
+  font-size: var(--text-sm, 0.8125rem);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+:where(.sentry-panel) .sentry-issue-id {
+  color: var(--sentry-muted);
+  font-size: var(--text-xs, 0.75rem);
+}
+:where(.sentry-panel) .sentry-disclosure {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-inline-start: auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: var(--sentry-muted);
+  font-size: var(--text-xs, 0.75rem);
+  font-weight: 500;
+}
+:where(.sentry-panel) .sentry-issue-body > summary:hover .sentry-disclosure {
+  background: var(--sentry-hover);
+  color: var(--ink);
+}
+:where(.sentry-panel) .sentry-disclosure svg {
+  transition: transform var(--motion-duration-base, 250ms)
+    var(--motion-ease-smooth, cubic-bezier(0.42, 0, 0.58, 1));
+}
+:where(.sentry-panel) details[open] > summary .sentry-disclosure svg {
+  transform: rotate(180deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  :where(.sentry-panel) .sentry-disclosure svg {
+    transition: none;
+  }
+}
+:where(.sentry-panel) .sentry-issue-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 7px;
+  font-size: var(--text-xs, 0.75rem);
+  color: var(--sentry-muted);
+  margin-block-start: 5px;
+  line-height: 1.55;
+}
+:where(.sentry-panel) .sentry-issue-details {
+  padding-block-start: 16px;
+}
+:where(.sentry-panel) .sentry-issue-details dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-block: 0 15px;
+}
+:where(.sentry-panel) dt {
+  color: var(--sentry-muted);
+  font-size: var(--text-xs, 0.75rem);
+}
+:where(.sentry-panel) dd {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+}
+:where(.sentry-panel) .sentry-state {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border: 1px solid var(--sentry-line);
+  border-radius: 5px;
+  color: var(--sentry-muted);
+  font-size: var(--text-xs, 0.75rem);
+  white-space: nowrap;
+}
+:where(.sentry-panel) .sentry-state-active {
+  color: var(--sentry-accent);
+}
+:where(.sentry-panel) .sentry-regressed {
+  color: var(--sentry-error);
+}
+:where(.sentry-panel) .sentry-empty {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  text-align: center;
+  padding: 48px 20px;
+  border: 1px dashed var(--sentry-line);
+  border-radius: 10px;
+}
+:where(.sentry-panel) .sentry-empty p {
+  max-width: 48ch;
+  color: var(--sentry-muted);
+}
+:where(.sentry-panel) .sentry-empty-mark {
+  color: var(--sentry-muted);
+  font-size: var(--text-2xl, 1.5rem);
+}
+:where(.sentry-panel) .sentry-manual {
+  margin-block-start: 20px;
+  padding: 15px 16px;
+  border: 1px solid var(--sentry-line);
+  border-radius: 8px;
+}
+:where(.sentry-panel) summary {
+  cursor: pointer;
+}
+:where(.sentry-panel) .sentry-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  margin-block-start: 16px;
+}
+:where(.sentry-panel) .sentry-inline > label {
+  flex: 1 1 180px;
+}
+:where(.sentry-panel) .sentry-inline > .sentry-grow {
+  flex-grow: 3;
+}
+:where(.sentry-panel) .sentry-project {
+  border: 1px solid var(--sentry-line);
+  border-radius: 10px;
+  margin-block-end: 20px;
+  overflow: hidden;
+}
+:where(.sentry-panel) .sentry-project > .sentry-heading {
+  padding: 18px 18px 12px;
+}
+:where(.sentry-panel) .sentry-project-controls {
+  padding: 0 18px 15px;
+}
+:where(.sentry-panel) .sentry-route-list {
+  display: grid;
+}
+:where(.sentry-panel) .sentry-route {
+  padding: 16px 18px;
+  border-block-start: 1px solid var(--sentry-line);
+}
+:where(.sentry-panel) .sentry-route p {
+  color: var(--sentry-muted);
+  margin-block-start: 5px;
+  font-size: var(--text-xs, 0.75rem);
+}
+:where(.sentry-panel) .sentry-route .sentry-actions {
+  margin-block-start: 12px;
+}
+:where(.sentry-panel) .sentry-path {
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, monospace;
+  font-size: var(--text-xs, 0.75rem);
+}
+:where(.sentry-panel) .sentry-policy {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border-block-start: 1px solid var(--sentry-line);
+  background: var(--sentry-soft);
+}
+:where(.sentry-panel) .sentry-policy p {
+  color: var(--sentry-muted);
+  font-size: var(--text-xs, 0.75rem);
+}
+:where(.sentry-panel) .sentry-switch {
+  width: 40px;
+  min-height: 24px;
+  padding: 3px;
+  border-radius: 100px;
+  flex-shrink: 0;
+  transition: background var(--motion-duration-base, 250ms)
+    var(--motion-ease-standard, cubic-bezier(0.25, 0.1, 0.25, 1));
+}
+:where(.sentry-panel) .sentry-switch > span {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--sentry-muted);
+  transition:
+    transform var(--motion-duration-base, 250ms)
+      var(--motion-ease-in-out, cubic-bezier(0.42, 0, 0.58, 1)),
+    background var(--motion-duration-base, 250ms)
+      var(--motion-ease-standard, cubic-bezier(0.25, 0.1, 0.25, 1));
+}
+:where(.sentry-panel) .sentry-switch[aria-checked="true"] {
+  background: var(--sentry-accent);
+}
+:where(.sentry-panel) .sentry-switch[aria-checked="true"] > span {
+  transform: translateX(14px);
+  background: var(--canvas);
+}
+:where(.sentry-panel):dir(rtl) .sentry-switch[aria-checked="true"] > span {
+  transform: translateX(-14px);
+}
+:where(.sentry-panel) .sentry-limit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
+}
+:where(.sentry-panel) .sentry-limit input {
+  max-width: 120px;
+}
+:where(.sentry-panel) .sentry-limit p {
+  align-self: center;
+  margin-inline-start: auto;
+}
+:where(.sentry-panel) :is(.sentry-run-list, .sentry-batch-actions) {
+  display: grid;
+  gap: 12px;
+}
+:where(.sentry-panel) :is(.sentry-run, .sentry-batch-report) {
+  border: 1px solid var(--sentry-line);
+  padding: 18px;
+  border-radius: 10px;
+  margin-block-end: 12px;
+}
+:where(.sentry-panel) :is(.sentry-run, .sentry-batch-report) > :is(p, details, .sentry-actions) {
+  margin-block-start: 12px;
+}
+:where(.sentry-panel) .sentry-run details p {
+  margin-block-start: 10px;
+  max-width: 75ch;
+}
+:where(.sentry-panel) .sentry-batch-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+:where(.sentry-panel) .sentry-project-action {
+  text-align: end;
+}
+:where(.sentry-panel) .sentry-effort {
+  font-size: var(--text-xs, 0.75rem);
+  margin-inline-start: 8px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--sentry-accent) 12%, transparent);
+}
+:where(.sentry-panel) :is(.sentry-notice, .sentry-error) {
+  padding: 12px 14px;
+  border: 1px solid var(--sentry-line);
+  border-radius: 7px;
+  margin-block: 12px;
+  background: var(--sentry-soft);
+}
+:where(.sentry-panel) .sentry-error {
+  color: var(--sentry-error);
+  border-color: color-mix(in oklab, var(--sentry-error) 25%, transparent);
+}
+:where(.sentry-panel) .sentry-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+:where(.sentry-panel) .sentry-dialog {
+  position: fixed;
+  inset-block: 12px;
+  inset-inline-end: 12px;
+  z-index: 61;
+  width: min(560px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 24px;
+  border: 1px solid var(--sentry-line);
+  border-radius: 12px;
+  background: var(--canvas);
+  color: var(--ink);
+  box-shadow: var(--shadow-lg);
+}
+:where(.sentry-panel) .sentry-dialog .sentry-form {
+  padding: 0;
+  margin: 0;
+}
+:where(.sentry-panel) .sentry-form fieldset {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+:where(.sentry-panel) .sentry-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+:where(.sentry-panel) .sentry-dialog > p {
+  color: var(--sentry-muted);
+  margin-block-start: 8px;
+}
+:where(.sentry-panel) .sentry-dialog form {
+  margin-block-start: 24px;
+}
+:where(.sentry-panel) .sentry-dialog h2 {
+  font-size: var(--text-lg, 1.125rem);
+}
+:where(.sentry-panel) .sentry-discovery-row {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+}
+:where(.sentry-panel) .sentry-discovery-row label {
+  flex: 1;
+}
+:where(.sentry-panel) .sentry-discovery-row button {
+  flex-shrink: 0;
+}
+:where(.sentry-panel) .sentry-dialog-actions {
+  justify-content: flex-end;
+  padding-block-start: 8px;
+}
+:where(.sentry-panel) .sentry-setup-feedback {
+  min-height: 20px;
+  color: var(--sentry-error);
+}
+:where(.sentry-panel) .sentry-setup-note {
+  border: 1px solid var(--sentry-line);
+  padding: 10px 12px;
+  border-radius: 7px;
+  color: var(--sentry-muted);
+  background: var(--sentry-soft);
+}
+:where(.sentry-panel) .sentry-dialog details {
+  border-block-start: 1px solid var(--sentry-line);
+  padding-block-start: 14px;
+}
+:where(.sentry-panel) .sentry-dialog details label {
+  margin-block-start: 12px;
+}
+:where(.sentry-panel) .sentry-setup-step {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-weight: 600;
+  padding-block: 3px;
+}
+:where(.sentry-panel) .sentry-setup-step > span {
+  color: var(--sentry-muted);
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--sentry-line);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: var(--text-xs, 0.75rem);
+}
+.sentry-rail-anchor {
+  position: relative;
+}
+.sentry-rail-badge {
+  position: absolute;
+  inset-block-start: 1px;
+  inset-inline-end: 0;
+  min-width: 15px;
+  height: 14px;
+  padding-inline: 3px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  background: #a698f5;
+  color: #201b3a;
+  box-shadow: 0 0 0 2px var(--canvas);
+  font:
+    600 9px/1 ui-sans-serif,
+    system-ui,
+    sans-serif;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.sentry-rail-badge[data-freshness="stale"],
+.sentry-rail-badge[data-freshness="partial"] {
+  background: #ccac70;
+}
+@media (max-width: 760px) {
+  :where(.sentry-panel) {
+    padding: 20px 16px;
+  }
+  :where(.sentry-panel) .sentry-workspace:has(.sentry-project-nav) {
+    display: block;
+  }
+  :where(.sentry-panel) .sentry-project-nav {
+    display: none;
+  }
+  :where(.sentry-panel) .sentry-filterbar .sentry-mobile-project {
+    display: grid;
+  }
+  :where(.sentry-panel) .sentry-scope-hint {
+    display: none;
+  }
+  :where(.sentry-panel) .sentry-topbar {
+    align-items: start;
+  }
+  :where(.sentry-panel) .sentry-topbar > .sentry-actions {
+    gap: 6px;
+  }
+  :where(.sentry-panel) .sentry-tabs {
+    margin-block-end: 18px;
+    gap: 3px;
+  }
+  :where(.sentry-panel) .sentry-tabs button {
+    padding-inline: 9px;
+  }
+  :where(.sentry-panel) .sentry-issue {
+    grid-template-columns: 23px minmax(0, 1fr);
+    gap: 10px;
+    padding: 14px;
+  }
+  :where(.sentry-panel) .sentry-issue > button {
+    grid-column: 2;
+    justify-self: start;
+  }
+  :where(.sentry-panel) .sentry-filterbar > label {
+    flex: 1 1 140px;
+  }
+  :where(.sentry-panel) .sentry-filterbar > .sentry-grow {
+    flex-basis: 100%;
+  }
+  :where(.sentry-panel) :is(input, select, textarea) {
+    font-size: 1rem;
+  }
+  :where(.sentry-panel) .sentry-dialog {
+    padding: 20px;
+  }
+  :where(.sentry-panel) .sentry-limit p {
+    margin-inline-start: 0;
+    width: 100%;
+  }
+}
+@media (max-width: 420px) {
+  :where(.sentry-panel) .sentry-topbar {
+    gap: 16px;
+  }
+  :where(.sentry-panel) .sentry-topbar > .sentry-actions {
+    width: 100%;
+  }
+  :where(.sentry-panel) .sentry-grid {
+    grid-template-columns: 1fr;
+  }
+  :where(.sentry-panel) .sentry-scope-heading {
+    flex-wrap: wrap;
+  }
+  :where(.sentry-panel) .sentry-project-action {
+    text-align: start;
+  }
+  :where(.sentry-panel) .sentry-issue-details dl {
+    grid-template-columns: 1fr;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :where(.sentry-panel) *,
+  :where(.sentry-panel) *::before,
+  :where(.sentry-panel) *::after {
+    transition: none !important;
+  }
+}
+:where(.sentry-panel) .sentry-route-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-block-start: 12px;
+}
+:where(.sentry-panel) .sentry-route-controls .sentry-actions {
+  margin-block-start: 0;
+}
+:where(.sentry-panel) .sentry-route-details {
+  min-width: 0;
+  flex: 1 1 150px;
+  padding-block-start: 7px;
+}
+:where(.sentry-panel) .sentry-route-details summary {
+  color: var(--sentry-muted);
+  font-size: var(--text-xs, 0.75rem);
+}
+:where(.sentry-panel) .sentry-mobile-project.sentry-project-select {
+  display: none;
+  margin-block-end: 16px;
+}
+@media (max-width: 760px) {
+  :where(.sentry-panel) .sentry-mobile-project.sentry-project-select {
+    display: grid;
+  }
+}
+:where(.sentry-panel) .sentry-issue-mappings {
+  display: grid;
+  gap: 12px;
+  padding-block: 14px;
+  border-block-start: 1px solid var(--sentry-line);
+}
+:where(.sentry-panel) .sentry-issue-mappings p {
+  margin-block-start: 4px;
+  font-size: var(--text-xs, 0.75rem);
+}
+:where(.sentry-panel.sentry-settings) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: none;
+  flex-wrap: wrap;
+  overflow: visible;
+  padding: 0;
+}
+:where(.sentry-panel) .sentry-settings-status {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+:where(.sentry-panel) .sentry-settings-status .sentry-health {
+  font-size: var(--text-sm, 0.8125rem);
+  font-weight: 500;
+}
+:where(.sentry-panel) .sentry-settings-error {
+  color: var(--sentry-error);
+}
+:where(.sentry-panel) .sentry-models {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  align-items: center;
+  margin-block-end: 16px;
+}
+:where(.sentry-panel) .sentry-model {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+:where(.sentry-panel) .sentry-model-status {
+  color: var(--sentry-muted);
+  font-size: var(--text-xs, 0.75rem);
+}
+:where(.sentry-panel.sentry-settings) .sentry-models {
+  flex-basis: 100%;
+  margin: 0;
+}

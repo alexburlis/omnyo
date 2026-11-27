@@ -1,0 +1,115 @@
+.fastloop-panel {
+  color: var(--ink);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 1rem;
+  padding: 1rem;
+  min-width: 0;
+  font-size: var(--text-sm, 0.875rem);
+}
+
+.fastloop-panel :where(h3, h4, p, ul, dl) {
+  margin: 0;
+}
+
+.fastloop-panel :where(h3, h4) {
+  font-size: inherit;
+  font-weight: 600;
+}
+
+.fastloop-panel :where(button, select) {
+  font: inherit;
+  color: inherit;
+  background: var(--canvas);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 0.375rem);
+  padding: 0.4rem 0.65rem;
+  min-height: 2.25rem;
+  max-width: 100%;
+}
+
+.fastloop-panel button {
+  cursor: pointer;
+}
+
+.fastloop-panel select {
+  min-width: 0;
+  width: 100%;
+}
+
+.fastloop-panel button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.fastloop-panel :where(button, select):focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.fastloop-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.fastloop-details {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.fastloop-details section {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.fastloop-details ul {
+  padding-inline-start: 1.25rem;
+}
+
+.fastloop-checks,
+.fastloop-evidence {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.fastloop-checks li,
+.fastloop-evidence li {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.65rem;
+}
+
+.fastloop-muted {
+  color: color-mix(in oklch, var(--ink) 65%, var(--canvas));
+}
+
+.fastloop-identity dd {
+  margin: 0 0 0.5rem;
+  overflow-wrap: anywhere;
+}
+
+.fastloop-preview {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.fastloop-preview img {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--color-border);
+}
+
+.fastloop-preview pre {
+  max-height: 30rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

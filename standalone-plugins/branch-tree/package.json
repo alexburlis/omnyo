@@ -1,0 +1,59 @@
+{
+  "name": "omnyo-plugin-branch-tree",
+  "version": "0.1.0",
+  "private": true,
+  "author": {
+    "name": "Omnyo",
+    "url": "https://github.com/alexburlis"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alexburlis/omnyo.git",
+    "directory": "standalone-plugins/branch-tree"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "omnyo plugin build",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint --deny-warnings --format=agent",
+    "format:check": "oxfmt --check",
+    "test:e2e": "node tests/branches.e2e.mjs"
+  },
+  "dependencies": {
+    "@tanstack/react-virtual": "3.14.13",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@omnyo/plugin-sdk": "file:./vendor/omnyo-plugin-sdk-0.6.46-3b89f84383f5.tgz",
+    "@oxlint/plugins": "1.87.0",
+    "@radix-ui/react-dropdown-menu": "^2.1.20",
+    "@types/better-sqlite3": "7.6.12",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "hono": "4.13.11",
+    "oxfmt": "0.72.0",
+    "oxlint": "1.87.0",
+    "playwright-core": "1.64.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "sonner": "^1.7.4",
+    "typescript": "5.9.3"
+  },
+  "engines": {
+    "omnyo": ">=0.46.242",
+    "omnyoPluginSdk": ">=0.6.45"
+  },
+  "omnyo": {
+    "name": "Branch Tree",
+    "description": "One-click chat branches with a calm, nested sidebar tree.",
+    "branding": {
+      "icon": "GitBranch"
+    },
+    "server": "./server.ts",
+    "app": "./app.tsx",
+    "skills": [
+      "skills"
+    ]
+  }
+}

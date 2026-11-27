@@ -1,0 +1,68 @@
+{
+  "$schema": "https://schemas.agentskills.io/discovery/0.2.0/schema.json",
+  "skills": [
+    {
+      "name": "deploy-to-vercel",
+      "description": "Deploy applications and websites to Vercel. Use when the user requests deployment actions like \"deploy my app\", \"deploy and give me the link\", \"push this live\", or \"create a preview deployment\".",
+      "type": "skill-md",
+      "url": "https://github.com/vercel-labs/agent-skills/releases/download/agent-skills-5a37a6329fbad3666c3207392a6a7c0110e92efb/deploy-to-vercel.md",
+      "digest": "sha256:418ca2a60d35c551e6cb645f4e82c1b704a8335486ffe74b1b3d0617a17504e5"
+    },
+    {
+      "name": "vercel-cli-with-tokens",
+      "description": "Deploy and manage projects on Vercel using token-based authentication. Use when working with Vercel CLI using access tokens rather than interactive login — e.g. \"deploy to vercel\", \"set up vercel\", \"add environment variables to vercel\".",
+      "type": "skill-md",
+      "url": "https://github.com/vercel-labs/agent-skills/releases/download/agent-skills-5a37a6329fbad3666c3207392a6a7c0110e92efb/vercel-cli-with-tokens.md",
+      "digest": "sha256:c06bea99e75eab07fde4fae26069baa002f82f39b53f07981704c2901551dd4c"
+    },
+    {
+      "name": "vercel-composition-patterns",
+      "description": "React composition patterns that scale. Use when refactoring components with boolean prop proliferation, building flexible component libraries, or designing reusable APIs. Triggers on tasks involving compound components, render props, context providers, or component architecture. Includes React 19 API changes.",
+      "type": "archive",
+      "url": "https://github.com/vercel-labs/agent-skills/releases/download/agent-skills-5a37a6329fbad3666c3207392a6a7c0110e92efb/vercel-composition-patterns.tar.gz",
+      "digest": "sha256:0af47b94aa0ff20a60a1629cfb6b29db3ab47dfa781873ef08193a2da57932c7"
+    },
+    {
+      "name": "vercel-optimize",
+      "description": "Use for Vercel cost and performance optimization on deployed projects, especially Next.js, SvelteKit, Nuxt, and limited Astro apps. Collect Vercel metrics, usage, project config, and code scan results first; investigate only metric-backed candidates; produce ranked recommendations grounded in verified files and version-aware Vercel/framework docs. Trigger for Vercel bill reduction, slow or expensive routes, caching opportunities, Function Invocations, Build Minutes, Fast Data Transfer, Core Web Vitals, Bot Management, Fluid compute, or cost breakdown requests.",
+      "type": "archive",
+      "url": "https://github.com/vercel-labs/agent-skills/releases/download/agent-skills-5a37a6329fbad3666c3207392a6a7c0110e92efb/vercel-optimize.tar.gz",
+      "digest": "sha256:622daac872811a4206477e0569a183eaa248f9719454b39422a5690fbe31c126"
+    },
+    {
+      "name": "vercel-react-best-practices",
+      "description": "React and Next.js performance optimization guidelines from Vercel Engineering. This skill should be used when writing, reviewing, or refactoring React/Next.js code to ensure optimal performance patterns. Triggers on tasks involving React components, Next.js pages, data fetching, bundle optimization, or performance improvements.",
+      "type": "archive",
+      "url": "https://github.com/vercel-labs/agent-skills/releases/download/agent-skills-5a37a6329fbad3666c3207392a6a7c0110e92efb/vercel-react-best-practices.tar.gz",
+      "digest": "sha256:551e671112c393bec0b4a8551badb9bf3f63187e57a901a4e1b6b932bdffe995"
+    },
+    {
+      "name": "vercel-react-native-skills",
+      "description": "React Native and Expo best practices for building performant mobile apps. Use when building React Native components, optimizing list performance, implementing animations, or working with native modules. Triggers on tasks involving React Native, Expo, mobile performance, or native platform APIs.",
+      "type": "archive",
+      "url": "https://github.com/vercel-labs/agent-skills/releases/download/agent-skills-5a37a6329fbad3666c3207392a6a7c0110e92efb/vercel-react-native-skills.tar.gz",
+      "digest": "sha256:95308e57f629679542bc84cb0e8280aa1fd0003360d42341dec927447e0e7e6d"
+    },
+    {
+      "name": "vercel-react-view-transitions",
+      "description": "Guide for implementing smooth, native-feeling animations using React's View Transition API (`<ViewTransition>` component, `addTransitionType`, and CSS view transition pseudo-elements). Use this skill whenever the user wants to add page transitions, animate route changes, create shared element animations, animate enter/exit of components, animate list reorder, implement directional (forward/back) navigation animations, or integrate view transitions in Next.js. Also use when the user mentions view transitions, `startViewTransition`, `ViewTransition`, transition types, or asks about animating between UI states in React without third-party animation libraries.",
+      "type": "archive",
+      "url": "https://github.com/vercel-labs/agent-skills/releases/download/agent-skills-5a37a6329fbad3666c3207392a6a7c0110e92efb/vercel-react-view-transitions.tar.gz",
+      "digest": "sha256:6a0f7a632192ab8e088c95d312d12b8ef492d46a86fa75affd76ecf7163661ce"
+    },
+    {
+      "name": "web-design-guidelines",
+      "description": "Review UI code for Web Interface Guidelines compliance. Use when asked to \"review my UI\", \"check accessibility\", \"audit design\", \"review UX\", or \"check my site against best practices\".",
+      "type": "archive",
+      "url": "https://github.com/vercel-labs/agent-skills/releases/download/agent-skills-5a37a6329fbad3666c3207392a6a7c0110e92efb/web-design-guidelines.tar.gz",
+      "digest": "sha256:fac93c20923ff966353c5f82933e4842c0d694b1d2463a3710a39b157238a6d9"
+    },
+    {
+      "name": "writing-guidelines",
+      "description": "Review docs/prose for Writing Guidelines compliance. Use when asked to \"review my docs\", \"check writing style\", \"audit prose\", \"review docs voice and tone\", or \"check this page against the writing handbook\".",
+      "type": "skill-md",
+      "url": "https://github.com/vercel-labs/agent-skills/releases/download/agent-skills-5a37a6329fbad3666c3207392a6a7c0110e92efb/writing-guidelines.md",
+      "digest": "sha256:89a5f581193289b80af58b980090aeed535047c8df2b55ccbaae0de40283a99d"
+    }
+  ]
+}

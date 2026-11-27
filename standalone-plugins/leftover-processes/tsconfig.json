@@ -1,0 +1,34 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "lib": ["ES2023", "DOM"],
+    "types": ["node"],
+    "noEmit": true,
+    "skipLibCheck": false,
+    "esModuleInterop": true,
+    "noUncheckedIndexedAccess": true,
+    "paths": {
+      "@/*": ["./*"]
+    }
+  },
+  "include": [
+    "server.ts",
+    "host.ts",
+    "app.tsx",
+    "contract.ts",
+    "policy.ts",
+    "process-table.ts",
+    "store.ts",
+    "projection.ts",
+    "sweeper.ts",
+    "cli.ts",
+    "lib",
+    "components",
+    "tests",
+    "vitest.config.ts"
+  ]
+}

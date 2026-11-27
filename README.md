@@ -29,7 +29,7 @@ Open the local URL printed by the launcher. Sign in to your coding provider in i
 
 ## What's included
 
-The source includes the coordinator, browser app, CLI, host daemon, in-tree plugins, and the Omnyo website. The coordinator stores threads and settings in a local SQLite database. Built-in app diagnostic collection is disabled. See the [system overview](docs/system-overview.md).
+The source includes the coordinator, browser app, CLI, host daemon, in-tree plugins, [standalone plugins](standalone-plugins), and the Omnyo website. The coordinator stores threads and settings in a local SQLite database. Built-in app diagnostic collection is disabled. See the [system overview](docs/system-overview.md).
 
 ### Website
 
