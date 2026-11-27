@@ -8,15 +8,22 @@ export interface DesktopUpdateMetadataFileNames {
   windows: "latest.yml" | "nightly.yml";
 }
 
-export interface DesktopReleaseConfig {
-  appId: "dev.omnyo.beta" | "dev.omnyo.private" | "dev.omnyo.private.nightly";
+export interface DesktopReleaseIdentity {
+  channel: DesktopReleaseChannel;
   applicationName: "Omnyo" | "Omnyo Nightly";
   profileName: "Omnyo Private" | "Omnyo Private Nightly" | "Omnyo";
-  artifactName: string;
   iconFileName: "icon.png" | "icon-nightly.png";
+  releaseTag: "desktop-latest" | "desktop-nightly" | "desktop-public-beta";
+}
+
+export interface DesktopReleaseConfig extends Omit<
+  DesktopReleaseIdentity,
+  "channel"
+> {
+  appId: "dev.omnyo.beta" | "dev.omnyo.private" | "dev.omnyo.private.nightly";
+  artifactName: string;
   linuxExecutableName: "omnyo-private" | "omnyo-private-nightly";
   macIconPath: "assets/icon.icns" | "assets/icon-nightly.icns";
-  releaseTag: "desktop-latest" | "desktop-nightly" | "desktop-public-beta";
   updateMetadataFileNames: DesktopUpdateMetadataFileNames;
   windowsInstallGuid: "11c43a4e-5f09-59c3-a447-6f25f5982512" | null;
   windowsInstallName: "omnyo-private" | "omnyo-private-nightly";
@@ -38,6 +45,10 @@ export function resolveDesktopReleaseChannel(
 export function resolveDesktopBuildPlatform(
   nodePlatform: string,
 ): DesktopBuildPlatform;
+
+export function desktopReleaseIdentity(
+  channel: DesktopReleaseChannel,
+): DesktopReleaseIdentity;
 
 export function createDesktopReleaseConfig(
   channel: DesktopReleaseChannel,
