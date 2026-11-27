@@ -90,6 +90,11 @@ import { validatePresentationIcons } from "./presentation-icons.js";
 import { observeTurnTraceEventBatch } from "../services/system/turn-trace.js";
 import { advanceDaemonEventReceipt } from "../services/hosts/event-receipt-watermarks.js";
 import { collectAfterCommit } from "../services/lib/after-commit.js";
+import {
+  isMaintenanceFrozen,
+  isServerMoveSnapshotFenced,
+  serverMovingError,
+} from "../services/server-move/freeze-state.js";
 
 const INGRESS_WRITE_BUSY_WAIT_MS = 125;
 
@@ -131,6 +136,9 @@ interface EventEffectProgress {
 }
 
 interface AppliedEventBatch {
+  eventInputs: AppendDaemonEventInput[];
+  postableEvents: HostDaemonEventEnvelope[];
+  subagentCountsBefore: SubagentCounts;
   appendResult: AppendDaemonEventsResult;
   duplicateEvents: number;
   followUps: EventEffectFollowUp[];
@@ -1597,43 +1605,21 @@ export function registerInternalEventRoutes(app: Hono, deps: AppDeps): void {
         ),
       );
 
-      const labelledEntries = entries
-        .map((entry, index) => {
-          const validated = validatedEnvelopes[index];
+      const validatedEntries = entries.map((entry, index) => {
+        const validated = validatedEnvelopes[index];
 
-          if (validated === undefined) {
-            throw new Error(
-              "Missing validated envelope for daemon event entry",
-            );
-          }
+        if (validated === undefined) {
+          throw new Error("Missing validated envelope for daemon event entry");
+        }
 
-          return {
-            ...entry,
-            envelope: {
-              ...validated,
-              event: maskProviderEnvironmentEvent(validated.event),
-            },
-          };
-        })
-        .map((entry) => preserveTerminalProvisioningStatus(deps, entry));
-
-      const indexedInputs = labelledEntries.map((entry) => ({
-        eventIndex: entry.eventIndex,
-        input: toStoredEvent({
-          envelope: entry.envelope,
-          environmentId: entry.environmentId,
-        }),
-      }));
-
-      const eventInputs = indexedInputs.map((entry) => entry.input);
-
-      const subagentCountsBefore = readSubagentCounts(deps.db, [
-        ...new Set(
-          eventInputs
-            .filter(eventInputMayChangeSubagents)
-            .map((input) => input.threadId),
-        ),
-      ]);
+        return {
+          ...entry,
+          envelope: {
+            ...validated,
+            event: maskProviderEnvironmentEvent(validated.event),
+          },
+        };
+      });
 
       const indexedBatch: IndexedEventBatch | null =
         payload.firstEventIndex === undefined
@@ -1648,18 +1634,97 @@ export function registerInternalEventRoutes(app: Hono, deps: AppDeps): void {
               retained: payload.sourceInstanceId !== undefined,
             };
 
-      const postableEvents = labelledEntries.map((entry) => entry.envelope);
       const retainedDelivery = payload.sourceInstanceId !== undefined;
       const effectProgress: EventEffectProgress = { entry: null };
       let applied: AppliedEventBatch;
       let afterCommitActions: (() => void)[];
 
+      let waitedForWrite = false;
+      let admitted = false;
+
+      const assertWritable = () => {
+        if (
+          isServerMoveSnapshotFenced(deps.db) ||
+          isMaintenanceFrozen(deps.db)
+        ) {
+          throw serverMovingError();
+        }
+      };
+
       try {
-        const collected = collectAfterCommit(() =>
-          runImmediateTransactionWithBusyWait(
-            deps.db,
-            INGRESS_WRITE_BUSY_WAIT_MS,
-            (tx): AppliedEventBatch => {
+        const collected = await runImmediateTransactionWithBusyWait(
+          deps.db,
+          INGRESS_WRITE_BUSY_WAIT_MS,
+          (tx) =>
+            collectAfterCommit((): AppliedEventBatch => {
+              assertWritable();
+
+              if (waitedForWrite) {
+                requireAuthenticatedDaemonSession({
+                  context,
+                  db: deps.db,
+                  sessionId: session.id,
+                });
+
+                const assignments = new Map(
+                  listThreadEnvironmentAssignmentsOnHost(deps.db, {
+                    hostId: session.hostId,
+                    threadIds: [
+                      ...new Set(
+                        validatedEntries.map(
+                          ({ envelope }) => envelope.threadId,
+                        ),
+                      ),
+                    ],
+                  }).map(({ threadId, environmentId }) => [
+                    threadId,
+                    environmentId,
+                  ]),
+                );
+
+                if (
+                  validatedEntries.some(
+                    ({ environmentId, envelope }) =>
+                      assignments.get(envelope.threadId) !== environmentId,
+                  )
+                ) {
+                  throw new ApiError(
+                    503,
+                    "event_batch_not_applied",
+                    "Thread placement changed; retry the same event batch",
+                    true,
+                  );
+                }
+              }
+
+              admitted = true;
+
+              const labelledEntries = validatedEntries.map((entry) =>
+                preserveTerminalProvisioningStatus(deps, entry),
+              );
+
+              const indexedInputs = labelledEntries.map((entry) => ({
+                eventIndex: entry.eventIndex,
+                input: toStoredEvent({
+                  envelope: entry.envelope,
+                  environmentId: entry.environmentId,
+                }),
+              }));
+
+              const eventInputs = indexedInputs.map((entry) => entry.input);
+
+              const subagentCountsBefore = readSubagentCounts(deps.db, [
+                ...new Set(
+                  eventInputs
+                    .filter(eventInputMayChangeSubagents)
+                    .map((input) => input.threadId),
+                ),
+              ]);
+
+              const postableEvents = labelledEntries.map(
+                (entry) => entry.envelope,
+              );
+
               const indexed =
                 indexedBatch === null
                   ? null
@@ -1675,6 +1740,9 @@ export function registerInternalEventRoutes(app: Hono, deps: AppDeps): void {
                   : indexed.appendResult;
 
               return {
+                eventInputs,
+                postableEvents,
+                subagentCountsBefore,
                 appendResult,
                 duplicateEvents: indexed?.duplicateEvents ?? 0,
                 followUps: applyEventEffects(
@@ -1689,13 +1757,18 @@ export function registerInternalEventRoutes(app: Hono, deps: AppDeps): void {
                   effectProgress,
                 ),
               };
-            },
-          ),
+            }),
+          () => {
+            assertWritable();
+            waitedForWrite = true;
+          },
         );
 
         applied = collected.result;
         afterCommitActions = collected.actions;
       } catch (error) {
+        if (!admitted && error instanceof ApiError) throw error;
+
         throw toEventBatchRefusal(deps, {
           error,
           failedEntry: effectProgress.entry,
@@ -1703,7 +1776,15 @@ export function registerInternalEventRoutes(app: Hono, deps: AppDeps): void {
         });
       }
 
-      const { appendResult, duplicateEvents, followUps } = applied;
+      const {
+        appendResult,
+        duplicateEvents,
+        eventInputs,
+        followUps,
+        postableEvents,
+        subagentCountsBefore,
+      } = applied;
+
       const committedAt = performance.now();
 
       if (indexedBatch !== null) {

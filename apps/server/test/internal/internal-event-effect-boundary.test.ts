@@ -24,6 +24,7 @@ import {
   EVENTS_THROUGH_WAIT_MS,
   waitForEventsThrough,
 } from "../../src/services/hosts/event-receipt-watermarks.js";
+import { setServerMoveSnapshotFence } from "../../src/services/server-move/freeze-state.js";
 import { internalAuthHeaders } from "../helpers/commands.js";
 import { readJson } from "../helpers/json.js";
 import { createCommandApprovalPayload } from "../helpers/pending-interactions.js";
@@ -696,6 +697,40 @@ describe("daemon event effect boundary", () => {
         warmStatus: "idle",
         warmToolCall: true,
       });
+    }));
+
+  it("does not append a waiting batch after the server-move snapshot is fenced", () =>
+    withBoundaryFixture(async (fixture) => {
+      await storeStartedTurn(fixture);
+      const peer = createConnection(fixture.file);
+      peer.$client.exec("BEGIN IMMEDIATE");
+
+      try {
+        const fence = setTimeout(() => {
+          setServerMoveSnapshotFence(fixture.harness.db, true);
+          peer.$client.exec("ROLLBACK");
+        }, 0);
+
+        try {
+          const response = await postBatch(
+            fixture,
+            [turnCompleted(fixture.threadId)],
+            2,
+          );
+
+          expect(response).toMatchObject({
+            status: 503,
+            code: "server_moving",
+          });
+          expect(receipt(fixture)).toBe(1);
+          expect(storedCount(fixture, "turn/completed")).toBe(0);
+        } finally {
+          clearTimeout(fence);
+          setServerMoveSnapshotFence(fixture.harness.db, false);
+        }
+      } finally {
+        peer.$client.close();
+      }
     }));
 
   it("refuses a batch when the write lock is held at admission", () =>

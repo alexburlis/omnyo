@@ -500,7 +500,7 @@ export interface AcceptedQueuedFirstPrompt {
 
 export type AcceptQueuedFirstPrompt = (
   create: (tx: DbTransaction) => AcceptedQueuedFirstPrompt,
-) => { created: boolean; threadId: string };
+) => Promise<{ created: boolean; threadId: string }>;
 
 function preparePendingThreadStart(
   deps: ThreadCreateDeps,
@@ -545,16 +545,17 @@ function preparePendingThreadStart(
   return startContext;
 }
 
-function createPendingThreadWithQueuedFirstPrompt(
+async function createPendingThreadWithQueuedFirstPrompt(
   deps: ThreadCreateDeps,
   args: CreatePendingThreadArgs,
   accept: AcceptQueuedFirstPrompt,
 ) {
-  const startContext = preparePendingThreadStart(deps, args);
   let createdThread: ReturnType<typeof createThreadRecord> | null = null;
   let execution: ReturnType<typeof buildExecutionOptionsNow> | null = null;
 
-  const accepted = accept((tx) => {
+  const accepted = await accept((tx) => {
+    const startContext = preparePendingThreadStart(deps, args);
+
     const thread = createThreadRecord(deps, {
       request: args.request,
       environmentId: args.environmentId,
@@ -1241,7 +1242,7 @@ export async function createThreadFromRequest(
       sendAt: request.sendAt,
     });
   } else {
-    const accepted = createPendingThreadWithQueuedFirstPrompt(
+    const accepted = await createPendingThreadWithQueuedFirstPrompt(
       deps,
       { ...createArgs, sendAt: request.sendAt },
       options.acceptQueuedFirstPrompt,

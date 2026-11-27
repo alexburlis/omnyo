@@ -28,6 +28,10 @@ import {
   readAttachmentBytes,
   readAttachmentMetadata,
 } from "../projects/attachments.js";
+import {
+  isServerMoveFrozen,
+  serverMovingError,
+} from "../server-move/freeze-state.js";
 import { prepareQueuedMessageAcceptance } from "./queued-messages.js";
 import { createThreadFromRequest } from "./thread-create.js";
 
@@ -233,7 +237,7 @@ function toSubmissionReceipt(
   };
 }
 
-function commitSubmission(
+async function commitSubmission(
   deps: Pick<AppDeps, "db" | "logger">,
   args: {
     action: SubmissionReceiptRow["action"];
@@ -241,15 +245,21 @@ function commitSubmission(
     digest: string;
     key: SubmissionReceiptKey;
   },
-): CommittedSubmission {
+): Promise<CommittedSubmission> {
   let collected: ReturnType<typeof collectAfterCommit<CommittedSubmission>>;
 
+  const assertWritable = () => {
+    if (isServerMoveFrozen(deps.db)) throw serverMovingError();
+  };
+
   try {
-    collected = collectAfterCommit(() =>
-      runImmediateTransactionWithBusyWait(
-        deps.db,
-        SUBMISSION_WRITE_BUSY_WAIT_MS,
-        (tx): CommittedSubmission => {
+    collected = await runImmediateTransactionWithBusyWait(
+      deps.db,
+      SUBMISSION_WRITE_BUSY_WAIT_MS,
+      (tx) =>
+        collectAfterCommit((): CommittedSubmission => {
+          assertWritable();
+
           const existing = findSubmissionReceipt(tx, args.key);
 
           if (existing !== null) {
@@ -272,8 +282,8 @@ function commitSubmission(
           insertSubmissionReceipt(tx, row);
 
           return { created: true, row };
-        },
-      ),
+        }),
+      assertWritable,
     );
   } catch (error) {
     if (error instanceof PrimaryWriteBusyError) {
@@ -351,7 +361,7 @@ export async function acceptSubmission(
       thread,
     });
 
-    const committed = commitSubmission(deps, {
+    const committed = await commitSubmission(deps, {
       action: "thread-message",
       create: (tx) => ({
         queuedMessageId: acceptance.insert(tx, { collapseDuplicates: false })
@@ -401,8 +411,8 @@ export async function acceptSubmission(
         : { launchedByThreadId: args.launchedByThreadId }),
     },
     {
-      acceptQueuedFirstPrompt: (create) => {
-        const outcome = commitSubmission(deps, {
+      acceptQueuedFirstPrompt: async (create) => {
+        const outcome = await commitSubmission(deps, {
           action: "new-thread",
           create,
           digest,

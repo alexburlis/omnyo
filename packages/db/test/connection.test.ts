@@ -448,12 +448,12 @@ describe("createConnection", () => {
   });
 });
 
-function withWriterPair(
+async function withWriterPair(
   run: (
     primary: ReturnType<typeof createConnection>,
     peer: ReturnType<typeof createConnection>,
-  ) => void,
-): void {
+  ) => Promise<void>,
+): Promise<void> {
   const directory = mkdtempSync(join(tmpdir(), "omnyo-db-bounded-write-"));
   const file = join(directory, "omnyo.db");
   const primary = createConnection(file);
@@ -461,7 +461,7 @@ function withWriterPair(
 
   try {
     primary.$client.exec("CREATE TABLE bounded_write (value INTEGER)");
-    run(primary, peer);
+    await run(primary, peer);
   } finally {
     peer.$client.close();
     primary.$client.close();
@@ -476,23 +476,50 @@ function countBoundedWrites(db: ReturnType<typeof createConnection>): number {
 }
 
 describe("runImmediateTransactionWithBusyWait", () => {
-  it("refuses within the wait while another connection holds the write lock and restores the previous busy timeout", () => {
-    withWriterPair((primary, peer) => {
+  it("allows a timer to release the write lock and commits the waiting write", async () => {
+    await withWriterPair(async (primary, peer) => {
+      peer.$client.exec("BEGIN IMMEDIATE");
+      const unlock = setTimeout(() => peer.$client.exec("COMMIT"), 0);
+
+      try {
+        const writing = runImmediateTransactionWithBusyWait(
+          primary,
+          500,
+          () => {
+            primary.$client
+              .prepare("INSERT INTO bounded_write VALUES (1)")
+              .run();
+          },
+        );
+
+        expect(primary.$client.pragma("busy_timeout", { simple: true })).toBe(
+          SQLITE_BUSY_TIMEOUT_MS,
+        );
+        await writing;
+        expect(countBoundedWrites(primary)).toBe(1);
+      } finally {
+        clearTimeout(unlock);
+      }
+    });
+  });
+
+  it("refuses within the wait while another connection holds the write lock and restores the previous busy timeout", async () => {
+    await withWriterPair(async (primary, peer) => {
       primary.$client.pragma("busy_timeout = 1234");
       peer.$client.exec("BEGIN IMMEDIATE");
       let workStarted = false;
       const startedAt = performance.now();
 
-      expect(() =>
+      await expect(
         runImmediateTransactionWithBusyWait(primary, 50, () => {
           workStarted = true;
         }),
-      ).toThrow(PrimaryWriteBusyError);
+      ).rejects.toThrow(PrimaryWriteBusyError);
 
       const refusedAfterMs = performance.now() - startedAt;
       peer.$client.exec("ROLLBACK");
 
-      const timeoutInsideWork = runImmediateTransactionWithBusyWait(
+      const timeoutInsideWork = await runImmediateTransactionWithBusyWait(
         primary,
         50,
         () => {
@@ -518,13 +545,19 @@ describe("runImmediateTransactionWithBusyWait", () => {
     });
   });
 
-  it("throws when called inside an open transaction", () => {
-    withWriterPair((primary) => {
-      primary.transaction(() => {
-        expect(() =>
-          runImmediateTransactionWithBusyWait(primary, 50, () => undefined),
-        ).toThrow("cannot start inside an open transaction");
-      });
+  it("throws when called inside an open transaction", async () => {
+    await withWriterPair(async (primary) => {
+      const attempt = primary.transaction(() => ({
+        result: runImmediateTransactionWithBusyWait(
+          primary,
+          50,
+          () => undefined,
+        ),
+      }));
+
+      await expect(attempt.result).rejects.toThrow(
+        "cannot start inside an open transaction",
+      );
 
       expect(primary.$client.pragma("busy_timeout", { simple: true })).toBe(
         SQLITE_BUSY_TIMEOUT_MS,
@@ -532,9 +565,9 @@ describe("runImmediateTransactionWithBusyWait", () => {
     });
   });
 
-  it("rolls back nested effect transactions with the outer transaction", () => {
-    withWriterPair((primary) => {
-      expect(() =>
+  it("rolls back nested effect transactions with the outer transaction", async () => {
+    await withWriterPair(async (primary) => {
+      await expect(
         runImmediateTransactionWithBusyWait(primary, 50, () => {
           primary.$client.prepare("INSERT INTO bounded_write VALUES (1)").run();
           primary.transaction(
@@ -552,7 +585,7 @@ describe("runImmediateTransactionWithBusyWait", () => {
 
           throw new Error("effect failed");
         }),
-      ).toThrow("effect failed");
+      ).rejects.toThrow("effect failed");
 
       expect(countBoundedWrites(primary)).toBe(0);
     });
