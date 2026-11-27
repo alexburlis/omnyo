@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  node-abi>semver: 7.8.5
+
 importers:
 
   .:
@@ -17,7 +20,7 @@ importers:
     devDependencies:
       '@omnyo/plugin-sdk':
         specifier: file:./vendor/omnyo-plugin-sdk-0.6.46-3b89f84383f5.tgz
-        version: file:vendor/omnyo-plugin-sdk-0.6.46-3b89f84383f5.tgz(@types/better-sqlite3@7.6.13)(@types/react@19.3.0)(better-sqlite3@12.11.1)(cron-parser@5.5.0)(hono@4.13.11)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+        version: file:vendor/omnyo-plugin-sdk-0.6.46-3b89f84383f5.tgz(@types/better-sqlite3@7.6.13)(@types/react@19.3.0)(better-sqlite3@12.11.1)(cron-parser@5.5.0)(hono@4.13.16)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@oxlint/plugins':
         specifier: 1.85.0
         version: 1.85.0
@@ -40,8 +43,8 @@ importers:
         specifier: 5.5.0
         version: 5.5.0
       hono:
-        specifier: 4.13.11
-        version: 4.13.11
+        specifier: 4.13.16
+        version: 4.13.16
       oxfmt:
         specifier: 0.72.0
         version: 0.72.0
@@ -577,8 +580,8 @@ packages:
   github-from-package@0.0.0:
     resolution: {integrity: sha512-SyHy3T1v2NUXn29OsWdxmK6RwHD+vkj3v8en8AOBZ1wBQ/hCAQ5bAQTD02kW4W9tUp/3Qh6J8r9EvntiyCmOOw==}
 
-  hono@4.13.11:
-    resolution: {integrity: sha512-/SMX/RQNJn7oNmFwH6DtwDqcrzZU2otm1FD6OJe2cWF6cfy/F8hq0XVBv7xW3FTJshRQwuBnXHDq2kNsdZnshg==}
+  hono@4.13.16:
+    resolution: {integrity: sha512-AOLOEhvrV+iH92xXCnFr/5+3KjPKcI3xP63XJtX5spAnkznPdHijlIsUTpi7/9EhWqrTCekw5c5zh1K+YsVw7A==}
     engines: {node: '>=16.9.0'}
 
   ieee754@1.2.1:
@@ -840,7 +843,7 @@ snapshots:
   '@esbuild/win32-x64@0.28.2':
     optional: true
 
-  '@omnyo/plugin-sdk@file:vendor/omnyo-plugin-sdk-0.6.46-3b89f84383f5.tgz(@types/better-sqlite3@7.6.13)(@types/react@19.3.0)(better-sqlite3@12.11.1)(cron-parser@5.5.0)(hono@4.13.11)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
+  '@omnyo/plugin-sdk@file:vendor/omnyo-plugin-sdk-0.6.46-3b89f84383f5.tgz(@types/better-sqlite3@7.6.13)(@types/react@19.3.0)(better-sqlite3@12.11.1)(cron-parser@5.5.0)(hono@4.13.16)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
     dependencies:
       cross-spawn: 7.0.6
       zod: 4.6.7
@@ -849,7 +852,7 @@ snapshots:
       '@types/react': 19.3.0
       better-sqlite3: 12.11.1
       cron-parser: 5.5.0
-      hono: 4.13.11
+      hono: 4.13.16
       react: 19.3.1
       react-dom: 19.3.1(react@19.3.1)
 
@@ -1073,7 +1076,7 @@ snapshots:
 
   github-from-package@0.0.0: {}
 
-  hono@4.13.11: {}
+  hono@4.13.16: {}
 
   ieee754@1.2.1: {}
 

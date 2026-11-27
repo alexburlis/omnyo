@@ -24,8 +24,8 @@
     "verify": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test"
   },
   "dependencies": {
-    "undici": "7.29.1",
-    "zod": "4.6.5"
+    "undici": "7.30.1",
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@omnyo/plugin-sdk": "file:./vendor/omnyo-plugin-sdk-0.6.46-3b89f84383f5.tgz",
@@ -38,7 +38,7 @@
     "@types/react-dom": "^19.0.0",
     "better-sqlite3": "12.10.0",
     "cron-parser": "5.5.0",
-    "hono": "4.13.11",
+    "hono": "4.13.16",
     "jsdom": "29.0.1",
     "oxfmt": "0.72.0",
     "oxlint": "1.87.0",

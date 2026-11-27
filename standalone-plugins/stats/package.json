@@ -23,7 +23,7 @@
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.3.7",
     "@radix-ui/react-slot": "^1.3.0",
-    "zod": "^4.6.5"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@omnyo/plugin-sdk": "file:./vendor/omnyo-plugin-sdk-0.6.47-cd4c7b7b30b8.tgz",
@@ -48,7 +48,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cron-parser": "^5.5.0",
-    "hono": "^4.11.9",
+    "hono": "^4.13.16",
     "oxfmt": "0.71.0",
     "oxlint": "1.87.0",
     "sonner": "^1.7.4",

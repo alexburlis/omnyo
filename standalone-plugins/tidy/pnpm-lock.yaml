@@ -29,7 +29,7 @@ importers:
     devDependencies:
       '@omnyo/plugin-sdk':
         specifier: file:./vendor/omnyo-plugin-sdk-0.6.52-a6663b865ecc.tgz
-        version: file:vendor/omnyo-plugin-sdk-0.6.52-a6663b865ecc.tgz(@types/better-sqlite3@7.6.13)(@types/react@19.3.0)(better-sqlite3@12.11.1)(cron-parser@5.10.2)(hono@4.13.11)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+        version: file:vendor/omnyo-plugin-sdk-0.6.52-a6663b865ecc.tgz(@types/better-sqlite3@7.6.13)(@types/react@19.3.0)(better-sqlite3@12.11.1)(cron-parser@5.10.2)(hono@4.13.16)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@oxlint/plugins':
         specifier: 1.85.0
         version: 1.85.0
@@ -91,8 +91,8 @@ importers:
         specifier: ^5.5.0
         version: 5.10.2
       hono:
-        specifier: 4.13.11
-        version: 4.13.11
+        specifier: 4.13.16
+        version: 4.13.16
       oxfmt:
         specifier: 0.72.0
         version: 0.72.0
@@ -1043,8 +1043,8 @@ packages:
   hast-util-whitespace@3.0.0:
     resolution: {integrity: sha512-88JUN06ipLwsnv+dVn+OIYOvAuvBMy/Qoi6O7mQHxdPXpjy+Cd6xRkWwux7DKO+4sYILtLBRIKgsdpS2gQc7qw==}
 
-  hono@4.13.11:
-    resolution: {integrity: sha512-/SMX/RQNJn7oNmFwH6DtwDqcrzZU2otm1FD6OJe2cWF6cfy/F8hq0XVBv7xW3FTJshRQwuBnXHDq2kNsdZnshg==}
+  hono@4.13.16:
+    resolution: {integrity: sha512-AOLOEhvrV+iH92xXCnFr/5+3KjPKcI3xP63XJtX5spAnkznPdHijlIsUTpi7/9EhWqrTCekw5c5zh1K+YsVw7A==}
     engines: {node: '>=16.9.0'}
 
   html-void-elements@3.0.0:
@@ -1379,7 +1379,7 @@ snapshots:
     dependencies:
       react: 19.3.1
 
-  '@omnyo/plugin-sdk@file:vendor/omnyo-plugin-sdk-0.6.52-a6663b865ecc.tgz(@types/better-sqlite3@7.6.13)(@types/react@19.3.0)(better-sqlite3@12.11.1)(cron-parser@5.10.2)(hono@4.13.11)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
+  '@omnyo/plugin-sdk@file:vendor/omnyo-plugin-sdk-0.6.52-a6663b865ecc.tgz(@types/better-sqlite3@7.6.13)(@types/react@19.3.0)(better-sqlite3@12.11.1)(cron-parser@5.10.2)(hono@4.13.16)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
     dependencies:
       cross-spawn: 7.0.6
       zod: 4.6.7
@@ -1388,7 +1388,7 @@ snapshots:
       '@types/react': 19.3.0
       better-sqlite3: 12.11.1
       cron-parser: 5.10.2
-      hono: 4.13.11
+      hono: 4.13.16
       react: 19.3.1
       react-dom: 19.3.1(react@19.3.1)
 
@@ -2168,7 +2168,7 @@ snapshots:
     dependencies:
       '@types/hast': 3.0.5
 
-  hono@4.13.11: {}
+  hono@4.13.16: {}
 
   html-void-elements@3.0.0: {}
 

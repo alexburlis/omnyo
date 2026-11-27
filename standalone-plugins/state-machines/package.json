@@ -22,7 +22,7 @@
     "verify": "pnpm typecheck && pnpm test && pnpm lint && pnpm format:check && pnpm build"
   },
   "dependencies": {
-    "zod": "4.6.5"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@omnyo/plugin-sdk": "file:./vendor/omnyo-plugin-sdk-0.6.56-529aa18dd2d8.tgz",
@@ -39,7 +39,7 @@
     "clsx": "^2.1.1",
     "cron-parser": "5.5.0",
     "esbuild": "0.28.1",
-    "hono": "4.13.11",
+    "hono": "4.13.16",
     "jsdom": "^27.0.0",
     "oxfmt": "0.72.0",
     "oxlint": "1.88.0",
