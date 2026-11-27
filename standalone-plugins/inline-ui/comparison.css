@@ -1,0 +1,248 @@
+.omnyo-inline-comparison {
+  container-type: inline-size;
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+  margin: 0.875rem 0;
+  padding: 0.75rem 0.25rem;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  color: var(--foreground);
+  font-family: inherit;
+  line-height: 1.45;
+}
+
+.omnyo-inline-comparison__heading {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.omnyo-inline-comparison__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin-top: 0.45rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.omnyo-inline-comparison__legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.omnyo-inline-comparison__swatch {
+  flex-shrink: 0;
+  width: 1rem;
+  height: 0.5rem;
+  border-radius: 2px;
+  background: var(--primary);
+}
+
+.omnyo-inline-comparison__rows {
+  display: grid;
+  gap: 1rem;
+  margin-top: 0.85rem;
+}
+
+.omnyo-inline-comparison__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.omnyo-inline-comparison__category {
+  min-width: 0;
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.omnyo-inline-comparison__entries {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.omnyo-inline-comparison__entry {
+  min-width: 0;
+  padding-inline: 3px;
+}
+
+.omnyo-inline-comparison__value-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.65rem;
+  margin-bottom: 0.3rem;
+  font-size: 0.75rem;
+}
+
+.omnyo-inline-comparison__series-name {
+  min-width: 0;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+
+.omnyo-inline-comparison__value {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.1rem 0.35rem;
+  min-width: 0;
+  max-width: 100%;
+  margin-inline-start: auto;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.omnyo-inline-comparison__number,
+.omnyo-inline-comparison__unit {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.omnyo-inline-comparison__unit {
+  color: var(--muted-foreground);
+  font-weight: 400;
+}
+
+.omnyo-inline-comparison__track {
+  position: relative;
+  min-width: 0;
+  height: 0.65rem;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--muted) 65%, transparent);
+}
+
+.omnyo-inline-comparison__zero {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--muted-foreground);
+  pointer-events: none;
+}
+
+.omnyo-inline-comparison__bar {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.omnyo-inline-comparison__fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary);
+}
+
+.omnyo-inline-comparison__swatch[data-series="1"],
+.omnyo-inline-comparison__bar[data-series="1"] .omnyo-inline-comparison__fill {
+  background-color: color-mix(in srgb, var(--foreground) 85%, var(--accent));
+  background-image: repeating-linear-gradient(
+    135deg,
+    transparent 0,
+    transparent 3px,
+    color-mix(in srgb, var(--accent) 65%, transparent) 3px,
+    color-mix(in srgb, var(--accent) 65%, transparent) 5px
+  );
+}
+
+.omnyo-inline-comparison__bar:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+
+.omnyo-inline-comparison__note {
+  margin: 0.75rem 0 0;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.omnyo-inline-comparison__details {
+  margin-top: 0.75rem;
+  min-width: 0;
+  font-size: 0.75rem;
+}
+
+.omnyo-inline-comparison__details > summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--muted-foreground);
+}
+
+.omnyo-inline-comparison__details > summary:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+
+.omnyo-inline-comparison__table {
+  width: 100%;
+  margin-top: 0.5rem;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: inherit;
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+
+.omnyo-inline-comparison__table th,
+.omnyo-inline-comparison__table td {
+  padding: 0.4rem 0.35rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.omnyo-inline-comparison__table th {
+  font-weight: 500;
+}
+
+.omnyo-inline-comparison__table th:not(:first-child),
+.omnyo-inline-comparison__table td {
+  text-align: right;
+}
+
+.omnyo-inline-comparison__instructions {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.omnyo-inline-comparison__invalid {
+  min-width: 0;
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+}
+
+@container (min-width: 32rem) {
+  .omnyo-inline-comparison__row {
+    grid-template-columns: minmax(0, 10rem) minmax(0, 1fr);
+    gap: 1rem;
+  }
+}

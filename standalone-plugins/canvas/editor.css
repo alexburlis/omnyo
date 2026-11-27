@@ -1,0 +1,855 @@
+.cnv-workspace {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+
+.cnv-workspace > .cnv-body {
+  min-width: 0;
+}
+
+.cnv-workbench {
+  display: flex;
+  flex: 0 0 340px;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  width: 340px;
+  max-width: 100%;
+  overflow: auto;
+  border-inline-start: 1px solid var(--border);
+  background: var(--background);
+  color: var(--foreground);
+  font-size: var(--text-sm, 14px);
+  line-height: 1.5;
+  overscroll-behavior: contain;
+}
+
+.cnv-workbench-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px;
+  border-block-end: 1px solid var(--border);
+}
+
+.cnv-workbench-head :where(h2, h3, p) {
+  margin: 0;
+}
+
+.cnv-workbench-head :where(h2, h3) {
+  font-size: 15px;
+  line-height: 1.35;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.cnv-workbench-head p {
+  margin-block-start: 4px;
+  color: var(--muted-foreground);
+  font-size: var(--text-xs, 12px);
+}
+
+.cnv-workbench-tabs {
+  display: flex;
+  flex: none;
+  gap: 16px;
+  padding-inline: 16px;
+  border-block-end: 1px solid var(--border);
+}
+
+.cnv-workbench-tabs :where(button) {
+  padding: 10px 0 9px;
+  border: 0;
+  border-block-end: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: var(--text-xs, 12px);
+  cursor: pointer;
+}
+
+.cnv-workbench-tabs :where([aria-selected="true"], [aria-pressed="true"]) {
+  border-block-end-color: var(--primary);
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.cnv-editor-form {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 16px;
+  padding: 16px;
+}
+
+.cnv-field {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 6px;
+  font-size: var(--text-xs, 12px);
+  font-weight: 500;
+}
+
+.cnv-field > :where(span, label),
+.cnv-diff-label {
+  color: var(--muted-foreground);
+  font-size: var(--text-xs, 12px);
+  font-weight: 500;
+}
+
+.cnv-field :where(input, textarea, select),
+.cnv-editor-control {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius, 8px) - 2px);
+  background: var(--card);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.45;
+}
+
+.cnv-field textarea {
+  min-height: 96px;
+  resize: vertical;
+  overflow-wrap: anywhere;
+}
+
+.cnv-field :where(textarea[data-language], textarea[data-code="true"]) {
+  min-height: 180px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  tab-size: 2;
+}
+
+.cnv-field :where(small, .cnv-muted) {
+  font-size: var(--text-xs, 12px);
+  font-weight: 400;
+}
+
+.cnv-field-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.cnv-editor-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-block-start: 4px;
+}
+
+.cnv-workbench :where(button, a, input, select, textarea):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.cnv-workbench :where(input, select, textarea):disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.cnv-editor-error {
+  margin: 0;
+  color: var(--destructive-text, var(--destructive));
+  font-size: var(--text-xs, 12px);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.cnv-verification {
+  display: grid;
+  gap: 6px;
+  padding: 12px 0;
+  border-block: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: var(--text-xs, 12px);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.cnv-verification :where(p, ul) {
+  margin: 0;
+}
+
+.cnv-verification[data-state="verified"] {
+  color: var(--success);
+}
+
+.cnv-verification[data-state="failed"] {
+  color: var(--destructive-text, var(--destructive));
+}
+
+.cnv-history-list,
+.cnv-source-list {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  margin: 0;
+  padding: 0 16px 16px;
+  list-style: none;
+}
+
+.cnv-history-item,
+.cnv-source-item {
+  min-width: 0;
+  padding-block: 14px;
+  border-block-end: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+
+.cnv-history-item > :where(button) {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  line-height: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.cnv-history-item :where(h3, h4, p),
+.cnv-source-item :where(h3, h4, p) {
+  margin: 0;
+}
+
+.cnv-history-item :where(time, small),
+.cnv-source-meta {
+  color: var(--muted-foreground);
+  font-size: var(--text-xs, 12px);
+  font-weight: 400;
+}
+
+.cnv-history-item[data-selected="true"] > :where(button) {
+  color: var(--primary);
+}
+
+.cnv-change-diff {
+  display: grid;
+  gap: 12px;
+  margin-block-start: 12px;
+  font-size: var(--text-xs, 12px);
+}
+
+.cnv-before,
+.cnv-after {
+  min-width: 0;
+  padding-inline-start: 10px;
+  border-inline-start: 2px solid var(--border);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.cnv-before {
+  border-inline-start-color: color-mix(in oklab, var(--destructive) 55%, var(--border));
+}
+
+.cnv-after {
+  border-inline-start-color: color-mix(in oklab, var(--success) 65%, var(--border));
+}
+
+.cnv-before :where(pre),
+.cnv-after :where(pre) {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  font: inherit;
+}
+
+.cnv-source-item {
+  display: grid;
+  gap: 8px;
+}
+
+.cnv-source-item :where(h3, h4) {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.cnv-source-item .cnv-editor-actions {
+  padding-block-start: 0;
+}
+
+.cnv-module {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+  color: var(--foreground);
+  font-size: 13px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+
+.cnv-module-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.cnv-module-meta,
+.cnv-module-note,
+.cnv-module-state {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.cnv-module-value {
+  font-size: 34px;
+  font-weight: 650;
+  line-height: 1.15;
+  letter-spacing: -0.035em;
+}
+
+.cnv-module-chart {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: 220px;
+}
+
+.cnv-module-chart :where(text) {
+  fill: var(--muted-foreground);
+  font-family: var(--font-sans);
+  font-size: 11px;
+}
+
+.cnv-module-table,
+.cnv-node-content .cnv-module-table {
+  display: table;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.cnv-module-table :where(th, td) {
+  padding: 8px 6px;
+  border-block-end: 1px solid var(--border);
+  text-align: end;
+  vertical-align: top;
+}
+
+.cnv-module-table :where(td:not(:first-child)) {
+  white-space: nowrap;
+}
+
+.cnv-module-table :where(th:first-child, td:first-child) {
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+
+.cnv-module-table :where(th) {
+  color: var(--muted-foreground);
+  font-weight: 500;
+}
+
+.cnv-module-state[data-state="failed"] {
+  color: var(--destructive-text, var(--destructive));
+}
+
+.cnv-module-state[data-state="stale"],
+.cnv-module-state[data-state="review"] {
+  color: var(--warning-text);
+}
+
+.cnv-module-state[data-state="fresh"] {
+  color: var(--success);
+}
+
+.cnv-semantic {
+  display: grid;
+  align-items: start;
+  min-width: 0;
+}
+
+.cnv-semantic-layer {
+  grid-area: 1 / 1;
+  min-width: 0;
+}
+
+.cnv-semantic-layer,
+.cnv-semantic-sources {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.cnv-semantic-layer[data-active="true"],
+.cnv-semantic-sources[data-active="true"] {
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.cnv-node[data-measuring] :is(.cnv-semantic-layer, .cnv-semantic-sources) {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.cnv-semantic-sources {
+  padding-block-start: 16px;
+}
+
+@container canvas-panel (max-width: 1050px) {
+  .cnv-workspace:has(.cnv-workbench) {
+    flex-direction: column;
+  }
+
+  .cnv-workbench {
+    flex-basis: auto;
+    width: auto;
+    max-height: 48%;
+    border-inline-start: 0;
+    border-block-start: 1px solid var(--border);
+  }
+}
+
+@container canvas-panel (max-width: 480px) {
+  .cnv-workspace:has(.cnv-workbench) {
+    flex-direction: column-reverse;
+  }
+
+  .cnv-workspace:has(.cnv-workbench):has(.cnv-toolbar[data-floating="true"]) {
+    flex-direction: column;
+  }
+
+  .cnv-workbench {
+    flex: 0 1 auto;
+    max-height: 60%;
+  }
+
+  .cnv-workbench-head,
+  .cnv-editor-form {
+    padding: 14px;
+  }
+
+  .cnv-workbench-tabs {
+    padding-inline: 14px;
+  }
+
+  .cnv-history-list,
+  .cnv-source-list {
+    padding-inline: 14px;
+  }
+}
+
+.cnv-sources {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 16px;
+  padding: 16px;
+}
+
+.cnv-sources :where(h3, h4, p) {
+  margin: 0;
+}
+
+.cnv-sources > .cnv-editor-actions {
+  justify-content: space-between;
+}
+
+.cnv-sources h3 {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.cnv-sources .cnv-source-list {
+  padding: 0;
+}
+
+.cnv-sources :where(button:not(.cnv-source-item)) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  gap: 4px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius, 8px) - 2px);
+  background: var(--card);
+  color: var(--foreground);
+  font: inherit;
+  font-size: var(--text-xs, 12px);
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.cnv-sources :where(button:not(.cnv-source-item)):hover:not(:disabled) {
+  background: var(--accent);
+}
+
+.cnv-sources :where(button):disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+button.cnv-source-item {
+  width: 100%;
+  gap: 4px;
+  padding: 12px 0;
+  border: 0;
+  border-block-end: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+button.cnv-source-item span {
+  color: var(--muted-foreground);
+  font-size: var(--text-xs, 12px);
+}
+
+button.cnv-source-item[aria-pressed="true"] strong {
+  color: var(--primary);
+}
+
+.cnv-source-status {
+  display: grid;
+  gap: 12px;
+}
+
+.cnv-sources fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.cnv-sources legend {
+  margin-block-end: 8px;
+  padding: 0;
+}
+
+.cnv-source-dataset {
+  max-height: 300px;
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius, 8px) - 2px);
+  background: var(--surface-recessed);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.cnv-module :where(p) {
+  margin: 0;
+}
+
+.cnv-module-chart .canvas-gridline {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.cnv-module-chart .canvas-bar {
+  fill: var(--cnv-accent, var(--chart-1, var(--primary)));
+}
+
+.cnv-module-chart .cnv-chart-line {
+  fill: none;
+  stroke: var(--cnv-accent, var(--chart-1, var(--primary)));
+  stroke-width: 2.25;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.cnv-module-chart .cnv-chart-point {
+  fill: var(--cnv-accent, var(--chart-1, var(--primary)));
+  stroke: var(--background);
+  stroke-width: 2;
+}
+
+.cnv-module-chart .cnv-chart-area-top {
+  stop-color: var(--cnv-accent, var(--chart-1, var(--primary)));
+  stop-opacity: 0.22;
+}
+
+.cnv-module-chart .cnv-chart-area-bottom {
+  stop-color: var(--cnv-accent, var(--chart-1, var(--primary)));
+  stop-opacity: 0;
+}
+
+.cnv-module-note summary {
+  width: fit-content;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+
+.cnv-module-note[open] summary {
+  margin-block-end: 8px;
+}
+
+@container canvas-panel (max-width: 480px) {
+  .cnv-sources {
+    padding: 14px;
+  }
+}
+
+.cnv-workbench-panel[hidden] {
+  display: none;
+}
+
+.cnv-editor-empty {
+  margin: 0;
+  padding: 20px 16px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
+
+.cnv-editor-fields {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  gap: 16px;
+  border: 0;
+}
+
+.cnv-editor-section {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+  padding: 14px 0 0;
+  gap: 12px;
+  border: 0;
+  border-block-start: 1px solid var(--border);
+}
+
+.cnv-editor-section > legend,
+.cnv-editor-section > summary {
+  padding: 0;
+  color: var(--foreground);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cnv-editor-section > summary {
+  cursor: pointer;
+}
+
+.cnv-editor-section[open] > summary {
+  margin-block-end: 12px;
+}
+
+.cnv-editor-section .cnv-field + .cnv-field {
+  margin-block-start: 12px;
+}
+
+.cnv-editor-notice {
+  margin: 0;
+  color: var(--warning-text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.cnv-evidence-choice {
+  display: flex;
+  align-items: start;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.cnv-evidence-choice input {
+  flex: none;
+  margin: 3px 0 0;
+  accent-color: var(--primary);
+}
+
+.cnv-history-origin {
+  display: block;
+  margin-block-start: 4px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.cnv-connections {
+  margin: 0 16px 16px;
+  padding-block-start: 14px;
+  border-block-start: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.cnv-connections > summary {
+  color: var(--foreground);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cnv-connections[open] > * + * {
+  margin-block-start: 12px;
+}
+
+.cnv-connection {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+  padding-block-end: 12px;
+  border-block-end: 1px solid var(--border);
+}
+
+.cnv-connection > p {
+  margin: 0;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+
+.cnv-resize-handle {
+  position: absolute;
+  inset-inline-end: -6px;
+  bottom: -6px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  padding: 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ring);
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.cnv-resize-handle::after {
+  content: "";
+  width: 7px;
+  height: 10px;
+  border-inline: 1px solid currentColor;
+}
+
+.cnv-resize-handle:hover {
+  color: var(--foreground);
+}
+
+.cnv-resize-handle:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.cnv-island-inspector {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.cnv-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cnv-swatch {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: var(--cnv-accent, var(--muted-foreground));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--foreground) 12%, transparent);
+  cursor: pointer;
+}
+
+.cnv-swatch[data-accent="neutral"] {
+  background: color-mix(in oklab, var(--foreground) 22%, var(--card));
+}
+
+.cnv-swatch[aria-checked="true"] {
+  box-shadow:
+    0 0 0 2px var(--card),
+    0 0 0 4px var(--ring);
+}
+
+.cnv-segmented {
+  display: inline-flex;
+  width: fit-content;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius, 8px) - 1px);
+  background: var(--surface-recessed);
+}
+
+.cnv-segmented :where(button) {
+  padding: 5px 10px;
+  border: 0;
+  border-radius: calc(var(--radius, 8px) - 3px);
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.cnv-segmented :where(button[aria-checked="true"]) {
+  background: var(--card);
+  color: var(--foreground);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.12);
+}
+
+.cnv-island-members {
+  display: grid;
+  gap: 2px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cnv-island-members :where(button) {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cnv-island-members :where(button:hover) {
+  background: var(--accent);
+}
+
+.cnv-island-members :where(button > span) {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cnv-island-members :where(small) {
+  flex: none;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}

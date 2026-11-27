@@ -1,0 +1,63 @@
+{
+  "name": "omnyo-plugin-quiet-notifications",
+  "version": "0.1.1",
+  "private": true,
+  "description": "Notify only when a chat has finished or needs input.",
+  "license": "MIT",
+  "author": {
+    "name": "bb",
+    "url": "https://github.com/get-bb"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/get-bb/bb.git",
+    "directory": "plugins/push-notifications"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "omnyo plugin build",
+    "test": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint --deny-warnings --format=agent .",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "verify": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test"
+  },
+  "dependencies": {
+    "undici": "7.29.1",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@omnyo/plugin-sdk": "file:./vendor/omnyo-plugin-sdk-0.6.46-3b89f84383f5.tgz",
+    "@oxlint/plugins": "1.87.0",
+    "@testing-library/dom": "10.4.1",
+    "@testing-library/react": "16.3.2",
+    "@types/better-sqlite3": "7.6.13",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "better-sqlite3": "12.10.0",
+    "cron-parser": "5.5.0",
+    "hono": "4.13.11",
+    "jsdom": "29.0.1",
+    "oxfmt": "0.72.0",
+    "oxlint": "1.87.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "4.1.11"
+  },
+  "engines": {
+    "omnyo": ">=0.46.246 <0.47.0",
+    "omnyoPluginSdk": ">=0.6.45 <0.7.0"
+  },
+  "omnyo": {
+    "name": "Quiet Notifications",
+    "description": "Notify when a chat has finished or needs your input.",
+    "branding": {
+      "icon": "BellDot"
+    },
+    "server": "./server.ts",
+    "app": "./app.tsx"
+  }
+}

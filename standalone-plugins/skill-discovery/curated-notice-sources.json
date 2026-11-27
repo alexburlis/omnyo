@@ -1,0 +1,18 @@
+[
+  {
+    "url": "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/LICENSE",
+    "sha256": "e32449d23085399adc1222f7a17408b730550258e51627c153cb108ca9955823"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/vercel-labs/agent-skills/5a37a6329fbad3666c3207392a6a7c0110e92efb/README.md",
+    "sha256": "9429e781e3fb2f005e619b96fe18cdc59f8db38b619a4c98f0c46c86357e56a0"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/obra/superpowers/22f0b463e7a5e579904dd6211a520321035526f7/LICENSE",
+    "sha256": "a37e0e9697144819e1d965176ac4ae5bc3fa02d11e7812036bbcadf6dafe2400"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/LICENSE",
+    "sha256": "b65e575eb4f04a13c187d64e958321298e2ab84d67aa8428819f362056ba292c"
+  }
+]

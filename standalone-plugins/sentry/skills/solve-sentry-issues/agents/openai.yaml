@@ -1,0 +1,6 @@
+interface:
+  display_name: "Solve Sentry Issues"
+  short_description: "Clear Sentry with verified fixes in the active version"
+  default_prompt: "Use $solve-sentry-issues to clear this app's Sentry projects, check existing development fixes, and resolve verified repairs in the intended version without deploying production."
+policy:
+  allow_implicit_invocation: false

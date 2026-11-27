@@ -1,0 +1,18 @@
+export const runtimeLimits = {
+  globalActions: 2,
+  environmentActions: 1,
+  pendingEvents: 1_000,
+  subscriptionWindow: 1_000,
+  subscriptionWindowMs: 86_400_000,
+  historyRecords: 10_000,
+  historyAgeMs: 30 * 86_400_000,
+  actionRate: 10,
+  actionRateWindowMs: 300_000,
+  microsteps: 32,
+  reconcileMs: 30_000,
+  quiescenceGraceMs: 60_000,
+  requestAgeMs: 30 * 86_400_000,
+  retryBackoffsMs: [5_000, 30_000],
+  readPage: 100,
+  logPageBytes: 32_768,
+} as const;

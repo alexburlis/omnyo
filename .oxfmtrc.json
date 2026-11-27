@@ -4,6 +4,7 @@
   "sortPackageJson": false,
   "ignorePatterns": [
     "node_modules/",
+    "standalone-plugins/",
     "dist/",
     "build/",
     "coverage/",

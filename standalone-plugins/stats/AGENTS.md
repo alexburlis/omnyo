@@ -1,0 +1,3 @@
+# Stats
+
+Use pnpm and the installed public Omnyo Plugin SDK. Own SQLite data through `api.storage.database()`. Do not query Omnyo's private database or account credential stores. Store numeric metrics, safe labels and IDs only; discard all prompt/reply/tool bodies immediately. Preserve lifetime counters and daily summaries on archive/delete; bound recent detail. Input/cache semantics are provider-specific, output includes reasoning. Global throughput divides recorded output by wall-clock seconds. Nested-agent totals must not duplicate Omnyo child chats. Make no provider calls. Verify typecheck, lint, format, build, SDK-harness behavioral E2E and live Chrome page.

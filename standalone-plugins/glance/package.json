@@ -1,0 +1,66 @@
+{
+  "name": "omnyo-plugin-glance",
+  "version": "0.1.53",
+  "private": true,
+  "author": {
+    "name": "Omnyo",
+    "url": "https://github.com/alexburlis"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alexburlis/omnyo.git",
+    "directory": "standalone-plugins/glance"
+  },
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint --deny-warnings --format=agent",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "build": "omnyo plugin build",
+    "package:runtime": "node ../package-runtime.mjs --plugin glance",
+    "install:runtime": "node scripts/install-runtime.mjs",
+    "verify": "pnpm test && pnpm typecheck && pnpm lint && pnpm format:check && pnpm build"
+  },
+  "dependencies": {
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@omnyo/plugin-sdk": "file:./vendor/omnyo-plugin-sdk-0.6.51-9f0ed325bab7.tgz",
+    "@oxlint/plugins": "1.88.0",
+    "@testing-library/react": "^16.3.2",
+    "@types/better-sqlite3": "7.6.13",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "better-sqlite3": "^12.0.0",
+    "cron-parser": "^5.5.0",
+    "esbuild": "0.28.1",
+    "hono": "^4.11.9",
+    "jsdom": "^27.0.0",
+    "oxfmt": "0.72.0",
+    "oxlint": "1.88.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "7.0.2",
+    "vitest": "^4.0.0"
+  },
+  "engines": {
+    "omnyo": ">=0.46.246",
+    "omnyoPluginSdk": ">=0.6.51"
+  },
+  "packageManager": "pnpm@11.28.5",
+  "omnyo": {
+    "name": "Glance",
+    "description": "A live card for every chat: status, proof and deliverables, with what changed since you last looked.",
+    "branding": {
+      "icon": "Target"
+    },
+    "server": "./server.ts",
+    "app": "./app.tsx",
+    "skills": [
+      "skills"
+    ]
+  }
+}

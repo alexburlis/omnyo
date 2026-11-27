@@ -1,0 +1,26 @@
+[
+  {
+    "source": "github/awesome-copilot/react19-test-patterns",
+    "reason": "Excluded after review: its React 19 StrictMode effect-count guidance requires correction before admission."
+  },
+  {
+    "source": "vercel-labs/agent-skills/deploy-to-vercel",
+    "reason": "Not selected for the initial general-purpose catalog; deployment and account setup need a separate review."
+  },
+  {
+    "source": "vercel-labs/agent-skills/vercel-cli-with-tokens",
+    "reason": "Not selected for the initial catalog; token-handling and deployment instructions need a separate review."
+  },
+  {
+    "source": "vercel-labs/agent-skills/vercel-optimize",
+    "reason": "Not selected for the initial catalog; requires a Vercel-specific metrics and account workflow."
+  },
+  {
+    "source": "vercel-labs/agent-skills/vercel-react-native-skills",
+    "reason": "Not selected for the initial catalog; mobile-specific package awaits review."
+  },
+  {
+    "source": "vercel-labs/agent-skills/vercel-react-view-transitions",
+    "reason": "Not selected for the initial catalog; framework-version-specific package awaits review."
+  }
+]

@@ -1,0 +1,74 @@
+{
+  "name": "omnyo-plugin-sentry",
+  "version": "0.3.8",
+  "private": true,
+  "author": {
+    "name": "Omnyo",
+    "url": "https://github.com/alexburlis"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alexburlis/omnyo.git",
+    "directory": "standalone-plugins/sentry"
+  },
+  "type": "module",
+  "scripts": {
+    "sync:solver-skill": "node scripts/sync-solver-skill.mjs",
+    "test": "vitest run --project contract",
+    "test:host": "vitest run --project host",
+    "test:ui": "vitest run --project ui",
+    "test:journey": "node --import tsx tests/fixture-journey.mjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint --deny-warnings --format=agent",
+    "format:check": "oxfmt --check .",
+    "build": "omnyo plugin build",
+    "package:runtime": "node scripts/package-runtime.mjs",
+    "install:runtime": "node scripts/install-runtime.mjs",
+    "test:browser": "node tests/ui-browser-journey.mjs",
+    "test:runtime-package": "node tests/runtime-package-journey.mjs"
+  },
+  "dependencies": {
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@omnyo/plugin-sdk": "file:./vendor/omnyo-plugin-sdk-0.6.57-2aa65914a674.tgz",
+    "@oxlint/plugins": "1.88.0",
+    "@playwright/test": "latest",
+    "@radix-ui/react-dialog": "^1.1.19",
+    "@testing-library/react": "latest",
+    "@types/better-sqlite3": "7.6.13",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "better-sqlite3": "^12.0.0",
+    "cron-parser": "^5.5.0",
+    "esbuild": "0.28.1",
+    "hono": "^4.11.9",
+    "jsdom": "latest",
+    "oxfmt": "0.75.0",
+    "oxlint": "1.88.0",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "tsx": "latest",
+    "typescript": "^5.7.0",
+    "vitest": "latest"
+  },
+  "engines": {
+    "omnyo": ">=0.46",
+    "omnyoPluginSdk": ">=0.6.57"
+  },
+  "packageManager": "pnpm@11.28.5",
+  "omnyo": {
+    "name": "Sentry",
+    "description": "Investigate Sentry issues in local chats on the model you pick and deliver verified, reviewed fixes as pull requests.",
+    "branding": {
+      "icon": "Bug"
+    },
+    "server": "./server.ts",
+    "app": "./app.tsx",
+    "host": "./host.ts",
+    "skills": [
+      "skills"
+    ]
+  }
+}

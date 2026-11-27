@@ -1,0 +1,978 @@
+export const curatedSnapshot = [
+  {
+    id: "github/awesome-copilot/convert-excel-to-md",
+    name: "convert-excel-to-md",
+    publisher: "GitHub Awesome Copilot",
+    description:
+      "Convert Excel XLSX spreadsheets, tables, and embedded images to Markdown with bundled Python scripts.",
+    sourceUrl:
+      "https://github.com/github/awesome-copilot/tree/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/convert-excel-to-md",
+    license: "MIT",
+    useOnce: false,
+    pin: "f10fdb8b2660ce85c98f220b2f1ca24653768a5c",
+    artifact: {
+      kind: "github-files",
+      files: [
+        {
+          path: "SKILL.md",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/convert-excel-to-md/SKILL.md",
+          sha256: "f392579af2e4f3f7ebcb20453299e62d85d1461ef3456973d57243ff036809f0",
+        },
+        {
+          path: "references/setup.md",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/convert-excel-to-md/references/setup.md",
+          sha256: "a807719be649a49dc43bcc021233a4b7cd2d50a243b925330f8f20985e97a0be",
+        },
+        {
+          path: "scripts/convert_excel_to_md.py",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/convert-excel-to-md/scripts/convert_excel_to_md.py",
+          sha256: "ffbd8bf06d66e01e9f5ede866df5636eb0dc0ee7aab95b68b8474c8d89b99e14",
+        },
+        {
+          path: "scripts/requirements.txt",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/convert-excel-to-md/scripts/requirements.txt",
+          sha256: "e69829fee01dfc5fda987ed17f6b6472ee9a0b0985ce93138aa167a547e4f502",
+        },
+      ],
+    },
+    notice: {
+      path: "LICENSE.curated.txt",
+      content:
+        'MIT License\n\nCopyright GitHub, Inc.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the "Software"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.',
+      sourceUrl:
+        "https://github.com/github/awesome-copilot/blob/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/LICENSE",
+    },
+    useOnceReview: null,
+  },
+  {
+    id: "github/awesome-copilot/convert-pdf-to-md",
+    name: "convert-pdf-to-md",
+    publisher: "GitHub Awesome Copilot",
+    description:
+      "Extract text, tables, and embedded images from PDF documents into Markdown using bundled Python scripts.",
+    sourceUrl:
+      "https://github.com/github/awesome-copilot/tree/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/convert-pdf-to-md",
+    license: "MIT",
+    useOnce: false,
+    pin: "f10fdb8b2660ce85c98f220b2f1ca24653768a5c",
+    artifact: {
+      kind: "github-files",
+      files: [
+        {
+          path: "SKILL.md",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/convert-pdf-to-md/SKILL.md",
+          sha256: "adadaec52cb7bda8b03254df12eae421d58fd85b6e5c96e57f494ee42216b6a1",
+        },
+        {
+          path: "references/setup.md",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/convert-pdf-to-md/references/setup.md",
+          sha256: "1870e60e0d5d832cab342c8598c11650c8cd54eb998c98952a8a2626da3d0ed4",
+        },
+        {
+          path: "scripts/convert_pdf_to_md.py",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/convert-pdf-to-md/scripts/convert_pdf_to_md.py",
+          sha256: "9ea864b8815e39e5d85e7146d913aad1440a18f587102a4e712d4664c5a07df1",
+        },
+        {
+          path: "scripts/requirements.txt",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/convert-pdf-to-md/scripts/requirements.txt",
+          sha256: "622ed8ada047607acd6f41777348fb13a9e751a112a538854a8ace7b3011592f",
+        },
+      ],
+    },
+    notice: {
+      path: "LICENSE.curated.txt",
+      content:
+        'MIT License\n\nCopyright GitHub, Inc.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the "Software"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.',
+      sourceUrl:
+        "https://github.com/github/awesome-copilot/blob/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/LICENSE",
+    },
+    useOnceReview: null,
+  },
+  {
+    id: "github/awesome-copilot/convert-word-to-md",
+    name: "convert-word-to-md",
+    publisher: "GitHub Awesome Copilot",
+    description:
+      "Convert Word DOCX documents and embedded images to Markdown with bundled Python scripts.",
+    sourceUrl:
+      "https://github.com/github/awesome-copilot/tree/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/convert-word-to-md",
+    license: "MIT",
+    useOnce: false,
+    pin: "f10fdb8b2660ce85c98f220b2f1ca24653768a5c",
+    artifact: {
+      kind: "github-files",
+      files: [
+        {
+          path: "SKILL.md",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/convert-word-to-md/SKILL.md",
+          sha256: "dde993754e47ebccf30b540b98f9555936d44a5e40c9c70d83d296e03e60785e",
+        },
+        {
+          path: "references/setup.md",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/convert-word-to-md/references/setup.md",
+          sha256: "9c7d8ed7aba7f5244dfa64b8c651cf6c2f5ef27761dff5d908fc3069a0915f8e",
+        },
+        {
+          path: "scripts/convert_word_to_md.py",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/convert-word-to-md/scripts/convert_word_to_md.py",
+          sha256: "b2478a03e2939f9d826143856f2595d57392d6b1d624ac8612e417f95b34ff72",
+        },
+        {
+          path: "scripts/requirements.txt",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/convert-word-to-md/scripts/requirements.txt",
+          sha256: "8d43ce25284c8a786d24f8c873ea1cbc9ccd638b83b259b334081994037ea145",
+        },
+      ],
+    },
+    notice: {
+      path: "LICENSE.curated.txt",
+      content:
+        'MIT License\n\nCopyright GitHub, Inc.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the "Software"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.',
+      sourceUrl:
+        "https://github.com/github/awesome-copilot/blob/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/LICENSE",
+    },
+    useOnceReview: null,
+  },
+  {
+    id: "github/awesome-copilot/documentation-writer",
+    name: "documentation-writer",
+    publisher: "GitHub Awesome Copilot",
+    description: "Write tutorials, how-to guides, reference docs, and explanations using Diátaxis.",
+    sourceUrl:
+      "https://github.com/github/awesome-copilot/tree/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/documentation-writer",
+    license: "MIT",
+    useOnce: true,
+    pin: "f10fdb8b2660ce85c98f220b2f1ca24653768a5c",
+    artifact: {
+      kind: "github-files",
+      files: [
+        {
+          path: "SKILL.md",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/documentation-writer/SKILL.md",
+          sha256: "7e8244988c9f4eb63bf8c0edf160578544621eb96e5e51e2d848f1401c5de8f1",
+        },
+      ],
+    },
+    notice: {
+      path: "LICENSE.curated.txt",
+      content:
+        'MIT License\n\nCopyright GitHub, Inc.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the "Software"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.',
+      sourceUrl:
+        "https://github.com/github/awesome-copilot/blob/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/LICENSE",
+    },
+    useOnceReview: {
+      skillSha256: "7e8244988c9f4eb63bf8c0edf160578544621eb96e5e51e2d848f1401c5de8f1",
+      reason:
+        "Reviewed standalone instructions; no bundled scripts, supporting-file reads, or disabled invocation declarations.",
+    },
+  },
+  {
+    id: "github/awesome-copilot/github-actions-efficiency",
+    name: "github-actions-efficiency",
+    publisher: "GitHub Awesome Copilot",
+    description:
+      "Audit GitHub Actions CI duration and cost, then propose evidence-backed workflow improvements.",
+    sourceUrl:
+      "https://github.com/github/awesome-copilot/tree/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/github-actions-efficiency",
+    license: "MIT",
+    useOnce: false,
+    pin: "f10fdb8b2660ce85c98f220b2f1ca24653768a5c",
+    artifact: {
+      kind: "github-files",
+      files: [
+        {
+          path: "SKILL.md",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/github-actions-efficiency/SKILL.md",
+          sha256: "9c41e860468e5c88d83ab6eec70c585b0f122facec2632ea65497b3389139e43",
+        },
+        {
+          path: "references/actions.md",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/github-actions-efficiency/references/actions.md",
+          sha256: "9f24153e0b743a978ec84e08bc64047616d18504965708cc7507437203689fdb",
+        },
+        {
+          path: "references/patterns.md",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/github-actions-efficiency/references/patterns.md",
+          sha256: "a9fb61ee95b5f2f4cb372064f5de9d04ca749da1b78d050e42e909e9e97228dd",
+        },
+        {
+          path: "references/reporting.md",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/github-actions-efficiency/references/reporting.md",
+          sha256: "18eec5acd0d9e52b450f86b8232e9994c5c5b7760240bcb2e97417f8a847508c",
+        },
+        {
+          path: "references/review-rubric.md",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/github-actions-efficiency/references/review-rubric.md",
+          sha256: "f2fd2bbd34f15f68664e30ea62468f8a5b19bc9b49929dcd082a4c87316b3ce2",
+        },
+      ],
+    },
+    notice: {
+      path: "LICENSE.curated.txt",
+      content:
+        'MIT License\n\nCopyright GitHub, Inc.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the "Software"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.',
+      sourceUrl:
+        "https://github.com/github/awesome-copilot/blob/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/LICENSE",
+    },
+    useOnceReview: null,
+  },
+  {
+    id: "github/awesome-copilot/github-actions-hardening",
+    name: "github-actions-hardening",
+    publisher: "GitHub Awesome Copilot",
+    description:
+      "Review GitHub Actions workflows for injection, unsafe triggers, permissions, and supply-chain risks.",
+    sourceUrl:
+      "https://github.com/github/awesome-copilot/tree/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/github-actions-hardening",
+    license: "MIT",
+    useOnce: false,
+    pin: "f10fdb8b2660ce85c98f220b2f1ca24653768a5c",
+    artifact: {
+      kind: "github-files",
+      files: [
+        {
+          path: "SKILL.md",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/github-actions-hardening/SKILL.md",
+          sha256: "31a8e7483d978e6267941edefebbe42aaa946bb3d43c9095aa3db343d4a8ff06",
+        },
+        {
+          path: "references/injection.md",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/github-actions-hardening/references/injection.md",
+          sha256: "ebd6ef8d39ba6f1cd3dc13051e6ed4163d1d2ba36518cf0f7393836a211e58ff",
+        },
+        {
+          path: "references/permissions-and-tokens.md",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/github-actions-hardening/references/permissions-and-tokens.md",
+          sha256: "7272d00b20cf99c6fcbf34346f76730907c00701aef44bb9cfb7ab3eecac336b",
+        },
+        {
+          path: "references/report-format.md",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/github-actions-hardening/references/report-format.md",
+          sha256: "3ecd2442e173bc001f858747873349be7c6c77050470b87ae516647908b1e86e",
+        },
+        {
+          path: "references/supply-chain.md",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/github-actions-hardening/references/supply-chain.md",
+          sha256: "f66f613dbd732ce87c1e76b88208efde8feae3ffe5a3ab405cde4ce3df66f605",
+        },
+        {
+          path: "references/triggers-and-privilege.md",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/github-actions-hardening/references/triggers-and-privilege.md",
+          sha256: "465f3f76517e9f5374a73e30f46cb47e1fe62ce9fd81f782808a3abbb2df2756",
+        },
+      ],
+    },
+    notice: {
+      path: "LICENSE.curated.txt",
+      content:
+        'MIT License\n\nCopyright GitHub, Inc.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the "Software"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.',
+      sourceUrl:
+        "https://github.com/github/awesome-copilot/blob/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/LICENSE",
+    },
+    useOnceReview: null,
+  },
+  {
+    id: "github/awesome-copilot/javascript-typescript-jest",
+    name: "javascript-typescript-jest",
+    publisher: "GitHub Awesome Copilot",
+    description:
+      "Write JavaScript and TypeScript tests with Jest, including async code, mocks, and React components.",
+    sourceUrl:
+      "https://github.com/github/awesome-copilot/tree/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/javascript-typescript-jest",
+    license: "MIT",
+    useOnce: true,
+    pin: "f10fdb8b2660ce85c98f220b2f1ca24653768a5c",
+    artifact: {
+      kind: "github-files",
+      files: [
+        {
+          path: "SKILL.md",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/javascript-typescript-jest/SKILL.md",
+          sha256: "cb9a552dfe63cae4f310b27067ba28351b59ad17e83a9e1c5ff23c542ce6fdd8",
+        },
+      ],
+    },
+    notice: {
+      path: "LICENSE.curated.txt",
+      content:
+        'MIT License\n\nCopyright GitHub, Inc.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the "Software"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.',
+      sourceUrl:
+        "https://github.com/github/awesome-copilot/blob/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/LICENSE",
+    },
+    useOnceReview: {
+      skillSha256: "cb9a552dfe63cae4f310b27067ba28351b59ad17e83a9e1c5ff23c542ce6fdd8",
+      reason:
+        "Reviewed standalone instructions; no bundled scripts, supporting-file reads, or disabled invocation declarations.",
+    },
+  },
+  {
+    id: "github/awesome-copilot/playwright-explore-website",
+    name: "playwright-explore-website",
+    publisher: "GitHub Awesome Copilot",
+    description:
+      "Automate browser exploration of website flows using Playwright MCP, then propose test cases.",
+    sourceUrl:
+      "https://github.com/github/awesome-copilot/tree/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/playwright-explore-website",
+    license: "MIT",
+    useOnce: false,
+    pin: "f10fdb8b2660ce85c98f220b2f1ca24653768a5c",
+    artifact: {
+      kind: "github-files",
+      files: [
+        {
+          path: "SKILL.md",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/playwright-explore-website/SKILL.md",
+          sha256: "1496280e250b5b79c2c3081f093fa1fea22ac19a2fdc05074589875cdd9f55d3",
+        },
+      ],
+    },
+    notice: {
+      path: "LICENSE.curated.txt",
+      content:
+        'MIT License\n\nCopyright GitHub, Inc.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the "Software"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.',
+      sourceUrl:
+        "https://github.com/github/awesome-copilot/blob/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/LICENSE",
+    },
+    useOnceReview: null,
+  },
+  {
+    id: "github/awesome-copilot/playwright-generate-test",
+    name: "playwright-generate-test",
+    publisher: "GitHub Awesome Copilot",
+    description:
+      "Generate and run a Playwright test after exploring the supplied browser scenario with Playwright MCP.",
+    sourceUrl:
+      "https://github.com/github/awesome-copilot/tree/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/playwright-generate-test",
+    license: "MIT",
+    useOnce: false,
+    pin: "f10fdb8b2660ce85c98f220b2f1ca24653768a5c",
+    artifact: {
+      kind: "github-files",
+      files: [
+        {
+          path: "SKILL.md",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/playwright-generate-test/SKILL.md",
+          sha256: "79dbb1a49fc5a6502788ccba1a4bd30769a017a1cc31d9db329d1326ea3d898f",
+        },
+      ],
+    },
+    notice: {
+      path: "LICENSE.curated.txt",
+      content:
+        'MIT License\n\nCopyright GitHub, Inc.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the "Software"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.',
+      sourceUrl:
+        "https://github.com/github/awesome-copilot/blob/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/LICENSE",
+    },
+    useOnceReview: null,
+  },
+  {
+    id: "github/awesome-copilot/postgresql-code-review",
+    name: "postgresql-code-review",
+    publisher: "GitHub Awesome Copilot",
+    description: "Review PostgreSQL SQL, data integrity, access controls, and query patterns.",
+    sourceUrl:
+      "https://github.com/github/awesome-copilot/tree/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/postgresql-code-review",
+    license: "MIT",
+    useOnce: true,
+    pin: "f10fdb8b2660ce85c98f220b2f1ca24653768a5c",
+    artifact: {
+      kind: "github-files",
+      files: [
+        {
+          path: "SKILL.md",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/postgresql-code-review/SKILL.md",
+          sha256: "5c2f68120440692ae4b030b17e2a3553c1204d63ee871d6d994c6925b1f874cb",
+        },
+      ],
+    },
+    notice: {
+      path: "LICENSE.curated.txt",
+      content:
+        'MIT License\n\nCopyright GitHub, Inc.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the "Software"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.',
+      sourceUrl:
+        "https://github.com/github/awesome-copilot/blob/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/LICENSE",
+    },
+    useOnceReview: {
+      skillSha256: "5c2f68120440692ae4b030b17e2a3553c1204d63ee871d6d994c6925b1f874cb",
+      reason:
+        "Reviewed standalone instructions; no bundled scripts, supporting-file reads, or disabled invocation declarations.",
+    },
+  },
+  {
+    id: "github/awesome-copilot/refactor-plan",
+    name: "refactor-plan",
+    publisher: "GitHub Awesome Copilot",
+    description: "Plan and sequence a multi-file refactor before changing code.",
+    sourceUrl:
+      "https://github.com/github/awesome-copilot/tree/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/refactor-plan",
+    license: "MIT",
+    useOnce: true,
+    pin: "f10fdb8b2660ce85c98f220b2f1ca24653768a5c",
+    artifact: {
+      kind: "github-files",
+      files: [
+        {
+          path: "SKILL.md",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/refactor-plan/SKILL.md",
+          sha256: "93741df0042a15c01ae8589e72014dcf53c557c11ca1df69c29737534c312c29",
+        },
+      ],
+    },
+    notice: {
+      path: "LICENSE.curated.txt",
+      content:
+        'MIT License\n\nCopyright GitHub, Inc.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the "Software"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.',
+      sourceUrl:
+        "https://github.com/github/awesome-copilot/blob/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/LICENSE",
+    },
+    useOnceReview: {
+      skillSha256: "93741df0042a15c01ae8589e72014dcf53c557c11ca1df69c29737534c312c29",
+      reason:
+        "Reviewed standalone instructions; no bundled scripts, supporting-file reads, or disabled invocation declarations.",
+    },
+  },
+  {
+    id: "github/awesome-copilot/review-and-refactor",
+    name: "review-and-refactor",
+    publisher: "GitHub Awesome Copilot",
+    description: "Review and refactor project code using the project’s coding guidelines.",
+    sourceUrl:
+      "https://github.com/github/awesome-copilot/tree/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/review-and-refactor",
+    license: "MIT",
+    useOnce: true,
+    pin: "f10fdb8b2660ce85c98f220b2f1ca24653768a5c",
+    artifact: {
+      kind: "github-files",
+      files: [
+        {
+          path: "SKILL.md",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/review-and-refactor/SKILL.md",
+          sha256: "95b48ed4b137777ddc87b77cb0873ed7f485141a517825e71af1a984cf5a6cd6",
+        },
+      ],
+    },
+    notice: {
+      path: "LICENSE.curated.txt",
+      content:
+        'MIT License\n\nCopyright GitHub, Inc.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the "Software"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.',
+      sourceUrl:
+        "https://github.com/github/awesome-copilot/blob/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/LICENSE",
+    },
+    useOnceReview: {
+      skillSha256: "95b48ed4b137777ddc87b77cb0873ed7f485141a517825e71af1a984cf5a6cd6",
+      reason:
+        "Reviewed standalone instructions; no bundled scripts, supporting-file reads, or disabled invocation declarations.",
+    },
+  },
+  {
+    id: "github/awesome-copilot/shuffle-json-data",
+    name: "shuffle-json-data",
+    publisher: "GitHub Awesome Copilot",
+    description: "Validate and shuffle JSON records while preserving their structure.",
+    sourceUrl:
+      "https://github.com/github/awesome-copilot/tree/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/shuffle-json-data",
+    license: "MIT",
+    useOnce: true,
+    pin: "f10fdb8b2660ce85c98f220b2f1ca24653768a5c",
+    artifact: {
+      kind: "github-files",
+      files: [
+        {
+          path: "SKILL.md",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/shuffle-json-data/SKILL.md",
+          sha256: "00adbbd1ab1f7e525a2f34cfda9fe710c00925920b556751bbfe3a318f9faa3f",
+        },
+      ],
+    },
+    notice: {
+      path: "LICENSE.curated.txt",
+      content:
+        'MIT License\n\nCopyright GitHub, Inc.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the "Software"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.',
+      sourceUrl:
+        "https://github.com/github/awesome-copilot/blob/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/LICENSE",
+    },
+    useOnceReview: {
+      skillSha256: "00adbbd1ab1f7e525a2f34cfda9fe710c00925920b556751bbfe3a318f9faa3f",
+      reason:
+        "Reviewed standalone instructions; no bundled scripts, supporting-file reads, or disabled invocation declarations.",
+    },
+  },
+  {
+    id: "github/awesome-copilot/sql-code-review",
+    name: "sql-code-review",
+    publisher: "GitHub Awesome Copilot",
+    description:
+      "Review SQL for injection risks, permissions, query performance, and schema quality.",
+    sourceUrl:
+      "https://github.com/github/awesome-copilot/tree/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/sql-code-review",
+    license: "MIT",
+    useOnce: true,
+    pin: "f10fdb8b2660ce85c98f220b2f1ca24653768a5c",
+    artifact: {
+      kind: "github-files",
+      files: [
+        {
+          path: "SKILL.md",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/sql-code-review/SKILL.md",
+          sha256: "3f359d49372c1635176461fd6d82b4cfc799c6e0e29539c8414e67633395a984",
+        },
+      ],
+    },
+    notice: {
+      path: "LICENSE.curated.txt",
+      content:
+        'MIT License\n\nCopyright GitHub, Inc.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the "Software"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.',
+      sourceUrl:
+        "https://github.com/github/awesome-copilot/blob/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/LICENSE",
+    },
+    useOnceReview: {
+      skillSha256: "3f359d49372c1635176461fd6d82b4cfc799c6e0e29539c8414e67633395a984",
+      reason:
+        "Reviewed standalone instructions; no bundled scripts, supporting-file reads, or disabled invocation declarations.",
+    },
+  },
+  {
+    id: "github/awesome-copilot/sql-optimization",
+    name: "sql-optimization",
+    publisher: "GitHub Awesome Copilot",
+    description: "Optimize SQL queries, indexes, joins, and database execution plans.",
+    sourceUrl:
+      "https://github.com/github/awesome-copilot/tree/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/sql-optimization",
+    license: "MIT",
+    useOnce: true,
+    pin: "f10fdb8b2660ce85c98f220b2f1ca24653768a5c",
+    artifact: {
+      kind: "github-files",
+      files: [
+        {
+          path: "SKILL.md",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/sql-optimization/SKILL.md",
+          sha256: "d87639dea8e0208e2161b78b22f6427b0fdf59e95e693b40d48b1226a0c35ccf",
+        },
+      ],
+    },
+    notice: {
+      path: "LICENSE.curated.txt",
+      content:
+        'MIT License\n\nCopyright GitHub, Inc.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the "Software"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.',
+      sourceUrl:
+        "https://github.com/github/awesome-copilot/blob/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/LICENSE",
+    },
+    useOnceReview: {
+      skillSha256: "d87639dea8e0208e2161b78b22f6427b0fdf59e95e693b40d48b1226a0c35ccf",
+      reason:
+        "Reviewed standalone instructions; no bundled scripts, supporting-file reads, or disabled invocation declarations.",
+    },
+  },
+  {
+    id: "github/awesome-copilot/web-design-reviewer",
+    name: "web-design-reviewer",
+    publisher: "GitHub Awesome Copilot",
+    description:
+      "Review website accessibility, responsive layouts, and onboarding screens, then verify design fixes in a browser.",
+    sourceUrl:
+      "https://github.com/github/awesome-copilot/tree/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/web-design-reviewer",
+    license: "MIT",
+    useOnce: false,
+    pin: "f10fdb8b2660ce85c98f220b2f1ca24653768a5c",
+    artifact: {
+      kind: "github-files",
+      files: [
+        {
+          path: "SKILL.md",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/web-design-reviewer/SKILL.md",
+          sha256: "a08a147cfe555dabe30f2c8f2e267f287e992f74f2b802e68989884338e23b17",
+        },
+        {
+          path: "references/framework-fixes.md",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/web-design-reviewer/references/framework-fixes.md",
+          sha256: "e678c549dd5f69094d53eb5785f0c34ae4cd150a92ac1f79785065fc835276f6",
+        },
+        {
+          path: "references/visual-checklist.md",
+          url: "https://raw.githubusercontent.com/github/awesome-copilot/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/skills/web-design-reviewer/references/visual-checklist.md",
+          sha256: "1b69f0544481861186705f8446f1b44040d9a9879cfa7ba363a44afe7e5ad510",
+        },
+      ],
+    },
+    notice: {
+      path: "LICENSE.curated.txt",
+      content:
+        'MIT License\n\nCopyright GitHub, Inc.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the "Software"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.',
+      sourceUrl:
+        "https://github.com/github/awesome-copilot/blob/f10fdb8b2660ce85c98f220b2f1ca24653768a5c/LICENSE",
+    },
+    useOnceReview: null,
+  },
+  {
+    id: "obra/superpowers/brainstorming",
+    name: "brainstorming",
+    publisher: "Jesse Vincent · Superpowers",
+    description:
+      "Brainstorm product ideas and design approaches before implementation. Requires the separate superpowers:writing-plans skill.",
+    sourceUrl:
+      "https://github.com/obra/superpowers/tree/22f0b463e7a5e579904dd6211a520321035526f7/skills/brainstorming",
+    license: "MIT",
+    useOnce: false,
+    pin: "22f0b463e7a5e579904dd6211a520321035526f7",
+    artifact: {
+      kind: "github-files",
+      files: [
+        {
+          path: "SKILL.md",
+          url: "https://raw.githubusercontent.com/obra/superpowers/22f0b463e7a5e579904dd6211a520321035526f7/skills/brainstorming/SKILL.md",
+          sha256: "2c9ca71f94886f9ca9f4aef055f7cafb3e1a9bdf3aeebf8f4cb547c69405d207",
+        },
+        {
+          path: "builder-check-prompt.md",
+          url: "https://raw.githubusercontent.com/obra/superpowers/22f0b463e7a5e579904dd6211a520321035526f7/skills/brainstorming/builder-check-prompt.md",
+          sha256: "36d51a4723d6f0a3ce5811a0ea3b3a8424f07533947e1355f5d8cb8cce40c55e",
+        },
+        {
+          path: "scripts/frame-template.html",
+          url: "https://raw.githubusercontent.com/obra/superpowers/22f0b463e7a5e579904dd6211a520321035526f7/skills/brainstorming/scripts/frame-template.html",
+          sha256: "6a8a4e58bd6a44b904e2e3c57de774481d909204597e1498de53f1b2fecc4c4e",
+        },
+        {
+          path: "scripts/helper.js",
+          url: "https://raw.githubusercontent.com/obra/superpowers/22f0b463e7a5e579904dd6211a520321035526f7/skills/brainstorming/scripts/helper.js",
+          sha256: "43c6d69954a46ec34a2a262bcc62a9a7e83e839c739f199cb72646d397c686e3",
+        },
+        {
+          path: "scripts/server.cjs",
+          url: "https://raw.githubusercontent.com/obra/superpowers/22f0b463e7a5e579904dd6211a520321035526f7/skills/brainstorming/scripts/server.cjs",
+          sha256: "763abf96510e0b892a1141397b31aa82ef900cf87ed34dde94bc8782baf4a7ca",
+        },
+        {
+          path: "scripts/start-server.sh",
+          url: "https://raw.githubusercontent.com/obra/superpowers/22f0b463e7a5e579904dd6211a520321035526f7/skills/brainstorming/scripts/start-server.sh",
+          sha256: "314dd68dc00e8dd94c7491aca8a5f004c7fddffc161e2b07482f29f48d13659a",
+        },
+        {
+          path: "scripts/stop-server.sh",
+          url: "https://raw.githubusercontent.com/obra/superpowers/22f0b463e7a5e579904dd6211a520321035526f7/skills/brainstorming/scripts/stop-server.sh",
+          sha256: "0b5ccbbd57f62d3ed88993f7940b5ee0e5c0fc9b21c550c623da4f6292e47daf",
+        },
+        {
+          path: "visual-companion.md",
+          url: "https://raw.githubusercontent.com/obra/superpowers/22f0b463e7a5e579904dd6211a520321035526f7/skills/brainstorming/visual-companion.md",
+          sha256: "6ffcb038b53254bd31debaa15e12dcd4ff24bd63d690e0b644ac6396701cf2e2",
+        },
+      ],
+    },
+    notice: {
+      path: "LICENSE.curated.txt",
+      content:
+        'MIT License\n\nCopyright (c) 2025 Jesse Vincent\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the "Software"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n',
+      sourceUrl:
+        "https://github.com/obra/superpowers/blob/22f0b463e7a5e579904dd6211a520321035526f7/LICENSE",
+    },
+    useOnceReview: null,
+  },
+  {
+    id: "supabase/agent-skills/supabase-postgres-best-practices",
+    name: "supabase-postgres-best-practices",
+    publisher: "Supabase",
+    description:
+      "Optimize Postgres queries, schemas, indexes, connection pooling, and row-level security using Supabase best practices.",
+    sourceUrl:
+      "https://github.com/supabase/agent-skills/tree/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices",
+    license: "MIT",
+    useOnce: false,
+    pin: "c9be0e931b7930f7d02126d04774d904c381e7d7",
+    artifact: {
+      kind: "github-files",
+      files: [
+        {
+          path: "CHANGELOG.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/CHANGELOG.md",
+          sha256: "751ad110037c85d400018c9894716a04fa46357ff55c22b1169b280752e19e88",
+        },
+        {
+          path: "SKILL.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/SKILL.md",
+          sha256: "ad65e776f45e761bafc609d3f506c77c1032225aa65e0c4c02f241b8071e5855",
+        },
+        {
+          path: "references/_contributing.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/_contributing.md",
+          sha256: "191e039e7d94764e6073410b513b559f9a594e0fdf0252a30c2a2986df2ab3bc",
+        },
+        {
+          path: "references/_sections.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/_sections.md",
+          sha256: "c9e992612b422c7122de0b7542ebc2450db283edaab08cfe86c6d657fcccccd5",
+        },
+        {
+          path: "references/_template.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/_template.md",
+          sha256: "6299954250f212caabe339d752c3e5313a8e07d1a182a4e4b425baee91df1bd2",
+        },
+        {
+          path: "references/advanced-full-text-search.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/advanced-full-text-search.md",
+          sha256: "40c2606bbb4c4dce31308f201b24cc7f58c7df05b1d9c6856fe2b888d3b7cf28",
+        },
+        {
+          path: "references/advanced-jsonb-indexing.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/advanced-jsonb-indexing.md",
+          sha256: "24cacf6a8bc35901dd566d24502ce8e57f810a5c196b897e61d52726e521d106",
+        },
+        {
+          path: "references/conn-idle-timeout.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/conn-idle-timeout.md",
+          sha256: "630588902c00fcec59a5988cc5d042f76dcf2c923a535abfd8c47dca205eaed5",
+        },
+        {
+          path: "references/conn-limits.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/conn-limits.md",
+          sha256: "11b2a67a7c7679cbbc5d807bbb17e69c98484a581d0c8b929c03408f412b81b2",
+        },
+        {
+          path: "references/conn-pooling.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/conn-pooling.md",
+          sha256: "88cf086bf98ba865d2e9d0579974e1366b14157619d6a93e7da77be91084e4a5",
+        },
+        {
+          path: "references/conn-prepared-statements.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/conn-prepared-statements.md",
+          sha256: "174e9332fe3dda5c99b2b00159fb1915ae36c00bab3a7882c14e73e4344e946e",
+        },
+        {
+          path: "references/data-batch-inserts.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/data-batch-inserts.md",
+          sha256: "531933b82d6a622d0fae29e0ea80be6fe5d78655adf2804c271ea84a1930de37",
+        },
+        {
+          path: "references/data-n-plus-one.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/data-n-plus-one.md",
+          sha256: "21a44905e5b16a42741892ec34bb1bfef124d049b140a76934a9acd0f46f5fc2",
+        },
+        {
+          path: "references/data-pagination.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/data-pagination.md",
+          sha256: "73c9fa10a3d439bedea0e11b640bd25bf30dd50f0d9006cf85baf7c3151543fa",
+        },
+        {
+          path: "references/data-upsert.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/data-upsert.md",
+          sha256: "2612af83b20a2701dde30ef1f8d7efd26b7e9eef84717226b8f038a2d2150ff7",
+        },
+        {
+          path: "references/lock-advisory.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/lock-advisory.md",
+          sha256: "c88d259dbf81c3771438f59a165f7eab8acd09999dd370bdf807521c73f35aab",
+        },
+        {
+          path: "references/lock-deadlock-prevention.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/lock-deadlock-prevention.md",
+          sha256: "09aee46f51d7178c8e55fe056cd5a94a64ba2c122fe418e6900cd99f297b2347",
+        },
+        {
+          path: "references/lock-short-transactions.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/lock-short-transactions.md",
+          sha256: "5aa7f61095916986d39644b446cdbcd2bacca7ef698a3bb50b3f82dd60207602",
+        },
+        {
+          path: "references/lock-skip-locked.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/lock-skip-locked.md",
+          sha256: "6c45077f430f29cd9cd8f448c94d578e827e7bd023fcdaf717a756acb116fa4b",
+        },
+        {
+          path: "references/monitor-explain-analyze.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/monitor-explain-analyze.md",
+          sha256: "4cb67ffbf8e57f2e5b380b0beb4242528b513723ce314a2c2ffcf083bd4203d7",
+        },
+        {
+          path: "references/monitor-pg-stat-statements.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/monitor-pg-stat-statements.md",
+          sha256: "89dca99d4e894fcbdcac136be7ad9fbc03d1342904f065c1b198dc9cf495f098",
+        },
+        {
+          path: "references/monitor-vacuum-analyze.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/monitor-vacuum-analyze.md",
+          sha256: "2892272011710eb49b3f185ec12f15ce9ce4c365792c672f6e2a9c90da426a1a",
+        },
+        {
+          path: "references/query-composite-indexes.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/query-composite-indexes.md",
+          sha256: "73e42424e671f0266e74fdb220db3196790f69fb43e2b19c7b9483eb4971b554",
+        },
+        {
+          path: "references/query-covering-indexes.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/query-covering-indexes.md",
+          sha256: "daf2a7f0477fb7357b62b5fb5b185b1995a77a186347e45cb780e25e7a7589b6",
+        },
+        {
+          path: "references/query-index-types.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/query-index-types.md",
+          sha256: "472a74f22c2df203bd0154999b3a5a0187cca2ab3d9a3978e305bb7c32f1a282",
+        },
+        {
+          path: "references/query-missing-indexes.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/query-missing-indexes.md",
+          sha256: "91ad8b0ff4365704b4830a7f077c6f140f7140fd5d3ce5cd0b92b160cf9e25f1",
+        },
+        {
+          path: "references/query-partial-indexes.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/query-partial-indexes.md",
+          sha256: "6448982bc8558c6555284958edc331b29239c6a0130e6b4501dd6d4da607a6dd",
+        },
+        {
+          path: "references/schema-constraints.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/schema-constraints.md",
+          sha256: "90e8efda3e9e81095e642911ad4aae2809d160f29414338fa997253238f510f8",
+        },
+        {
+          path: "references/schema-data-types.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/schema-data-types.md",
+          sha256: "e01b58c14c7f3f65d8ead580b9a4fcf70b83baaab0f9a5f83c569c9fd113e8c8",
+        },
+        {
+          path: "references/schema-foreign-key-indexes.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/schema-foreign-key-indexes.md",
+          sha256: "7587713d12a65a212365459b3d39e4717d8a79e4073b10bd62f1054d8192c0dd",
+        },
+        {
+          path: "references/schema-lowercase-identifiers.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/schema-lowercase-identifiers.md",
+          sha256: "4bc80f70865f2390872591f326c8a6be6456a0aeb5a7e5a2475d7cd9d43059ab",
+        },
+        {
+          path: "references/schema-partitioning.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/schema-partitioning.md",
+          sha256: "541e13fbeaf4bb1485c9059d4c9417dbdb766cf16f4237cd63a04ada7ec45b90",
+        },
+        {
+          path: "references/schema-primary-keys.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/schema-primary-keys.md",
+          sha256: "3c8beabef82066f9a0838b926da0885117fd2d9a263aaf84cb5ca9e5f0d400e9",
+        },
+        {
+          path: "references/security-privileges.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/security-privileges.md",
+          sha256: "095909274a4fb43df785d7144cf674eeb40284d2d45628f14af4108737b93663",
+        },
+        {
+          path: "references/security-rls-basics.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/security-rls-basics.md",
+          sha256: "e04dd1a3a382aafdaaa73fe9f7976352acdde6e90c2a2470d281b94d4f44b096",
+        },
+        {
+          path: "references/security-rls-performance.md",
+          url: "https://raw.githubusercontent.com/supabase/agent-skills/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase-postgres-best-practices/references/security-rls-performance.md",
+          sha256: "2e1faeca7d5746e246b1c78f9492fe2a9cfa41c4d7fa1e23c402d58fa18ea014",
+        },
+      ],
+    },
+    notice: {
+      path: "LICENSE.curated.txt",
+      content:
+        'MIT License\n\nCopyright (c) 2026 Supabase\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the "Software"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n',
+      sourceUrl:
+        "https://github.com/supabase/agent-skills/blob/c9be0e931b7930f7d02126d04774d904c381e7d7/LICENSE",
+    },
+    useOnceReview: null,
+  },
+  {
+    id: "vercel-labs/agent-skills/vercel-composition-patterns",
+    name: "vercel-composition-patterns",
+    publisher: "Vercel",
+    description:
+      "React composition patterns that scale. Use when refactoring components with boolean prop proliferation, building flexible component libraries, or designing reusable APIs. Triggers on tasks involving compound components, render props, context providers, or component architecture. Includes React 19 API changes.",
+    sourceUrl:
+      "https://github.com/vercel-labs/agent-skills/tree/5a37a6329fbad3666c3207392a6a7c0110e92efb",
+    license: "MIT",
+    useOnce: false,
+    pin: "5a37a6329fbad3666c3207392a6a7c0110e92efb",
+    artifact: {
+      kind: "tar-gzip",
+      url: "https://github.com/vercel-labs/agent-skills/releases/download/agent-skills-5a37a6329fbad3666c3207392a6a7c0110e92efb/vercel-composition-patterns.tar.gz",
+      sha256: "0af47b94aa0ff20a60a1629cfb6b29db3ab47dfa781873ef08193a2da57932c7",
+    },
+    notice: {
+      path: "LICENSE.curated.txt",
+      content:
+        'Vercel Agent Skills\nSource: https://github.com/vercel-labs/agent-skills/tree/5a37a6329fbad3666c3207392a6a7c0110e92efb\n\nThe pinned README declares:\n\n## License\n\nMIT\n\nNo standalone LICENSE or copyright notice is supplied at this revision.\nThe MIT permission and warranty terms are reproduced below.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the "Software"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n',
+      sourceUrl:
+        "https://github.com/vercel-labs/agent-skills/blob/5a37a6329fbad3666c3207392a6a7c0110e92efb/README.md",
+    },
+    useOnceReview: null,
+  },
+  {
+    id: "vercel-labs/agent-skills/vercel-react-best-practices",
+    name: "vercel-react-best-practices",
+    publisher: "Vercel",
+    description:
+      "Speed up React app rendering and Next.js data fetching with Vercel’s performance guidelines.",
+    sourceUrl:
+      "https://github.com/vercel-labs/agent-skills/tree/5a37a6329fbad3666c3207392a6a7c0110e92efb",
+    license: "MIT",
+    useOnce: false,
+    pin: "5a37a6329fbad3666c3207392a6a7c0110e92efb",
+    artifact: {
+      kind: "tar-gzip",
+      url: "https://github.com/vercel-labs/agent-skills/releases/download/agent-skills-5a37a6329fbad3666c3207392a6a7c0110e92efb/vercel-react-best-practices.tar.gz",
+      sha256: "551e671112c393bec0b4a8551badb9bf3f63187e57a901a4e1b6b932bdffe995",
+    },
+    notice: {
+      path: "LICENSE.curated.txt",
+      content:
+        'Vercel Agent Skills\nSource: https://github.com/vercel-labs/agent-skills/tree/5a37a6329fbad3666c3207392a6a7c0110e92efb\n\nThe pinned README declares:\n\n## License\n\nMIT\n\nNo standalone LICENSE or copyright notice is supplied at this revision.\nThe MIT permission and warranty terms are reproduced below.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the "Software"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n',
+      sourceUrl:
+        "https://github.com/vercel-labs/agent-skills/blob/5a37a6329fbad3666c3207392a6a7c0110e92efb/README.md",
+    },
+    useOnceReview: null,
+  },
+  {
+    id: "vercel-labs/agent-skills/web-design-guidelines",
+    name: "web-design-guidelines",
+    publisher: "Vercel",
+    description:
+      'Review UI code for Web Interface Guidelines compliance. Use when asked to "review my UI", "check accessibility", "audit design", "review UX", or "check my site against best practices".',
+    sourceUrl:
+      "https://github.com/vercel-labs/agent-skills/tree/5a37a6329fbad3666c3207392a6a7c0110e92efb",
+    license: "MIT",
+    useOnce: false,
+    pin: "5a37a6329fbad3666c3207392a6a7c0110e92efb",
+    artifact: {
+      kind: "tar-gzip",
+      url: "https://github.com/vercel-labs/agent-skills/releases/download/agent-skills-5a37a6329fbad3666c3207392a6a7c0110e92efb/web-design-guidelines.tar.gz",
+      sha256: "fac93c20923ff966353c5f82933e4842c0d694b1d2463a3710a39b157238a6d9",
+    },
+    notice: {
+      path: "LICENSE.curated.txt",
+      content:
+        'Vercel Agent Skills\nSource: https://github.com/vercel-labs/agent-skills/tree/5a37a6329fbad3666c3207392a6a7c0110e92efb\n\nThe pinned README declares:\n\n## License\n\nMIT\n\nNo standalone LICENSE or copyright notice is supplied at this revision.\nThe MIT permission and warranty terms are reproduced below.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the "Software"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n',
+      sourceUrl:
+        "https://github.com/vercel-labs/agent-skills/blob/5a37a6329fbad3666c3207392a6a7c0110e92efb/README.md",
+    },
+    useOnceReview: null,
+  },
+  {
+    id: "vercel-labs/agent-skills/writing-guidelines",
+    name: "writing-guidelines",
+    publisher: "Vercel",
+    description:
+      'Review docs/prose for Writing Guidelines compliance. Use when asked to "review my docs", "check writing style", "audit prose", "review docs voice and tone", or "check this page against the writing handbook".',
+    sourceUrl:
+      "https://github.com/vercel-labs/agent-skills/tree/5a37a6329fbad3666c3207392a6a7c0110e92efb",
+    license: "MIT",
+    useOnce: false,
+    pin: "5a37a6329fbad3666c3207392a6a7c0110e92efb",
+    artifact: {
+      kind: "skill-md",
+      url: "https://github.com/vercel-labs/agent-skills/releases/download/agent-skills-5a37a6329fbad3666c3207392a6a7c0110e92efb/writing-guidelines.md",
+      sha256: "89a5f581193289b80af58b980090aeed535047c8df2b55ccbaae0de40283a99d",
+    },
+    notice: {
+      path: "LICENSE.curated.txt",
+      content:
+        'Vercel Agent Skills\nSource: https://github.com/vercel-labs/agent-skills/tree/5a37a6329fbad3666c3207392a6a7c0110e92efb\n\nThe pinned README declares:\n\n## License\n\nMIT\n\nNo standalone LICENSE or copyright notice is supplied at this revision.\nThe MIT permission and warranty terms are reproduced below.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the "Software"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n',
+      sourceUrl:
+        "https://github.com/vercel-labs/agent-skills/blob/5a37a6329fbad3666c3207392a6a7c0110e92efb/README.md",
+    },
+    useOnceReview: null,
+  },
+];
