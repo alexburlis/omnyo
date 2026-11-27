@@ -26,6 +26,10 @@ const QUEUE_AGE_WARN_THRESHOLD_MS = 30_000;
 
 const MAX_EVENTS_PER_POST = 100;
 
+const SLOW_UPLOAD_WARN_THRESHOLD_MS = 1_000;
+
+const SLOW_UPLOAD_WARN_INTERVAL_MS = 60_000;
+
 export interface EventSinkInput {
   event: ThreadEvent;
   threadId: string;
@@ -35,6 +39,7 @@ export interface EventPostResult {
   acceptedEvents: HostDaemonEventBatchResponse["acceptedEvents"];
   rejectedEvents: HostDaemonEventBatchResponse["rejectedEvents"];
   duplicateEvents?: HostDaemonEventBatchResponse["duplicateEvents"];
+  serverTiming?: string;
 }
 
 export interface EventPostBatch {
@@ -136,6 +141,47 @@ function summarizeRejectedEvents(
   }));
 }
 
+function parseEventServerTiming(header: string | undefined) {
+  if (header === undefined || header.length > 512) return null;
+
+  let eventLock: number | undefined;
+  let eventTx: number | undefined;
+  let eventAfter: number | undefined;
+
+  for (const metric of header.split(",")) {
+    const match =
+      /^\s*(event_lock|event_tx|event_after);dur=(\d+(?:\.\d+)?)\s*$/.exec(
+        metric,
+      );
+
+    if (match === null) return null;
+    const duration = Number(match[2]);
+
+    if (!Number.isFinite(duration) || duration > 30_000) return null;
+
+    switch (match[1]) {
+      case "event_lock":
+        if (eventLock !== undefined) return null;
+        eventLock = duration;
+        break;
+      case "event_tx":
+        if (eventTx !== undefined) return null;
+        eventTx = duration;
+        break;
+      case "event_after":
+        if (eventAfter !== undefined) return null;
+        eventAfter = duration;
+        break;
+    }
+  }
+
+  return eventLock === undefined ||
+    eventTx === undefined ||
+    eventAfter === undefined
+    ? null
+    : { event_lock: eventLock, event_tx: eventTx, event_after: eventAfter };
+}
+
 export function createEventSink(options: CreateEventSinkOptions): EventSink {
   const now = options.now ?? (() => Date.now());
 
@@ -161,6 +207,7 @@ export function createEventSink(options: CreateEventSinkOptions): EventSink {
   let backedUpSinceMs: number | null = queue.length === 0 ? null : now();
   let backpressureLogged = false;
   let retryDelayMs = INITIAL_RETRY_DELAY_MS;
+  let nextSlowUploadWarningAt = -Infinity;
 
   function maybeLogQueuePressure(): void {
     if (backpressureLogged || backedUpSinceMs === null) {
@@ -282,7 +329,13 @@ export function createEventSink(options: CreateEventSinkOptions): EventSink {
 
     if (first === undefined) return 0;
     let response: EventPostResult;
-    const startedAt = now();
+    const startedAt = performance.now();
+    const firstEnqueuedAt = enqueuedAt.get(first);
+
+    const oldestEventAgeMs =
+      firstEnqueuedAt === undefined
+        ? undefined
+        : Math.max(0, now() - firstEnqueuedAt);
 
     try {
       response = await options.postEvents(
@@ -303,7 +356,7 @@ export function createEventSink(options: CreateEventSinkOptions): EventSink {
           {
             ...runtimeErrorLogFields(normalized),
             batchSize: batch.length,
-            elapsedMs: Math.max(0, now() - startedAt),
+            elapsedMs: Math.max(0, performance.now() - startedAt),
           },
           "Failed to post daemon events; keeping events queued for retry",
         );
@@ -335,6 +388,9 @@ export function createEventSink(options: CreateEventSinkOptions): EventSink {
       return midpoint + (await deliverBatch(batch.slice(midpoint)));
     }
 
+    const postedAt = performance.now();
+    const httpMs = postedAt - startedAt;
+
     const rejectedIndexes = new Set(
       response.rejectedEvents.map((entry) => entry.eventIndex),
     );
@@ -358,6 +414,30 @@ export function createEventSink(options: CreateEventSinkOptions): EventSink {
     }
 
     await acknowledge(batch.filter((_, index) => !rejectedIndexes.has(index)));
+
+    const acknowledgedAt = performance.now();
+    const localAckMs = acknowledgedAt - postedAt;
+
+    if (
+      acknowledgedAt >= nextSlowUploadWarningAt &&
+      ((oldestEventAgeMs !== undefined &&
+        oldestEventAgeMs >= SLOW_UPLOAD_WARN_THRESHOLD_MS) ||
+        httpMs >= SLOW_UPLOAD_WARN_THRESHOLD_MS ||
+        localAckMs >= SLOW_UPLOAD_WARN_THRESHOLD_MS)
+    ) {
+      nextSlowUploadWarningAt = acknowledgedAt + SLOW_UPLOAD_WARN_INTERVAL_MS;
+      const phases = parseEventServerTiming(response.serverTiming);
+      options.logger.warn(
+        {
+          batchSize: batch.length,
+          ...(oldestEventAgeMs === undefined ? {} : { oldestEventAgeMs }),
+          httpMs,
+          localAckMs,
+          ...(phases === null ? {} : { phases }),
+        },
+        "Slow daemon event upload",
+      );
+    }
 
     return batch.length;
   }

@@ -1,4 +1,4 @@
-import { getThread, listEvents } from "@omnyo/db";
+import { createConnection, getThread, listEvents } from "@omnyo/db";
 import { turnScope } from "@omnyo/domain";
 import { groupHostDaemonEvents } from "@omnyo/host-daemon-contract";
 import { describe, expect, it, vi } from "vitest";
@@ -6,7 +6,11 @@ import {
   applyTurnCompletedEvent,
   readTurnCompletion,
 } from "../../src/internal/turn-completed-events.js";
-import { pruneThreadEventHistoryBestEffort } from "../../src/services/system/event-pruning.js";
+import {
+  maybePruneActiveThreadEventHistory,
+  resetActiveThreadEventPruningState,
+  pruneThreadEventHistoryBestEffort,
+} from "../../src/services/system/event-pruning.js";
 import { buildThreadTimelineWithProfile } from "../../src/services/threads/timeline.js";
 import {
   createTestDaemonEventEnvelope,
@@ -674,4 +678,80 @@ describe("thread event pruning", () => {
       ).toEqual([1_004, 1_005]);
     });
   });
+});
+
+describe("active pruning admission", () => {
+  it.each(["active", "idle"] as const)(
+    "skips actual lookups before both gates and admits %s threads",
+    async (status) => {
+      await withTestHarness(async (harness) => {
+        const host = seedHost(harness.deps);
+
+        const { project } = seedProjectWithSource(harness.deps, {
+          hostId: host.id,
+        });
+
+        const thread = seedThread(harness.deps, {
+          projectId: project.id,
+          status,
+        });
+
+        let lookups = 0;
+        let threadLookupSql = "";
+        let clock = 1_000_000;
+        let lookupAdvance = 0;
+
+        const db = createConnection(harness.db.$client.serialize(), {
+          slowQueryThresholdMs: 0,
+          slowQueryLogger: {
+            info(fields) {
+              if (
+                fields.operation === "get" &&
+                fields.sql.includes('from "threads"') &&
+                (threadLookupSql === "" || fields.sql === threadLookupSql)
+              ) {
+                threadLookupSql = fields.sql;
+                lookups += 1;
+                clock += lookupAdvance;
+              }
+            },
+          },
+        });
+
+        const now = vi.spyOn(Date, "now").mockImplementation(() => clock);
+        const deps = { ...harness.deps, db };
+
+        const prune = (sequence: number) =>
+          maybePruneActiveThreadEventHistory(deps, {
+            threadId: thread.id,
+            latestPrunableSequence: sequence,
+          });
+
+        try {
+          expect(prune(249)).toBeNull();
+          expect(lookups).toBe(0);
+          lookupAdvance = 10;
+          expect(prune(250)).not.toBeNull();
+          expect(lookups).toBe(1);
+          clock = 1_030_009;
+          lookupAdvance = 1;
+          expect(prune(500)).toBeNull();
+          expect(lookups).toBe(1);
+          clock = 1_030_010;
+          expect(prune(500)).not.toBeNull();
+          expect(lookups).toBe(2);
+          clock += 60_000;
+          expect(prune(749)).toBeNull();
+          expect(lookups).toBe(2);
+          resetActiveThreadEventPruningState(thread.id);
+          expect(prune(250)).not.toBeNull();
+          expect(lookups).toBe(3);
+        } finally {
+          resetActiveThreadEventPruningState(thread.id);
+          now.mockRestore();
+          db.$client.close();
+        }
+      });
+    },
+  );
 });

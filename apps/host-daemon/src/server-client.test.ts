@@ -44,6 +44,41 @@ function createInteractiveRequest(): PendingInteractionCreate {
 }
 
 describe("createServerClient", () => {
+  it.each([
+    undefined,
+    "event_lock;dur=1,event_tx;dur=2,event_after;dur=3",
+    "malformed timing metadata",
+  ])(
+    "passes through optional event response timing without parsing: %s",
+    async (serverTiming) => {
+      const client = createServerClient({
+        fetchFn: async () =>
+          Response.json(
+            { acceptedEvents: [], rejectedEvents: [], duplicateEvents: 0 },
+            {
+              headers:
+                serverTiming === undefined
+                  ? {}
+                  : { "Server-Timing": serverTiming },
+            },
+          ),
+        getSessionId: () => "session-1",
+        hostKey: "host-key",
+        logger: createLogger(),
+        serverUrl: "http://127.0.0.1:3334",
+      });
+
+      await expect(
+        client.postEvents({ events: [], firstEventIndex: 1 }),
+      ).resolves.toEqual({
+        acceptedEvents: [],
+        rejectedEvents: [],
+        duplicateEvents: 0,
+        ...(serverTiming === undefined ? {} : { serverTiming }),
+      });
+    },
+  );
+
   it("narrows a protocol update retry request from error details", async () => {
     const fetchFn = vi.fn<FetchFn>(async () =>
       Response.json(

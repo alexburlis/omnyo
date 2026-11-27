@@ -8,7 +8,7 @@ import {
   type DbConnection,
 } from "@omnyo/db";
 import type { AppDeps } from "../../types.js";
-import { purgeHistoryCacheThread } from "../threads/history-cache-writer.js";
+import { purgeCompactedThreadHistories } from "../threads/history-compaction.js";
 
 export interface ThreadPruningSweepLimits {
   elapsedBudgetMs: number;
@@ -129,36 +129,28 @@ export async function runThreadPruningSweep(
     reason = "failed";
     throw error;
   } finally {
-    for (const threadId of compactedThreadIds)
-      deps.hub.notifyThread(threadId, ["history-compacted"]);
-    const purgeFailures: unknown[] = [];
-
-    for (const threadId of compactedThreadIds) {
-      try {
-        await purgeHistoryCacheThread(deps.db, threadId);
-      } catch (error) {
-        purgeFailures.push(error);
-      }
-    }
-
-    if (purgeFailures.length > 0) reason = "failed";
-    deps.logger.debug(
-      {
-        advances,
-        removed,
-        scanned,
-        removedBytes,
-        maxAdvanceMs,
-        reason,
-        elapsedMs: performance.now() - startedAt,
-      },
-      "Thread pruning sweep finished",
-    );
-
-    if (purgeFailures.length > 0)
-      throw new AggregateError(
-        purgeFailures,
+    try {
+      await purgeCompactedThreadHistories(
+        deps,
+        compactedThreadIds,
         "Pruned history cache cleanup failed",
       );
+    } catch (error) {
+      reason = "failed";
+      throw error;
+    } finally {
+      deps.logger.debug(
+        {
+          advances,
+          removed,
+          scanned,
+          removedBytes,
+          maxAdvanceMs,
+          reason,
+          elapsedMs: performance.now() - startedAt,
+        },
+        "Thread pruning sweep finished",
+      );
+    }
   }
 }

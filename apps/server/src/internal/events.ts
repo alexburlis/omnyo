@@ -43,6 +43,7 @@ import {
   type ThreadEventType,
   type ThreadEventTurnStatus,
 } from "@omnyo/domain";
+import { roundDurationMs } from "@omnyo/process-utils";
 import type { Hono } from "hono";
 import { ApiError } from "../errors.js";
 import type {
@@ -136,6 +137,7 @@ interface EventEffectProgress {
 }
 
 interface AppliedEventBatch {
+  transactionStartedAt: number;
   eventInputs: AppendDaemonEventInput[];
   postableEvents: HostDaemonEventEnvelope[];
   subagentCountsBefore: SubagentCounts;
@@ -1638,6 +1640,7 @@ export function registerInternalEventRoutes(app: Hono, deps: AppDeps): void {
       const effectProgress: EventEffectProgress = { entry: null };
       let applied: AppliedEventBatch;
       let afterCommitActions: (() => void)[];
+      let committedAt: number;
 
       let waitedForWrite = false;
       let admitted = false;
@@ -1651,12 +1654,15 @@ export function registerInternalEventRoutes(app: Hono, deps: AppDeps): void {
         }
       };
 
+      const writeStartedAt = performance.now();
+
       try {
         const collected = await runImmediateTransactionWithBusyWait(
           deps.db,
           INGRESS_WRITE_BUSY_WAIT_MS,
           (tx) =>
             collectAfterCommit((): AppliedEventBatch => {
+              const transactionStartedAt = performance.now();
               assertWritable();
 
               if (waitedForWrite) {
@@ -1740,6 +1746,7 @@ export function registerInternalEventRoutes(app: Hono, deps: AppDeps): void {
                   : indexed.appendResult;
 
               return {
+                transactionStartedAt,
                 eventInputs,
                 postableEvents,
                 subagentCountsBefore,
@@ -1764,6 +1771,7 @@ export function registerInternalEventRoutes(app: Hono, deps: AppDeps): void {
           },
         );
 
+        committedAt = performance.now();
         applied = collected.result;
         afterCommitActions = collected.actions;
       } catch (error) {
@@ -1783,9 +1791,8 @@ export function registerInternalEventRoutes(app: Hono, deps: AppDeps): void {
         followUps,
         postableEvents,
         subagentCountsBefore,
+        transactionStartedAt,
       } = applied;
-
-      const committedAt = performance.now();
 
       if (indexedBatch !== null) {
         advanceDaemonEventReceipt(
@@ -1864,10 +1871,16 @@ export function registerInternalEventRoutes(app: Hono, deps: AppDeps): void {
       };
 
       const body = JSON.stringify(response);
+      const contentLength = String(Buffer.byteLength(body));
+      const encodedAt = performance.now();
+      const lockMs = roundDurationMs(transactionStartedAt - writeStartedAt);
+      const transactionMs = roundDurationMs(committedAt - transactionStartedAt);
+      const afterCommitMs = roundDurationMs(encodedAt - committedAt);
 
       return context.body(body, 200, {
-        "content-length": String(Buffer.byteLength(body)),
+        "content-length": contentLength,
         "content-type": "application/json",
+        "server-timing": `event_lock;dur=${lockMs}, event_tx;dur=${transactionMs}, event_after;dur=${afterCommitMs}`,
       });
     },
   );

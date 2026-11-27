@@ -55,6 +55,229 @@ function systemErrorEvent(threadId: string) {
   } as const;
 }
 
+describe("slow successful event uploads", () => {
+  const timing = "event_lock;dur=1.5,event_tx;dur=2,event_after;dur=3";
+  let monotonic: number;
+  let wall: number;
+  let httpMs: number;
+  let localAckMs: number;
+  let headerReads: number;
+  let serverTiming: string | undefined;
+  let logger: ReturnType<typeof createLogger>;
+  let sink: EventSink;
+
+  beforeEach(() => {
+    monotonic = 0;
+    wall = 0;
+    httpMs = 5;
+    localAckMs = 2;
+    headerReads = 0;
+    serverTiming = timing;
+    logger = createLogger();
+    vi.spyOn(performance, "now").mockImplementation(() => monotonic);
+  });
+
+  afterEach(async () => {
+    await sink?.dispose();
+    vi.restoreAllMocks();
+  });
+
+  function makeSink(options: Partial<CreateEventSinkOptions> = {}): EventSink {
+    sink = createEventSink({
+      instanceId: "current",
+      isSessionOpen: () => true,
+      logger,
+      now: () => wall,
+      postEvents: async () => {
+        monotonic += httpMs;
+
+        return {
+          acceptedEvents: [],
+          rejectedEvents: [],
+          get serverTiming() {
+            headerReads += 1;
+
+            return serverTiming;
+          },
+        };
+      },
+      onAcknowledged: async () => {
+        monotonic += localAckMs;
+      },
+      ...options,
+    });
+
+    return sink;
+  }
+
+  function emit(): void {
+    sink.emit({
+      threadId: "thr_private",
+      event: systemErrorEvent("thr_private"),
+    });
+  }
+
+  it("keeps fast traffic quiet without reading timing metadata", async () => {
+    makeSink();
+    emit();
+    await sink.flush();
+    expect(logger.warn).not.toHaveBeenCalled();
+    expect(headerReads).toBe(0);
+  });
+
+  it("logs only approved durations and batch count after a slow successful post", async () => {
+    httpMs = 1_000;
+    makeSink();
+    emit();
+    emit();
+    await sink.flush();
+    expect(logger.warn).toHaveBeenCalledExactlyOnceWith(
+      {
+        batchSize: 2,
+        oldestEventAgeMs: 0,
+        httpMs: 1_000,
+        localAckMs: 2,
+        phases: { event_lock: 1.5, event_tx: 2, event_after: 3 },
+      },
+      "Slow daemon event upload",
+    );
+    expect(sink.pendingEvents()).toEqual([]);
+    expect(headerReads).toBe(1);
+  });
+
+  it.each(["queue", "acknowledgment"])(
+    "admits a %s-only delay",
+    async (phase) => {
+      makeSink();
+      emit();
+
+      if (phase === "queue") wall = 1_000;
+      else localAckMs = 1_000;
+      await sink.flush();
+      expect(logger.warn).toHaveBeenCalledExactlyOnceWith(
+        {
+          batchSize: 1,
+          oldestEventAgeMs: phase === "queue" ? 1_000 : 0,
+          httpMs: 5,
+          localAckMs: phase === "queue" ? 2 : 1_000,
+          phases: { event_lock: 1.5, event_tx: 2, event_after: 3 },
+        },
+        "Slow daemon event upload",
+      );
+    },
+  );
+
+  it("omits age for checkpoint-restored events", async () => {
+    httpMs = 1_000;
+    makeSink({
+      initialEvents: [
+        {
+          instanceId: "old",
+          index: 1,
+          blockedReason: null,
+          envelope: { threadId: "thr_old", event: systemErrorEvent("thr_old") },
+        },
+      ],
+    });
+    await sink.flush();
+    expect(logger.warn).toHaveBeenCalledExactlyOnceWith(
+      {
+        batchSize: 1,
+        httpMs: 1_000,
+        localAckMs: 2,
+        phases: { event_lock: 1.5, event_tx: 2, event_after: 3 },
+      },
+      "Slow daemon event upload",
+    );
+  });
+
+  it("clamps a backward wall-clock step without changing monotonic durations", async () => {
+    httpMs = 1_000;
+    wall = 100;
+    makeSink();
+    emit();
+    wall = -100;
+    await sink.flush();
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        oldestEventAgeMs: 0,
+        httpMs: 1_000,
+        localAckMs: 2,
+      }),
+      "Slow daemon event upload",
+    );
+  });
+
+  it("uses a monotonic sixty-second cooldown before reading the next header", async () => {
+    makeSink();
+    emit();
+    wall = 1_000;
+    await sink.flush();
+
+    for (let index = 0; index < 100; index += 1) {
+      emit();
+      wall += 1_000;
+      await sink.flush();
+    }
+
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(headerReads).toBe(1);
+    monotonic = 60_007;
+    emit();
+    wall += 1_000;
+    await sink.flush();
+    expect(logger.warn).toHaveBeenCalledTimes(2);
+    expect(headerReads).toBe(2);
+  });
+
+  it.each([
+    undefined,
+    "",
+    "bad",
+    "event_lock;dur=1,event_tx;dur=2",
+    `${timing},event_lock;dur=4`,
+    `${timing},other;dur=4`,
+    timing.replace("dur=1.5", "dur=-1"),
+    timing.replace("dur=1.5", "dur=Infinity"),
+    timing.replace("dur=1.5", "dur=30001"),
+    timing.replace("dur=1.5", "dur=1e3"),
+    "x".repeat(513),
+  ])(
+    "keeps successful delivery and total timings with invalid phases: %s",
+    async (header) => {
+      httpMs = 1_000;
+      serverTiming = header;
+      makeSink();
+      emit();
+      await sink.flush();
+      expect(logger.warn).toHaveBeenCalledExactlyOnceWith(
+        {
+          batchSize: 1,
+          oldestEventAgeMs: 0,
+          httpMs: 1_000,
+          localAckMs: 2,
+        },
+        "Slow daemon event upload",
+      );
+      expect(sink.pendingEvents()).toEqual([]);
+    },
+  );
+
+  it("does not warn before acknowledgment succeeds", async () => {
+    httpMs = 1_000;
+    makeSink({
+      onAcknowledged: async () => {
+        throw new Error("checkpoint failed");
+      },
+    });
+    emit();
+    await expect(sink.flush()).rejects.toThrow("checkpoint failed");
+    expect(logger.warn).not.toHaveBeenCalled();
+    expect(headerReads).toBe(0);
+    expect(sink.pendingEvents()).toHaveLength(1);
+  });
+});
+
 describe("event sink", () => {
   it("drains successfully skipped diffs without requiring allocated sequences", async () => {
     const postEvents = vi.fn<CreateEventSinkOptions["postEvents"]>(

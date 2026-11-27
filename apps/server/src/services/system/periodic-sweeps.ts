@@ -72,6 +72,7 @@ import {
 import { deliverLegacyDeferredThreadMessages } from "../threads/legacy-deferred-messages.js";
 import { releaseOrphanedQueuedMessageDispatchClaims } from "../threads/queued-messages.js";
 import { runEventLoopWork, runEventLoopWorkSync } from "./event-loop-work.js";
+import { purgeCompactedThreadHistories } from "../threads/history-compaction.js";
 import { purgeHistoryCacheThread } from "../threads/history-cache-writer.js";
 import { createAutoCompactionSweep } from "../threads/auto-compaction.js";
 
@@ -177,30 +178,6 @@ interface PeriodicSweepJobState {
 type PeriodicSweepJobList = readonly PeriodicSweepJob[];
 
 const periodicSweepJobStates = new Map<string, PeriodicSweepJobState>();
-
-async function purgeCompactedThreadHistories(
-  deps: Pick<AppDeps, "db" | "hub">,
-  threadIds: ReadonlySet<string>,
-): Promise<void> {
-  const failures: unknown[] = [];
-
-  for (const threadId of threadIds)
-    deps.hub.notifyThread(threadId, ["history-compacted"]);
-
-  for (const threadId of threadIds) {
-    try {
-      await purgeHistoryCacheThread(deps.db, threadId);
-    } catch (error) {
-      failures.push(error);
-    }
-  }
-
-  if (failures.length > 0)
-    throw new AggregateError(
-      failures,
-      "Compacted history cache cleanup failed",
-    );
-}
 
 function getPeriodicSweepJobState(
   job: PeriodicSweepJob,

@@ -712,10 +712,12 @@ export function createServerClient(
 
       const json = await response.json();
       const parsed = hostDaemonEventBatchResponseSchema.parse(json);
+      const serverTiming = response.headers.get("Server-Timing");
 
       return {
         acceptedEvents: parsed.acceptedEvents,
         rejectedEvents: parsed.rejectedEvents,
+        ...(serverTiming === null ? {} : { serverTiming }),
         ...(parsed.duplicateEvents === undefined
           ? {}
           : { duplicateEvents: parsed.duplicateEvents }),

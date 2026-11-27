@@ -249,12 +249,14 @@ export function registerThreadDataRoutes(
     }
 
     invalidateThreadHistoryBuilders(deps.db, message.id);
-    void purgeHistoryCacheThread(deps.db, message.id).catch((error) =>
-      deps.logger.error(
-        { error, threadId: message.id },
-        "History cache invalidation failed",
-      ),
-    );
+
+    if (rewritten)
+      void purgeHistoryCacheThread(deps.db, message.id).catch((error) =>
+        deps.logger.error(
+          { error, threadId: message.id },
+          "History cache invalidation failed",
+        ),
+      );
 
     timelineCache.invalidateThread(message.id);
     timelineLatestRowsCache.invalidateThread(message.id);

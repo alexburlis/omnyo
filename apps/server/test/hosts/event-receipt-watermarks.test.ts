@@ -1,11 +1,18 @@
+import { Buffer } from "node:buffer";
 import {
   createConnection,
+  listEvents,
   migrate,
   noopNotifier,
   recordDaemonEventReceipt,
   upsertHost,
   type DbConnection,
 } from "@omnyo/db";
+import { threadScope } from "@omnyo/domain";
+import {
+  groupHostDaemonEvents,
+  hostDaemonEventBatchResponseSchema,
+} from "@omnyo/host-daemon-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   advanceDaemonEventReceipt,
@@ -14,6 +21,9 @@ import {
   waitForEventsThrough,
 } from "../../src/services/hosts/event-receipt-watermarks.js";
 import { setServerMoveSnapshotFence } from "../../src/services/server-move/freeze-state.js";
+import { internalAuthHeaders } from "../helpers/commands.js";
+import { seedThreadFixture } from "../helpers/seed.js";
+import { withTestHarness } from "../helpers/test-app.js";
 
 const key = { hostId: "host-watermarks", instanceId: "instance-1" };
 
@@ -58,6 +68,56 @@ describe("daemon event receipt watermarks", () => {
     advanceDaemonEventReceipt(db, key, 3);
     await expect(pending).resolves.toBe("reached");
   });
+
+  it("returns write and post-commit timings with the indexed event receipt", () =>
+    withTestHarness(async (harness) => {
+      const { host, session, thread } = seedThreadFixture(harness);
+
+      const receipt = waitForEventsThrough(harness.db, {
+        eventsThrough: 1,
+        key: { hostId: host.id, instanceId: session.instanceId },
+      });
+
+      const response = await harness.app.request("/internal/session/events", {
+        method: "POST",
+        headers: internalAuthHeaders(harness, { hostId: host.id }),
+        body: JSON.stringify({
+          sessionId: session.id,
+          firstEventIndex: 1,
+          eventGroups: groupHostDaemonEvents([
+            {
+              threadId: thread.id,
+              event: {
+                type: "system/error",
+                threadId: thread.id,
+                scope: threadScope(),
+                message: "Synthetic indexed event",
+              },
+            },
+          ]),
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      await expect(receipt).resolves.toBe("reached");
+      const body = await response.text();
+      expect(response.headers.get("content-length")).toBe(
+        String(Buffer.byteLength(body)),
+      );
+      expect(
+        hostDaemonEventBatchResponseSchema.parse(JSON.parse(body)),
+      ).toEqual({
+        acceptedEvents: [{ eventIndex: 0, sequence: 1, threadId: thread.id }],
+        rejectedEvents: [],
+        duplicateEvents: 0,
+      });
+      expect(listEvents(harness.db, { threadId: thread.id })).toEqual([
+        expect.objectContaining({ sequence: 1, type: "system/error" }),
+      ]);
+      expect(response.headers.get("server-timing")).toMatch(
+        /^event_lock;dur=\d+(?:\.\d+)?, event_tx;dur=\d+(?:\.\d+)?, event_after;dur=\d+(?:\.\d+)?$/,
+      );
+    }));
 
   it("gives up once the deadline passes without the index", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });

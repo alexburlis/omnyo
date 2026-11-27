@@ -6,6 +6,7 @@ import {
 } from "@omnyo/db";
 import type { ThreadEventType } from "@omnyo/domain";
 import { roundDurationMs } from "@omnyo/process-utils";
+import { purgeCompactedThreadHistories } from "../threads/history-compaction.js";
 import type { AppDeps } from "../../types.js";
 
 type ThreadEventPruningMode = "active" | "archived" | "idle";
@@ -119,7 +120,13 @@ export function pruneThreadEventHistoryBestEffort(
     return null;
   } finally {
     if (getThreadEventRewriteGeneration(args.threadId) !== generation) {
-      deps.hub.notifyThread(args.threadId, ["history-compacted"]);
+      void purgeCompactedThreadHistories(deps, new Set([args.threadId])).catch(
+        (error) =>
+          deps.logger.error(
+            { error, threadId: args.threadId },
+            "History cache invalidation failed",
+          ),
+      );
     }
   }
 }
@@ -128,16 +135,6 @@ export function maybePruneActiveThreadEventHistory(
   deps: Pick<AppDeps, "db" | "logger" | "hub">,
   args: MaybePruneActiveThreadEventHistoryArgs,
 ): ThreadEventPruningResult | null {
-  const thread = getThread(deps.db, args.threadId);
-
-  if (
-    !thread ||
-    (thread.status !== "active" && thread.status !== "idle") ||
-    thread.archivedAt !== null
-  ) {
-    return null;
-  }
-
   const lastState = activeThreadPruneStateByThreadId.get(args.threadId);
   const lastPrunedSequence = lastState?.lastPrunedSequence ?? 0;
 
@@ -148,12 +145,27 @@ export function maybePruneActiveThreadEventHistory(
     return null;
   }
 
-  const now = Date.now();
+  const eligibilityCheckedAt = Date.now();
   const lastPrunedAt = lastState?.lastPrunedAt ?? 0;
 
-  if (now - lastPrunedAt < ACTIVE_THREAD_EVENT_PRUNE_MIN_INTERVAL_MS) {
+  if (
+    eligibilityCheckedAt - lastPrunedAt <
+    ACTIVE_THREAD_EVENT_PRUNE_MIN_INTERVAL_MS
+  ) {
     return null;
   }
+
+  const thread = getThread(deps.db, args.threadId);
+
+  if (
+    !thread ||
+    (thread.status !== "active" && thread.status !== "idle") ||
+    thread.archivedAt !== null
+  ) {
+    return null;
+  }
+
+  const now = Date.now();
 
   activeThreadPruneStateByThreadId.set(args.threadId, {
     lastPrunedAt: now,
